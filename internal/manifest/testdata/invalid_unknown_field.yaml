@@ -1,0 +1,8 @@
+service: my-svc
+run:
+  modes: [local]
+  local:
+    start: ./run.sh
+  ready:
+    http: ":8080/health"
+unknown_top_level_field: this-should-fail

@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proofbench.dev/spec/v0/evidence-v2.schema.json",
+  "title": "Proofbench Evidence Bundle Manifest v2",
+  "description": "Schema for evidence/<runId>/manifest.json: the machine-checkable record of one verification run. All enums, required fields, and types derive from internal/evidence/types.go.",
+  "type": "object",
+  "required": ["schema", "runId", "claim", "phase", "artifacts", "verdict", "startedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Bundle schema version. Must be 2 for evidence bundle v2.",
+      "type": "integer",
+      "const": 2
+    },
+    "ticket": {
+      "description": "Optional ticket or issue identifier this bundle is attached to (e.g. 'ENG-20190').",
+      "type": "string"
+    },
+    "runId": {
+      "description": "Unique, human-readable run identifier. Conventionally '<YYYYMMDD>-<HHMMSS>-<phase>' (e.g. '20260704-101500-reverify').",
+      "type": "string",
+      "minLength": 1
+    },
+    "claim": {
+      "description": "One-sentence statement of what this run is intended to prove (e.g. 'sync(verse) propagates to sequenceNote on release').",
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "description": "Lifecycle stage this bundle documents. One of: repro (reproduce the problem), verify (first verification), reverify (re-check after a fix), fix (the fix run itself), report (summary/rollup).",
+      "type": "string",
+      "enum": ["repro", "verify", "reverify", "fix", "report"]
+    },
+    "kind": {
+      "description": "Pairing role within a before/after pair: 'before' or 'after'. Omit when the bundle stands alone.",
+      "type": "string",
+      "enum": ["before", "after"]
+    },
+    "pairsWith": {
+      "description": "runId of the complementary bundle in a before/after pair. Bundles pair by explicit ID, not by convention.",
+      "type": "string"
+    },
+    "surface": {
+      "description": "Free-form key-value map describing the execution surface (e.g. substrate, cluster, env). Kept as a flat map so it is substrate-agnostic.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "examples": [
+        {"substrate": "k8s-attach", "cluster": "delta-akash", "env": "delta"}
+      ]
+    },
+    "pins": {
+      "description": "Key-value map of exact versions/SHAs for every artifact exercised, making the run reproducible (e.g. repo commit, image digest).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "examples": [
+        {"repo": "appservice@abc123", "image": "dataservice:redcat@sha256:deadbeef"}
+      ]
+    },
+    "proofLevel": {
+      "description": "Highest proof-ladder rung reached by this bundle. L0=static-valid, L1=builds/loads, L2=unit-green, L3=up+healthy, L4=effect-verified, L5=end-to-end observed.",
+      "type": "string",
+      "enum": ["L0", "L1", "L2", "L3", "L4", "L5"]
+    },
+    "startedAt": {
+      "description": "RFC 3339 timestamp when the run started.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "description": "RFC 3339 timestamp when the run finished (including verdict seal). Omitted if the run was abandoned.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "checks": {
+      "description": "Ordered list of machine-evaluated predicate results. Every declared check must appear, using 'not-run' rather than omitting — never default-green.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Check"
+      }
+    },
+    "artifacts": {
+      "description": "Ordered list of all captured files and links in this bundle directory. Set at verdict-seal time; unregistered files are auto-registered.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      }
+    },
+    "verdict": {
+      "description": "Overall outcome of the bundle, set last from artifacts and checks. Tri-state: pass (all checks passed), fail (at least one check failed), inconclusive (checks could not run, e.g. a human gate blocked execution).",
+      "type": "string",
+      "enum": ["pass", "fail", "inconclusive"]
+    },
+    "note": {
+      "description": "Human-readable annotation on the verdict (e.g. reason for inconclusive, override rationale).",
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "Check": {
+      "title": "Check",
+      "description": "A machine-evaluated predicate result. State is explicitly tri-state — 'not-run' must be used rather than omitting a check that did not execute.",
+      "type": "object",
+      "required": ["name", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique name of this check within the bundle, matching the corresponding CheckSpec in ready.yaml where applicable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "description": "Tri-state result: pass (predicate held), fail (predicate did not hold), not-run (check was declared but could not execute).",
+          "type": "string",
+          "enum": ["pass", "fail", "not-run"]
+        },
+        "level": {
+          "description": "Proof-ladder rung this check contributes to (e.g. 'L4'). Mirrors CheckSpec.level from ready.yaml.",
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3", "L4", "L5"]
+        },
+        "expect": {
+          "description": "The predicate expression declared for this check (e.g. 'db.orders.rows > @before').",
+          "type": "string"
+        },
+        "observed": {
+          "description": "The actual observed value that was evaluated against the predicate (e.g. '42 > 17').",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Explanation for a fail or not-run result (e.g. 'gate: cluster deploy pending', 'exit code 1').",
+          "type": "string"
+        },
+        "artifacts": {
+          "description": "Names of artifacts (matching Artifact.name) that provide evidence for this check's result.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Artifact": {
+      "title": "Artifact",
+      "description": "One captured file or link inside the bundle directory. Provenance distinguishes harness-collected from agent-supplied artifacts (anti-fabrication).",
+      "type": "object",
+      "required": ["type", "name", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Artifact kind: command (captured shell command with exit code), snapshot (before/after data snapshot), screenshot (UI screenshot), log (free-form log file), recording (video/trace recording), link (external URL reference).",
+          "type": "string",
+          "enum": ["command", "snapshot", "screenshot", "log", "recording", "link"]
+        },
+        "name": {
+          "description": "Short identifier for this artifact, used as a reference key in Check.artifacts. Must be unique within the bundle.",
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "description": "Relative path to the artifact file within the bundle directory (e.g. '03-fire.log'). For type 'link', this is the URL.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "description": "Hex-encoded SHA-256 digest of the artifact file. Omitted for type 'link'. Used for tamper-evidence.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "provenance": {
+          "description": "Who produced this artifact: 'harness' (captured automatically by the pb harness) or 'agent' (supplied by the agent — requires scrutiny).",
+          "type": "string",
+          "enum": ["harness", "agent"]
+        },
+        "meta": {
+          "description": "Type-specific metadata. For 'command': cmd (string), exitCode (integer), durationSec (number). For 'snapshot': table (string), rowsBefore (integer), rowsAfter (integer). Other types may use free-form keys.",
+          "type": "object"
+        }
+      }
+    }
+  }
+}

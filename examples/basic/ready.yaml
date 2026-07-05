@@ -1,0 +1,30 @@
+service: basic-orders
+role: Minimal HTTP order-capture service (Proofbench example)
+
+run:
+  modes: [local]
+  local:
+    start: go run .
+  ready:
+    http: ":8391/healthz"
+    timeout: 30s
+    interval: 1s
+
+drive:
+  create-order:
+    run: "curl -sf -X POST http://localhost:8391/orders -H 'Content-Type: application/json' -d '{\"item\":\"widget\",\"qty\":1}'"
+    output: json
+
+checks:
+  - name: up
+    level: L3
+    exercise: "curl -sf http://localhost:8391/healthz"
+    expect:
+      - "http(http://localhost:8391/healthz)==200"
+
+  - name: order-roundtrip
+    level: L4
+    exercise: drive.create-order
+    expect:
+      - "exitCode(order-roundtrip)==0"
+      - "rows(orders.json)>0"

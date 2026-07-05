@@ -1,0 +1,9 @@
+{
+  "name": "detect-node-compose",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "test": "jest --ci"
+  }
+}

@@ -1,0 +1,7 @@
+service: my-svc
+run:
+  modes: [local, docker-swarm]
+  local:
+    start: ./run.sh
+  ready:
+    http: ":8080/health"

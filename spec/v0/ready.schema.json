@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proofbench.dev/spec/v0/ready.schema.json",
+  "title": "Proofbench Readiness Manifest",
+  "description": "Schema for ready.yaml: the per-repo declarative spec of how a service becomes runnable and testable on any substrate. Derive, don't restate — points into existing truth (compose files, devcontainer.json, Makefile, AGENTS.md). All types derive from internal/manifest/types.go.",
+  "type": "object",
+  "required": ["service", "run"],
+  "additionalProperties": false,
+  "properties": {
+    "service": {
+      "description": "Short identifier for this service (e.g. 'orders-api'). Used as a key in workspace.yaml and as a human-readable label.",
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "description": "One-sentence description of what this service does (e.g. 'REST API for order lifecycle'). Aids auto-generated documentation.",
+      "type": "string"
+    },
+    "sources": {
+      "description": "Map of source-type name to file path for existing project files the harness should read instead of duplicating. Common keys: compose, devcontainer, agentsmd. The harness derives deps, healthchecks, and env from these files.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Relative path from the repo root to the source file."
+      },
+      "examples": [
+        {
+          "compose": "./docker-compose.yml",
+          "devcontainer": ".devcontainer/devcontainer.json",
+          "agentsmd": "./AGENTS.md"
+        }
+      ]
+    },
+    "run": {
+      "description": "Declares the supported run modes and how to start and probe the service.",
+      "$ref": "#/$defs/RunSpec"
+    },
+    "resources": {
+      "description": "Map of resource name to Score-style typed dependency. Resources are resolved per substrate via their 'via' map. Use '${resources.<name>.host}' placeholders in env overrides.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Resource"
+      }
+    },
+    "seed": {
+      "description": "Ordered list of seed steps (schema migrations, fixture loading) that prepare the service's data layer. Steps are run in order, after their 'after' dependencies are satisfied.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SeedStep"
+      }
+    },
+    "drive": {
+      "description": "Map of verb name to real product entrypoints the harness may exercise. Drive verbs run actual product paths, not test look-alikes.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/DriveVerb"
+      }
+    },
+    "checks": {
+      "description": "Ordered list of declared validation surfaces. Each check names the proof-ladder level it proves and the predicates that must hold.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CheckSpec"
+      }
+    },
+    "gates": {
+      "description": "Human gates on destructive or irreversible steps (e.g. cluster deploys, prod writes). A gate blocks the step until approved; an unapproved gate yields 'inconclusive', never a fake pass.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Gate"
+      }
+    },
+    "known_walls": {
+      "description": "Known failure traps for this service: symptom, root cause, and recovery recipe. Agents and humans consult these before debugging.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Wall"
+      }
+    }
+  },
+  "$defs": {
+    "RunSpec": {
+      "title": "RunSpec",
+      "description": "Supported run modes and the start/probe recipe for each. 'modes' lists the substrates this service can run on; 'local' provides the bare-process recipe; 'ready' is the readiness probe.",
+      "type": "object",
+      "required": ["modes"],
+      "additionalProperties": false,
+      "properties": {
+        "modes": {
+          "description": "Substrates this service supports. At least one required. Values: local (bare process), compose (Docker Compose), k8s-attach (BYOC port-forward), remote (delegate to provider).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["local", "compose", "k8s-attach", "remote"]
+          },
+          "minItems": 1
+        },
+        "local": {
+          "description": "Bare-process (local substrate) start recipe. Required when 'local' appears in modes.",
+          "$ref": "#/$defs/LocalRun"
+        },
+        "ready": {
+          "description": "Readiness probe using k8s probe vocabulary. The harness polls this until the service reports healthy or the timeout expires.",
+          "$ref": "#/$defs/Probe"
+        }
+      }
+    },
+    "LocalRun": {
+      "title": "LocalRun",
+      "description": "How to start the service as a bare process on the local substrate.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "description": "Shell command to start the service (e.g. 'npm run dev', 'go run ./cmd/server'). Runs in the repo root.",
+          "type": "string"
+        },
+        "env": {
+          "description": "Environment configuration for the process.",
+          "$ref": "#/$defs/EnvSpec"
+        }
+      }
+    },
+    "EnvSpec": {
+      "title": "EnvSpec",
+      "description": "Sources environment variables from an optional file, with explicit overrides. Overrides may use '${resources.<name>.host}' placeholders resolved per substrate.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "Relative path to a .env-style file whose variables are loaded into the process environment (e.g. '.env.local').",
+          "type": "string"
+        },
+        "overrides": {
+          "description": "Key-value overrides applied after the file is loaded. Values may reference Score-style resource placeholders (e.g. '${resources.db.host}').",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Probe": {
+      "title": "Probe",
+      "description": "Readiness probe using k8s probe vocabulary. Specify exactly one of http, tcp, or exec.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "description": "HTTP GET target in ':port/path' or 'host:port/path' form (e.g. ':8080/healthz'). The harness polls until it gets a 2xx response.",
+          "type": "string"
+        },
+        "tcp": {
+          "description": "TCP dial target in ':port' or 'host:port' form. The harness polls until the connection succeeds.",
+          "type": "string"
+        },
+        "exec": {
+          "description": "Shell command whose exit code 0 signals readiness (e.g. 'pg_isready -h localhost').",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Maximum time to wait for readiness in Go duration syntax (e.g. '60s', '2m'). Defaults to 60s if omitted.",
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        },
+        "interval": {
+          "description": "How often to poll the probe in Go duration syntax (e.g. '2s'). Defaults to 2s if omitted.",
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        }
+      }
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "A Score-style typed dependency (database, queue, service). The 'via' map resolves the locator per substrate name. Placeholder '${resources.<name>.host}' is available in env overrides.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Semantic resource type (e.g. 'postgres', 'kafka', 'redis', 'service'). The harness uses this to apply substrate-specific defaults.",
+          "type": "string",
+          "minLength": 1
+        },
+        "via": {
+          "description": "Map of substrate name to locator string for this resource on that substrate (e.g. {'compose': 'postgres', 'k8s': 'svc/orders-db'}).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "optional": {
+          "description": "If true, the harness skips this resource when unavailable instead of failing the run. Defaults to false.",
+          "type": "boolean"
+        },
+        "repo": {
+          "description": "For type 'service': relative or absolute path to the dependency's repo root, used when the harness needs to bring up the dependency locally.",
+          "type": "string"
+        }
+      }
+    },
+    "SeedStep": {
+      "title": "SeedStep",
+      "description": "One seed task (schema migration, fixture load, data initialisation) with an explicit dependency ordering.",
+      "type": "object",
+      "required": ["name", "run"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique name for this seed step within the manifest, used as a dependency reference in other steps' 'after' lists.",
+          "type": "string",
+          "minLength": 1
+        },
+        "run": {
+          "description": "Shell command to execute (e.g. 'npm run db:migrate'). Runs in the repo root.",
+          "type": "string",
+          "minLength": 1
+        },
+        "after": {
+          "description": "Names of seed steps or resource names that must complete successfully before this step runs.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "DriveVerb": {
+      "title": "DriveVerb",
+      "description": "A real product entrypoint the harness may invoke. Drive verbs exercise actual product paths (not test look-alikes) and may inject identity credentials.",
+      "type": "object",
+      "required": ["run"],
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "description": "Shell command to invoke the entrypoint (e.g. './scripts/create-order.sh'). Runs in the repo root.",
+          "type": "string",
+          "minLength": 1
+        },
+        "identity": {
+          "description": "Identity injection recipe. 'env:VAR_NAME' reads from an environment variable; other forms TBD.",
+          "type": "string"
+        },
+        "output": {
+          "description": "Expected output format of the command for structured parsing (e.g. 'json', 'text').",
+          "type": "string",
+          "enum": ["json", "text"]
+        }
+      }
+    },
+    "CheckSpec": {
+      "title": "CheckSpec",
+      "description": "A declared validation surface: what to exercise, the proof-ladder level it proves, and the predicates that must hold. Results are captured in the evidence bundle's checks[] array.",
+      "type": "object",
+      "required": ["name", "level"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique name for this check within the manifest. Must match the corresponding Check.name in the evidence bundle.",
+          "type": "string",
+          "minLength": 1
+        },
+        "level": {
+          "description": "Proof-ladder rung this check proves when it passes. L0=static-valid, L1=builds/loads, L2=unit-green, L3=up+healthy, L4=effect-verified, L5=end-to-end observed.",
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3", "L4", "L5"]
+        },
+        "exercise": {
+          "description": "What to run for this check: a drive verb reference (e.g. 'drive.create-order') or a shell command (e.g. 'playwright tests/e2e/order.spec.ts').",
+          "type": "string"
+        },
+        "expect": {
+          "description": "List of predicate expressions that must all hold for the check to pass (e.g. 'exitCode == 0', 'http.status == 201', 'db.orders.rows > @before').",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifacts": {
+          "description": "Artifact types the harness should capture for this check (e.g. 'screenshot', 'trace').",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["command", "snapshot", "screenshot", "log", "recording", "link"]
+          }
+        }
+      }
+    },
+    "Gate": {
+      "title": "Gate",
+      "description": "A human gate on a destructive or irreversible step. An ungated destructive step must never execute autonomously.",
+      "type": "object",
+      "required": ["on", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "The trigger event or action that requires human approval (e.g. 'deploy', 'drop-table', 'prod-write').",
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "description": "Human-readable explanation of why this gate exists (e.g. 'cluster release is irreversible').",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "Wall": {
+      "title": "Wall",
+      "description": "A known failure trap: observed symptom, root cause, and recovery recipe. Agents consult known_walls before spending time debugging.",
+      "type": "object",
+      "required": ["symptom", "cause", "recover"],
+      "additionalProperties": false,
+      "properties": {
+        "symptom": {
+          "description": "Observable symptom string (error message, log line, or behavior) that signals this trap (e.g. '401 from artifact registry').",
+          "type": "string",
+          "minLength": 1
+        },
+        "cause": {
+          "description": "Root cause of the symptom in plain language (e.g. 'token expiry').",
+          "type": "string",
+          "minLength": 1
+        },
+        "recover": {
+          "description": "Shell command or step sequence to recover from this trap (e.g. 'gcloud auth print-access-token | docker login ...').",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+service: my-svc
+run:
+  modes: [local]
+  local:
+    start: ./run.sh
+  ready:
+    http: ":8080/health"
+checks:
+  - name: health-check
+    level: L3
+    exercise: curl http://localhost:8080/health
+  - name: health-check
+    level: L4
+    exercise: curl http://localhost:8080/health

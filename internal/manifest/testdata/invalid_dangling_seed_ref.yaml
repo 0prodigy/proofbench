@@ -1,0 +1,11 @@
+service: my-svc
+run:
+  modes: [local]
+  local:
+    start: ./run.sh
+  ready:
+    http: ":8080/health"
+seed:
+  - name: schema
+    run: ./migrate.sh
+    after: [nonexistent-dep]

@@ -1,0 +1,75 @@
+# ready.yaml  (schema: proofbench/spec v0)
+service: orders-api
+role: REST API for order lifecycle
+
+sources:
+  compose: ./docker-compose.yml
+  devcontainer: .devcontainer/devcontainer.json
+  agentsmd: ./AGENTS.md
+
+run:
+  modes: [local, compose]
+  local:
+    start: npm run dev
+    env:
+      file: .env.local
+      overrides:
+        DB_HOST: "${resources.db.host}"
+  ready:
+    http: ":8080/healthz"
+    timeout: 60s
+    interval: 2s
+
+resources:
+  db:
+    type: postgres
+    via:
+      compose: postgres
+      k8s: svc/orders-db
+  queue:
+    type: kafka
+    via:
+      k8s: svc/kafka
+    optional: false
+  auth-svc:
+    type: service
+    repo: ../auth-service
+    via:
+      k8s: svc/auth
+
+seed:
+  - name: schema
+    run: npm run db:migrate
+    after: [db]
+  - name: fixtures
+    run: npm run db:seed -- --tiny
+    after: [schema]
+
+drive:
+  create-order:
+    run: ./scripts/create-order.sh
+    identity: env:USER_EMAIL
+    output: json
+
+checks:
+  - name: order-roundtrip
+    level: L4
+    exercise: drive.create-order
+    expect:
+      - "exitCode == 0"
+      - "http.status == 201"
+  - name: e2e-ui
+    level: L5
+    exercise: playwright tests/e2e/order.spec.ts
+    expect:
+      - "exitCode == 0"
+    artifacts: [screenshot, trace]
+
+gates:
+  - on: deploy
+    reason: "cluster release is irreversible"
+
+known_walls:
+  - symptom: "401 from artifact registry"
+    cause: "token expiry"
+    recover: gcloud auth print-access-token | docker login ...
