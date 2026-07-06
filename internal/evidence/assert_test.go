@@ -42,6 +42,10 @@ func TestAssert(t *testing.T) {
 		"copyA.txt": "same bytes",
 		"copyB.txt": "same bytes",
 		"copyC.txt": "different bytes",
+		"exec.json": `{"selectedAction":"full_run","stages":[` +
+			`{"name":"validate","state":"SUCCEEDED"},` +
+			`{"name":"transform","state":"SUCCEEDED"},` +
+			`{"name":"publish","state":"SUCCEEDED"}]}`,
 	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +100,26 @@ func TestAssert(t *testing.T) {
 		{"equal with spaces", "equal( copyA.txt , copyB.txt )", "equal=true", true, false},
 		{"equal missing file", "equal(copyA.txt,ghost.txt)", "", false, true},
 		{"equal one path", "equal(copyA.txt)", "", false, true},
+
+		// jsonpath (reads the execution.json fixture below)
+		{"jsonpath equals action", "jsonpath(exec.json,selectedAction)==full_run", "full_run", true, false},
+		{"jsonpath differs", "jsonpath(exec.json,selectedAction)==quick_run", "full_run", false, false},
+		{"jsonpath nested index", "jsonpath(exec.json,stages.0.name)==validate", "validate", true, false},
+		{"jsonpath nested index state", "jsonpath(exec.json,stages.2.state)==SUCCEEDED", "SUCCEEDED", true, false},
+		{"jsonpath regex match", "jsonpath(exec.json,selectedAction)~=^full", "full_run", true, false},
+		{"jsonpath regex no match", "jsonpath(exec.json,selectedAction)~=^quick", "full_run", false, false},
+		{"jsonpath missing key", "jsonpath(exec.json,nope)==x", "", false, true},
+		{"jsonpath bad index", "jsonpath(exec.json,stages.9.name)==x", "", false, true},
+		{"jsonpath no op", "jsonpath(exec.json,selectedAction)", "", false, true},
+		{"jsonpath one arg", "jsonpath(exec.json)==x", "", false, true},
+
+		// contains (ordered stage list / terminal status)
+		{"contains stage present", "contains(exec.json,stages,validate)", "contains=true", true, false},
+		{"contains stage object field", "contains(exec.json,stages,SUCCEEDED)", "contains=true", true, false},
+		{"contains stage absent", "contains(exec.json,stages,deleted)", "contains=false", false, false},
+		{"contains scalar", "contains(exec.json,selectedAction,full)", "contains=true", true, false},
+		{"contains trailing junk", "contains(exec.json,stages,x)==1", "", false, true},
+		{"contains two args", "contains(exec.json,stages)", "", false, true},
 
 		// malformed
 		{"no parens", "exitCode==0", "", false, true},

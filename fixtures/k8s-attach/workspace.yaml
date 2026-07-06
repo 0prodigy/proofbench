@@ -1,0 +1,23 @@
+# workspace.yaml — org-level graph for the ENG-17397 Actions & Controls proof.
+#
+# Names the BYOC cluster's kubectl context + granted namespace for the
+# k8s-attach substrate to port-forward into. No cluster credentials live here
+# (ADR-0008) — only a context NAME resolved from the local kubeconfig, plus a
+# namespace. `pb up --substrate k8s-attach` reads Contexts["k8s-attach"] as
+# "<kube-context>@<namespace>" and targets the granted namespace rather than
+# the current kubeconfig default. Override at run time with PB_K8S_CONTEXT /
+# PB_K8S_NAMESPACE.
+#
+# ENG-17397 A&C is dev-tested on the `redcat` cluster (lyric-qa skill + memory
+# project_eng-20190-ac-realtest-staging). Confirm the exact context name and
+# granted namespace against your kubeconfig / with the cluster owner before the
+# run — this fixture carries a name, not a secret.
+
+services:
+  appservice: /Users/prodigy/lyric/appservice
+  metadata-service: /Users/prodigy/lyric/metadata-service
+
+contexts:
+  # <kube-context>@<namespace>. redcat's app namespace; adjust to the granted
+  # namespace on your kubeconfig.
+  k8s-attach: "redcat@redcat"

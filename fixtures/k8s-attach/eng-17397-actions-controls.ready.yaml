@@ -1,0 +1,171 @@
+service: appservice
+role: >-
+  Lyric note-execution + Actions & Controls (ENG-17397). Proves per-scenario
+  action resolution, run-override precedence, action-specific log templates,
+  the [SYSTEM] [STAGE] marker + stage-state progression, and scenario-copy
+  carrying selectedNotesActions — end-to-end against a live BYOC appservice.
+
+# The whole proof runs attach-only against an already-deployed cluster
+# (Shape-A, ADR-0011): pb up port-forwards, never creates cluster objects.
+# workspace.yaml (this directory) names the kubectl context + granted
+# namespace; export PB_K8S_NAMESPACE / PB_K8S_CONTEXT to override.
+
+sources:
+  # Service port-forward target: kubectl port-forward svc/appservice <local>:8000.
+  k8s: "svc/appservice:8000"
+  repo: /Users/prodigy/lyric/appservice
+
+run:
+  modes: [k8s-attach]
+  # env is DERIVED from the live appservice pod so mongo URI / kafka / service
+  # URLs come from the cluster, not a hand-written file.
+  local:
+    env:
+      derive:
+        from: k8s-pod
+        pod: "deploy/appservice"
+  ready:
+    # TCP against the FORWARDED appservice port; placeholders are resolved by
+    # the k8s-attach substrate against the ports Up bound.
+    tcp: "${resources.appservice.host}:${resources.appservice.port}"
+    timeout: 60s
+    interval: 2s
+
+resources:
+  appservice:
+    type: service
+    via:
+      k8s: "svc/appservice:8000"
+    repo: /Users/prodigy/lyric/appservice
+  mongo:
+    type: mongodb
+    via:
+      k8s: "svc/mongodb-svc:27017"
+  kafka:
+    type: kafka
+    via:
+      k8s: "svc/kafka-cluster-kafka-brokers:9092"
+
+# Drive verbs are the REAL lyric-qa entrypoints the QA agent uses — not
+# look-alikes. IDs the scripts need (scenario/sequence/sequenceNote/app/
+# execution) are supplied by the QA agent as environment variables, exported
+# before `pb up`/`pb verify`. Reads write a JSON document the jsonpath/contains
+# predicates below assert against; `pb evidence add` claims those files.
+#
+# The lyric-qa scripts own their own cluster access via --env/--context (they
+# port-forward mongo/appservice internally) — pb's forwards make the localhost
+# ports available for any additional substrate-blind dialing. Keep --env/
+# --context consistent with workspace.yaml (PB_K8S_NAMESPACE / PB_K8S_CONTEXT).
+drive:
+  # STEP 2/3: set a per-note selected action on a scenario
+  # (scenarios.selectedNotesActions[<seqNoteId>]). Uses the mongo helper to
+  # write the scenario config the resolveAction chain reads (tier-3).
+  configure-action:
+    run: >-
+      ~/.claude/skills/lyric-qa/scripts/lyric-mongo.sh
+      --env "$PB_K8S_NAMESPACE" --context "$PB_K8S_CONTEXT" --db lyric
+      --eval "db.scenarios.updateOne({_id:'$PB_SCENARIO_A'},{\$set:{'selectedNotesActions.$PB_SEQ_NOTE_ID':'$PB_ACTION'}})"
+    output: json
+  # STEP 3/4: fire an execution. --selected-notes-actions is the run-config
+  # override (tier-1); omit it to exercise scenario/app/default precedence.
+  fire-execution:
+    run: >-
+      ~/.claude/skills/lyric-qa/scripts/lyric-fire-execution.sh
+      --env "$PB_K8S_NAMESPACE" --context "$PB_K8S_CONTEXT"
+      --scenario-id "$PB_SCENARIO_A" --sequence-id "$PB_SEQUENCE_ID"
+      --sequence-note-id "$PB_SEQ_NOTE_ID" ${PB_RUN_ACTIONS:+--selected-notes-actions "$PB_RUN_ACTIONS"}
+    output: json
+  # STEP 3-5: read the execution doc (selectedAction, logState, stages[]) into
+  # execution.json so the jsonpath/contains predicates can assert against it.
+  read-execution:
+    run: >-
+      ~/.claude/skills/lyric-qa/scripts/lyric-mongo.sh
+      --env "$PB_K8S_NAMESPACE" --context "$PB_K8S_CONTEXT" --db lyric
+      --eval "JSON.stringify(db.executions.findOne({_id:'$PB_EXECUTION_ID'},{selectedAction:1,logState:1,stages:1}))"
+      > execution.json
+    output: json
+
+checks:
+  # L3 — appservice is up and serving (health = TCP came up + a real GET).
+  - name: appservice-up
+    level: L3
+    exercise: >-
+      curl -sf -o /dev/null "http://${resources.appservice.host}:${resources.appservice.port}/scenarios/$PB_SCENARIO_A"
+    expect:
+      - "exitCode(appservice-up)==0"
+
+  # L4 — action resolution: fire in Scenario A (scenario=full_run) with a
+  # run-config override of quick_run; the override must win (tier-1 > tier-3).
+  # read-execution writes execution.json; assert selectedAction resolved.
+  - name: action-resolution
+    level: L4
+    exercise: "drive.read-execution"
+    expect:
+      - "jsonpath(execution.json,selectedAction)==$PB_EXPECTED_ACTION"
+
+  # L4 — stage progress: the execution advances through the SELECTED action's
+  # ordered stages, each reaching a terminal SUCCEEDED state.
+  - name: stage-progress
+    level: L4
+    exercise: "drive.read-execution"
+    expect:
+      - "contains(execution.json,stages,validate)"
+      - "contains(execution.json,stages,transform)"
+      - "contains(execution.json,stages,SUCCEEDED)"
+
+  # L5 — end-to-end: the run-monitor stage-log advances validate -> transform
+  # -> publish in the studio UI, captured as a screenshot via the playwright
+  # driver (trace/PNG sealed with provenance tool, ADR-0013). Scope: just the
+  # stage-log spec; confirm the studio-ui A&C branch with the cluster owner.
+  - name: stage-log-observed
+    level: L5
+    driver: playwright
+    exercise: "tests/e2e/eng-17397-stage-log.spec.ts"
+    expect:
+      - "exitCode(stage-log-observed)==0"
+    artifacts: [screenshot, recording]
+
+gates:
+  - on: fire-execution
+    reason: >-
+      firing a note execution consumes cluster compute and mutates the
+      executions/scenarios collections on a shared BYOC cluster — a human
+      confirms the target scenario/sequence IDs before the run.
+  - on: configure-action
+    reason: >-
+      writes scenarios.selectedNotesActions on a live scenario doc; confirm the
+      scenario is a throwaway proof scenario, not a shared fixture.
+
+known_walls:
+  - symptom: "note runs but the lyric-py A&C stage markers / defaultAction copy behave like an older wheel"
+    cause: >-
+      the runner force-reinstalls its baked LYRIC_PY_VERSION at studio-run time;
+      a note-scoped setup.sh lyric-py pin does NOT stick on the cluster
+      (memory: mltest-runner-reinstalls-baked-lyric-py).
+    recover: >-
+      test the lyric-py A&C change by rebuilding/repinning the RUNNER to the
+      A&C wheel version, not via a per-note override.
+  - symptom: "run-monitor UI does not advance stage-by-stage even though stages[].state transitions in mongo"
+    cause: >-
+      the stage-control signal is not surfaced by the deployed studio-ui branch;
+      the branch must render execution.stages[] (per-action user stages), not
+      just the built-in run-engine template.
+    recover: >-
+      deploy the studio-ui A&C branch that renders execution.stages[] progress +
+      the run-config action picker; confirm the exact branch name with the
+      cluster owner before firing.
+  - symptom: "execution.selectedAction is null / falls back to defaultAction when a scenario action was configured"
+    cause: >-
+      selectedNotesActions must be keyed by SEQUENCE-NOTE-ID, not noteId
+      (executions.service.ts looks up by sequenceNoteId; a noteId-keyed map is
+      silently ignored) — the wrong key is a silent no-op.
+    recover: >-
+      key configure-action / --selected-notes-actions by the sequenceNote _id
+      (PB_SEQ_NOTE_ID), not the noteId.
+  - symptom: "lyric-fire-execution.sh returns 500"
+    cause: >-
+      the /executions endpoint requires scenarioId + sequenceId + sequenceNoteId
+      in the QUERY STRING; a body-only POST 500s.
+    recover: >-
+      pass all three via --scenario-id/--sequence-id/--sequence-note-id (the
+      script places them in the query string).

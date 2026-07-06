@@ -40,7 +40,29 @@ const (
 const (
 	ProvenanceHarness = "harness"
 	ProvenanceAgent   = "agent"
+	// ProvenanceTool marks harness-directed tool output (ADR-0013): the
+	// harness chose the tool, its flags, and its output path but did not tee
+	// the bytes itself (Capture.File). Distinct from ProvenanceHarness
+	// (teed subprocess) and ProvenanceAgent (operator-supplied / Seal sweep).
+	ProvenanceTool = "tool"
 )
+
+// Capture is the single seam through which any driver's observations enter a
+// bundle (driver-interfaces §2). *Bundle satisfies it; drivers never touch
+// *Bundle directly, so provenance and sealing stay uniform.
+type Capture interface {
+	// Exec spawns argv (bash -lc when shell), tees combined output to an
+	// NN-<name>.log artifact with provenance harness, and returns the exit
+	// code. Equivalent to Bundle.Run.
+	Exec(name string, argv []string, shell bool) (exitCode int, err error)
+	// File claims a driver-produced file (trace, screenshot, video) as an
+	// artifact with provenance tool (ADR-0013); typ is an Artifact* enum.
+	File(typ, name, srcPath string, meta map[string]any) error
+	// BundleDir is the bundle directory, for pointing external tools' output
+	// at. Named BundleDir (not Dir) because Bundle.Dir is a frozen field
+	// (types.go) and Go forbids a method and field sharing a name.
+	BundleDir() string
+}
 
 // Manifest is the evidence bundle manifest (evidence/<runId>/manifest.json),
 // schema version 2.

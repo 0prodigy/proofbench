@@ -137,6 +137,28 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "derive": {
+          "description": "Derive environment from a live source (e.g. a running pod) instead of a checked-in file, so config tracks the cluster. Optional.",
+          "$ref": "#/$defs/DeriveSpec"
+        }
+      }
+    },
+    "DeriveSpec": {
+      "title": "DeriveSpec",
+      "description": "Pulls environment from a live source. Only 'k8s-pod' is resolved today: reads the process environment of a running pod in the granted namespace.",
+      "type": "object",
+      "required": ["from"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "description": "Source kind to derive environment from. Supported: 'k8s-pod' (a running pod's environment).",
+          "type": "string",
+          "enum": ["k8s-pod"]
+        },
+        "pod": {
+          "description": "For 'k8s-pod': the pod name, a 'deploy/<name>' / 'svc/<name>' selector, or an 'app=<label>' selector to read env from. Defaults to the service's own workload when omitted.",
+          "type": "string"
         }
       }
     },
@@ -264,6 +286,11 @@
           "description": "Proof-ladder rung this check proves when it passes. L0=static-valid, L1=builds/loads, L2=unit-green, L3=up+healthy, L4=effect-verified, L5=end-to-end observed.",
           "type": "string",
           "enum": ["L0", "L1", "L2", "L3", "L4", "L5"]
+        },
+        "driver": {
+          "description": "CheckDriver that exercises this check (driver-interfaces §3). Optional, default 'exec' (bash -lc, teed). 'playwright' shells the Playwright CLI and captures trace/screenshots as tool-provenance artifacts.",
+          "type": "string",
+          "enum": ["exec", "playwright"]
         },
         "exercise": {
           "description": "What to run for this check: a drive verb reference (e.g. 'drive.create-order') or a shell command (e.g. 'playwright tests/e2e/order.spec.ts').",

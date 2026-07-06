@@ -50,6 +50,7 @@ var validArtifactTypes = map[string]bool{
 var validProvenances = map[string]bool{
 	ProvenanceHarness: true,
 	ProvenanceAgent:   true,
+	ProvenanceTool:    true,
 }
 
 // New creates a new evidence bundle directory under root, named
@@ -198,6 +199,67 @@ func (b *Bundle) Add(srcPath, typ, name string, meta map[string]any) error {
 
 	return b.Save()
 }
+
+// File claims a driver-produced file (trace, screenshot, video, session
+// probe) as an artifact of the given type and name, recording provenance
+// "tool" (ADR-0013) — the harness directed the tool but did not tee the
+// bytes. Copy-in, sequence-prefix, and sha256 behaviour match Add; only the
+// provenance differs, so a driver-captured artifact is distinguishable from
+// an agent-supplied one.
+func (b *Bundle) File(typ, name, srcPath string, meta map[string]any) error {
+	if !validArtifactTypes[typ] {
+		return fmt.Errorf("evidence.File: invalid artifact type %q", typ)
+	}
+	abs, err := filepath.Abs(srcPath)
+	if err != nil {
+		return fmt.Errorf("evidence.File: abs path: %w", err)
+	}
+	bundleDir, err := filepath.Abs(b.Dir)
+	if err != nil {
+		return fmt.Errorf("evidence.File: abs bundle dir: %w", err)
+	}
+
+	var destPath string
+	if strings.HasPrefix(abs, bundleDir+string(os.PathSeparator)) || abs == bundleDir {
+		destPath = abs
+	} else {
+		seq := b.nextSeq()
+		destName := fmt.Sprintf("%02d-%s", seq, filepath.Base(abs))
+		destPath = uniquePath(filepath.Join(bundleDir, destName))
+		if err := copyFile(abs, destPath); err != nil {
+			return fmt.Errorf("evidence.File: copy %s -> %s: %w", abs, destPath, err)
+		}
+	}
+
+	sum, err := sha256File(destPath)
+	if err != nil {
+		return fmt.Errorf("evidence.File: sha256 %s: %w", destPath, err)
+	}
+	rel, err := filepath.Rel(bundleDir, destPath)
+	if err != nil {
+		return fmt.Errorf("evidence.File: rel path: %w", err)
+	}
+
+	b.M.Artifacts = append(b.M.Artifacts, Artifact{
+		Type:       typ,
+		Name:       name,
+		Path:       rel,
+		SHA256:     sum,
+		Provenance: ProvenanceTool,
+		Meta:       meta,
+	})
+	return b.Save()
+}
+
+// Exec satisfies Capture by delegating to Run (a teed subprocess, provenance
+// harness).
+func (b *Bundle) Exec(name string, argv []string, shell bool) (int, error) {
+	return b.Run(name, argv, shell)
+}
+
+// BundleDir satisfies Capture, returning the bundle directory. Named
+// BundleDir because Bundle.Dir is a frozen field.
+func (b *Bundle) BundleDir() string { return b.Dir }
 
 // Link registers an execution reference (e.g. a run/execution ID plus a URL
 // to an external system) as a link-type artifact with provenance agent.

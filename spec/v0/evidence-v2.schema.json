@@ -171,9 +171,9 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "provenance": {
-          "description": "Who produced this artifact: 'harness' (captured automatically by the pb harness) or 'agent' (supplied by the agent — requires scrutiny).",
+          "description": "Who produced this artifact (ADR-0013): 'harness' (teed subprocess captured by the pb harness), 'tool' (harness-directed external tool output — trace/screenshot the harness chose but did not tee), or 'agent' (supplied by the agent — requires scrutiny).",
           "type": "string",
-          "enum": ["harness", "agent"]
+          "enum": ["harness", "tool", "agent"]
         },
         "meta": {
           "description": "Type-specific metadata. For 'command': cmd (string), exitCode (integer), durationSec (number). For 'snapshot': table (string), rowsBefore (integer), rowsAfter (integer). Other types may use free-form keys.",

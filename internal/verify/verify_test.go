@@ -78,7 +78,7 @@ func TestRunChecksAllPass(t *testing.T) {
 		manifest.CheckSpec{Name: "b", Level: "L4", Exercise: "drive.fire", Expect: []string{"exitCode(b)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops)
+	checks := runChecks(r, Opts{}, ops, nil)
 	if len(checks) != 2 {
 		t.Fatalf("got %d checks, want 2", len(checks))
 	}
@@ -108,7 +108,7 @@ func TestRunChecksOneFailNeverAbortsRest(t *testing.T) {
 		manifest.CheckSpec{Name: "good", Level: "L4", Exercise: "echo ok", Expect: []string{"exitCode(good)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops)
+	checks := runChecks(r, Opts{}, ops, nil)
 	if checks[0].State != evidence.CheckFail {
 		t.Errorf("bad: state %q, want fail", checks[0].State)
 	}
@@ -137,7 +137,7 @@ func TestRunChecksOnlyFilter(t *testing.T) {
 		manifest.CheckSpec{Name: "b", Level: "L3", Exercise: "echo b", Expect: []string{"exitCode(b)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{Only: []string{"b"}}, ops)
+	checks := runChecks(r, Opts{Only: []string{"b"}}, ops, nil)
 	if checks[0].State != evidence.CheckNotRun || checks[0].Reason != "filtered" {
 		t.Errorf("a: state %q reason %q, want not-run/filtered", checks[0].State, checks[0].Reason)
 	}
@@ -159,7 +159,7 @@ func TestRunChecksUnknownDriveVerb(t *testing.T) {
 		manifest.CheckSpec{Name: "y", Level: "L2", Exercise: "echo y", Expect: []string{"exitCode(y)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops)
+	checks := runChecks(r, Opts{}, ops, nil)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "nope") {
 		t.Errorf("x: state %q reason %q, want fail naming the verb", checks[0].State, checks[0].Reason)
 	}
@@ -174,7 +174,7 @@ func TestRunChecksSpawnFailure(t *testing.T) {
 	)
 	ops := newFakeOps()
 	ops.spawnErr = map[string]error{"x": errors.New("no such binary")}
-	checks := runChecks(r, Opts{}, ops)
+	checks := runChecks(r, Opts{}, ops, nil)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "no such binary") {
 		t.Errorf("x: state %q reason %q, want fail with spawn reason", checks[0].State, checks[0].Reason)
 	}
@@ -184,7 +184,7 @@ func TestRunChecksExpectError(t *testing.T) {
 	r := ready(
 		manifest.CheckSpec{Name: "x", Level: "L3", Exercise: "echo hi", Expect: []string{"bogus predicate"}},
 	)
-	checks := runChecks(r, Opts{}, newFakeOps())
+	checks := runChecks(r, Opts{}, newFakeOps(), nil)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "bogus predicate") {
 		t.Errorf("x: state %q reason %q, want fail naming the erroring expect", checks[0].State, checks[0].Reason)
 	}
@@ -192,7 +192,7 @@ func TestRunChecksExpectError(t *testing.T) {
 
 func TestRunChecksNoExpectsPassesVacuously(t *testing.T) {
 	r := ready(manifest.CheckSpec{Name: "x", Level: "L1", Exercise: "exit 7"})
-	checks := runChecks(r, Opts{}, newFakeOps())
+	checks := runChecks(r, Opts{}, newFakeOps(), nil)
 	if checks[0].State != evidence.CheckPass {
 		t.Errorf("x: state %q, want pass (no expects, exercise spawned)", checks[0].State)
 	}

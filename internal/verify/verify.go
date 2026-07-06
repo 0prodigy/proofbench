@@ -8,8 +8,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/launchwings/proofbench/internal/checkdriver"
 	"github.com/launchwings/proofbench/internal/evidence"
 	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/launchwings/proofbench/internal/substrate"
 )
 
 // Opts configures a verification run.
@@ -17,7 +19,8 @@ type Opts struct {
 	EvidenceRoot string   // root directory for evidence bundles
 	Ticket       string   // optional ticket key recorded in the bundle
 	Claim        string   // the claim under verification
-	Substrate    string   // substrate kind (local|compose)
+	Substrate    string   // substrate kind (local|compose|k8s-attach)
+	Dir          string   // repo dir containing the manifest; "" = "."
 	Only         []string // restrict to these check names; empty = all
 }
 
@@ -55,7 +58,8 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	checks := runChecks(r, o, b)
+	endpoints := resolveEndpoints(r, o)
+	checks := runChecks(r, o, b, endpoints)
 	b.M.Checks = append(b.M.Checks, checks...)
 	level := proofLevel(checks)
 	b.M.ProofLevel = level
@@ -68,7 +72,10 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 
 // runChecks executes every declared check independently — one failure never
 // aborts the rest — and returns one tri-state result per CheckSpec, in order.
-func runChecks(r *manifest.Ready, o Opts, ops bundleOps) []evidence.Check {
+// endpoints (resource/service name -> host:port, resolved via the substrate's
+// optional Endpoints capability) are substituted into exercise strings so the
+// drive verbs stay substrate-blind (they always dial localhost).
+func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]string) []evidence.Check {
 	out := make([]evidence.Check, 0, len(r.Checks))
 	for _, spec := range r.Checks {
 		c := evidence.Check{
@@ -82,7 +89,13 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps) []evidence.Check {
 			out = append(out, c)
 			continue
 		}
-		cmd, err := resolveExercise(r, spec.Exercise)
+		// A non-exec driver dispatches through the CheckDriver family; the
+		// default exec path stays byte-identical to keep verify tests green.
+		if spec.Driver != "" && spec.Driver != checkdriver.KindExec {
+			out = append(out, driveCheck(r, spec, o, ops, endpoints, c))
+			continue
+		}
+		cmd, err := resolveExercise(r, spec.Exercise, endpoints)
 		if err != nil {
 			c.State = evidence.CheckFail
 			c.Reason = err.Error()
@@ -126,17 +139,110 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps) []evidence.Check {
 
 // resolveExercise turns a CheckSpec exercise into a shell command:
 // "drive.<name>" means the named drive verb's run string; anything else is
-// already a raw shell command.
-func resolveExercise(r *manifest.Ready, exercise string) (string, error) {
+// already a raw shell command. Endpoint placeholders (${resources.<n>.host},
+// ${resources.<n>.port}, ${endpoints.<n>}) are substituted last so drivers
+// dial localhost regardless of substrate.
+func resolveExercise(r *manifest.Ready, exercise string, endpoints map[string]string) (string, error) {
 	name, isDrive := strings.CutPrefix(exercise, "drive.")
 	if !isDrive {
-		return exercise, nil
+		return checkdriver.SubstituteEndpoints(exercise, endpoints), nil
 	}
 	v, ok := r.Drive[name]
 	if !ok {
 		return "", fmt.Errorf("unknown drive verb %q", name)
 	}
-	return v.Run, nil
+	return checkdriver.SubstituteEndpoints(v.Run, endpoints), nil
+}
+
+// resolveEndpoints fills a name -> host:port map for every resource (and the
+// service) the substrate can report through its optional Endpoints capability.
+// local/compose (which don't implement Endpoints) yield an empty map — their
+// locators are already local, so placeholders resolve to themselves via the
+// manifest's own env. A per-resource resolution failure is skipped, not fatal:
+// an unresolved placeholder surfaces as a runtime error in the exercise.
+func resolveEndpoints(r *manifest.Ready, o Opts) map[string]string {
+	dir := o.Dir
+	if dir == "" {
+		dir = "."
+	}
+	s, err := substrate.New(o.Substrate, dir)
+	if err != nil {
+		return nil
+	}
+	ep, ok := s.(substrate.Endpoints)
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	names := make([]string, 0, len(r.Resources)+1)
+	for name := range r.Resources {
+		names = append(names, name)
+	}
+	if r.Service != "" {
+		names = append(names, r.Service)
+	}
+	for _, name := range names {
+		if hostport, err := ep.Endpoint(name); err == nil {
+			out[name] = hostport
+		}
+	}
+	return out
+}
+
+// driveCheck exercises a check through a non-exec CheckDriver (playwright,
+// ...). Preflight failure records not-run (ADR-0012); the driver emits its
+// artifacts via the bundle's Capture seam. verify still owns tri-state:
+// expect predicates evaluate afterward exactly as for the exec path.
+func driveCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps, endpoints map[string]string, c evidence.Check) evidence.Check {
+	cap, ok := ops.(evidence.Capture)
+	if !ok {
+		c.State = evidence.CheckFail
+		c.Reason = fmt.Sprintf("driver %q needs a capture-capable bundle", spec.Driver)
+		return c
+	}
+	dir := o.Dir
+	if dir == "" {
+		dir = "."
+	}
+	d, err := checkdriver.New(spec.Driver, dir)
+	if err != nil {
+		c.State = evidence.CheckFail
+		c.Reason = err.Error()
+		return c
+	}
+	if err := d.Preflight(); err != nil {
+		c.State = evidence.CheckNotRun
+		c.Reason = err.Error()
+		return c
+	}
+	env := checkdriver.Env{Dir: dir, Endpoints: endpoints}
+	if _, err := d.Exercise(spec, env, cap); err != nil {
+		c.State = evidence.CheckFail
+		c.Reason = "exercise: " + err.Error()
+		return c
+	}
+	c.State = evidence.CheckPass
+	observed := make([]string, 0, len(spec.Expect))
+	for _, expr := range spec.Expect {
+		obs, ok, err := ops.Assert(expr)
+		if err != nil {
+			c.State = evidence.CheckFail
+			if c.Reason == "" {
+				c.Reason = expr + ": " + err.Error()
+			}
+			observed = append(observed, "error: "+err.Error())
+			continue
+		}
+		observed = append(observed, obs)
+		if !ok {
+			c.State = evidence.CheckFail
+			if c.Reason == "" {
+				c.Reason = "expect failed: " + expr
+			}
+		}
+	}
+	c.Observed = strings.Join(observed, "; ")
+	return c
 }
 
 // proofLevel returns the highest Ln such that at least one check at Ln

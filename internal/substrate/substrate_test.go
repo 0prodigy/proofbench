@@ -532,6 +532,162 @@ func TestComposeEndToEnd(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------- k8s-attach substrate
+
+func TestSplitLocatorPort(t *testing.T) {
+	tests := []struct {
+		in      string
+		locator string
+		port    int
+	}{
+		{"svc/appservice:8080", "svc/appservice", 8080},
+		{"deploy/appservice", "deploy/appservice", 0},
+		{"pod/mongo-0:27017", "pod/mongo-0", 27017},
+		{"appservice:8080", "appservice", 8080},
+		{"appservice", "appservice", 0},
+	}
+	for _, tt := range tests {
+		loc, port := splitLocatorPort(tt.in)
+		if loc != tt.locator || port != tt.port {
+			t.Errorf("splitLocatorPort(%q) = %q,%d; want %q,%d", tt.in, loc, port, tt.locator, tt.port)
+		}
+	}
+}
+
+func TestSplitKindName(t *testing.T) {
+	tests := []struct{ in, kind, name string }{
+		{"svc/appservice", "svc", "appservice"},
+		{"deploy/x", "deploy", "x"},
+		{"bare-pod", "pod", "bare-pod"},
+	}
+	for _, tt := range tests {
+		k, n := splitKindName(tt.in)
+		if k != tt.kind || n != tt.name {
+			t.Errorf("splitKindName(%q) = %q,%q; want %q,%q", tt.in, k, n, tt.kind, tt.name)
+		}
+	}
+}
+
+func TestNewK8sAttachNeedsNamespace(t *testing.T) {
+	dir := t.TempDir() // no workspace.yaml, no env
+	if _, err := New(KindK8sAttach, dir); err == nil || !strings.Contains(err.Error(), "namespace") {
+		t.Fatalf("want namespace error, got %v", err)
+	}
+}
+
+func TestNewK8sAttachFromEnv(t *testing.T) {
+	t.Setenv("PB_K8S_CONTEXT", "redcat")
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	s, err := New(KindK8sAttach, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if ka.context != "redcat" || ka.namespace != "delta" {
+		t.Fatalf("got context=%q namespace=%q, want redcat/delta", ka.context, ka.namespace)
+	}
+	// It satisfies the optional Endpoints capability.
+	if _, ok := s.(Endpoints); !ok {
+		t.Fatal("k8s-attach must satisfy the optional Endpoints capability")
+	}
+}
+
+func TestWorkspaceContext(t *testing.T) {
+	dir := t.TempDir()
+	ws := "contexts:\n  k8s-attach: \"dev-control@mltest\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kctx, ns, ok := workspaceContext(dir)
+	if !ok || kctx != "dev-control" || ns != "mltest" {
+		t.Fatalf("workspaceContext = %q,%q,%v; want dev-control,mltest,true", kctx, ns, ok)
+	}
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if ka.context != "dev-control" || ka.namespace != "mltest" {
+		t.Fatalf("New from workspace got %q/%q", ka.context, ka.namespace)
+	}
+}
+
+func TestK8sAttachEndpointFromForwards(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if err := ka.saveForwards([]forward{
+		{Name: "appservice", Locator: "svc/appservice", LocalPort: 18080, PID: 0},
+		{Name: "mongo", Locator: "svc/mongo", LocalPort: 27099, PID: 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ep := s.(Endpoints)
+	if hp, err := ep.Endpoint("appservice"); err != nil || hp != "127.0.0.1:18080" {
+		t.Errorf("Endpoint(appservice) = %q, %v; want 127.0.0.1:18080", hp, err)
+	}
+	if hp, err := ep.Endpoint("mongo"); err != nil || hp != "127.0.0.1:27099" {
+		t.Errorf("Endpoint(mongo) = %q, %v; want 127.0.0.1:27099", hp, err)
+	}
+	if _, err := ep.Endpoint("ghost"); err == nil {
+		t.Error("Endpoint(ghost) should error")
+	}
+}
+
+func TestK8sAttachDownIdempotent(t *testing.T) {
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	s, err := New(KindK8sAttach, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No forwards file at all — Down is a no-op, never an error, never a
+	// cluster mutation (Shape-A).
+	if err := s.Down(&manifest.Ready{}); err != nil {
+		t.Fatalf("Down with no forwards: %v", err)
+	}
+}
+
+func TestK8sAttachForwardTargets(t *testing.T) {
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	s, err := New(KindK8sAttach, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	r := &manifest.Ready{
+		Service: "appservice",
+		Sources: map[string]string{"k8s": "svc/appservice:80"},
+		Resources: map[string]manifest.Resource{
+			"mongo": {Type: "mongodb", Via: map[string]string{"k8s": "svc/mongodb-svc:27017"}},
+			"kafka": {Type: "kafka", Via: map[string]string{"k8s": "svc/kafka:9092"}},
+			"local": {Type: "http", Via: map[string]string{"compose": "x"}}, // no k8s locator
+		},
+	}
+	got := ka.forwardTargets(r)
+	// service first, then resources sorted by name (kafka, mongo); 'local' skipped.
+	want := []struct {
+		name    string
+		locator string
+		port    int
+	}{
+		{"appservice", "svc/appservice", 80},
+		{"kafka", "svc/kafka", 9092},
+		{"mongo", "svc/mongodb-svc", 27017},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d targets, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Name != w.name || got[i].Locator != w.locator || got[i].RemotePort != w.port {
+			t.Errorf("target[%d] = %+v, want %s/%s/%d", i, got[i], w.name, w.locator, w.port)
+		}
+	}
+}
+
 // ------------------------------------------------------------------ helpers
 
 func freePort(t *testing.T) int {

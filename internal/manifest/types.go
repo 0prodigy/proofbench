@@ -30,10 +30,21 @@ type LocalRun struct {
 	Env   EnvSpec `yaml:"env"`
 }
 
-// EnvSpec sources environment from a file plus explicit overrides.
+// EnvSpec sources environment from a file plus explicit overrides, optionally
+// derived from a live source (a running pod) rather than hand-written.
 type EnvSpec struct {
 	File      string            `yaml:"file"`
 	Overrides map[string]string `yaml:"overrides"`
+	Derive    *DeriveSpec       `yaml:"derive"`
+}
+
+// DeriveSpec pulls environment from a live source instead of a checked-in
+// file, so config (mongo URI, kafka, service URLs) tracks the cluster.
+// Only "k8s-pod" is resolved today: From names the source kind and Pod (or a
+// resource name / label selector) locates it within the granted namespace.
+type DeriveSpec struct {
+	From string `yaml:"from"`
+	Pod  string `yaml:"pod"`
 }
 
 // Probe uses k8s readiness-probe vocabulary: exactly one of HTTP/TCP/Exec.
@@ -73,6 +84,7 @@ type DriveVerb struct {
 type CheckSpec struct {
 	Name      string   `yaml:"name"`
 	Level     string   `yaml:"level"`
+	Driver    string   `yaml:"driver"`
 	Exercise  string   `yaml:"exercise"`
 	Expect    []string `yaml:"expect"`
 	Artifacts []string `yaml:"artifacts"`
