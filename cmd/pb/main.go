@@ -446,6 +446,7 @@ func cmdVerify(args []string) int {
 		Ticket:       *ticket,
 		Claim:        *claim,
 		Substrate:    *kind,
+		Dir:          filepath.Dir(*manifestPath),
 	}
 	if *only != "" {
 		opts.Only = strings.Split(*only, ",")

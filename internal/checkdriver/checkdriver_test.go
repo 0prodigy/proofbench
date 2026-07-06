@@ -61,6 +61,36 @@ func TestSubstituteEndpoints(t *testing.T) {
 	}
 }
 
+func TestUnresolvedEndpoints(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		// resolved / no endpoint placeholders
+		{"curl 127.0.0.1:18080/health", nil},
+		{"no placeholders", nil},
+		// ordinary shell vars must NOT be flagged as unresolved endpoints
+		{"lyric-mongo.sh --db lyric --eval $PB_SCENARIO_A", nil},
+		{"fire ${PB_RUN_ACTIONS:+--selected \"$PB_RUN_ACTIONS\"}", nil},
+		// real unresolved endpoint placeholders
+		{"curl http://${resources.appservice.host}:${resources.appservice.port}/x",
+			[]string{"${resources.appservice.host}", "${resources.appservice.port}"}},
+		{"dial ${endpoints.mongo}", []string{"${endpoints.mongo}"}},
+	}
+	for _, tt := range tests {
+		got := UnresolvedEndpoints(tt.in)
+		if len(got) != len(tt.want) {
+			t.Errorf("UnresolvedEndpoints(%q) = %v, want %v", tt.in, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("UnresolvedEndpoints(%q)[%d] = %q, want %q", tt.in, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
 func TestExecDriverSubstitutesAndRuns(t *testing.T) {
 	d, err := New(KindExec, ".")
 	if err != nil {

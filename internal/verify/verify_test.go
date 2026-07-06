@@ -78,7 +78,7 @@ func TestRunChecksAllPass(t *testing.T) {
 		manifest.CheckSpec{Name: "b", Level: "L4", Exercise: "drive.fire", Expect: []string{"exitCode(b)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops, nil)
+	checks := runChecks(r, Opts{}, ops, nil, false)
 	if len(checks) != 2 {
 		t.Fatalf("got %d checks, want 2", len(checks))
 	}
@@ -108,7 +108,7 @@ func TestRunChecksOneFailNeverAbortsRest(t *testing.T) {
 		manifest.CheckSpec{Name: "good", Level: "L4", Exercise: "echo ok", Expect: []string{"exitCode(good)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops, nil)
+	checks := runChecks(r, Opts{}, ops, nil, false)
 	if checks[0].State != evidence.CheckFail {
 		t.Errorf("bad: state %q, want fail", checks[0].State)
 	}
@@ -137,7 +137,7 @@ func TestRunChecksOnlyFilter(t *testing.T) {
 		manifest.CheckSpec{Name: "b", Level: "L3", Exercise: "echo b", Expect: []string{"exitCode(b)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{Only: []string{"b"}}, ops, nil)
+	checks := runChecks(r, Opts{Only: []string{"b"}}, ops, nil, false)
 	if checks[0].State != evidence.CheckNotRun || checks[0].Reason != "filtered" {
 		t.Errorf("a: state %q reason %q, want not-run/filtered", checks[0].State, checks[0].Reason)
 	}
@@ -159,7 +159,7 @@ func TestRunChecksUnknownDriveVerb(t *testing.T) {
 		manifest.CheckSpec{Name: "y", Level: "L2", Exercise: "echo y", Expect: []string{"exitCode(y)==0"}},
 	)
 	ops := newFakeOps()
-	checks := runChecks(r, Opts{}, ops, nil)
+	checks := runChecks(r, Opts{}, ops, nil, false)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "nope") {
 		t.Errorf("x: state %q reason %q, want fail naming the verb", checks[0].State, checks[0].Reason)
 	}
@@ -174,7 +174,7 @@ func TestRunChecksSpawnFailure(t *testing.T) {
 	)
 	ops := newFakeOps()
 	ops.spawnErr = map[string]error{"x": errors.New("no such binary")}
-	checks := runChecks(r, Opts{}, ops, nil)
+	checks := runChecks(r, Opts{}, ops, nil, false)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "no such binary") {
 		t.Errorf("x: state %q reason %q, want fail with spawn reason", checks[0].State, checks[0].Reason)
 	}
@@ -184,7 +184,7 @@ func TestRunChecksExpectError(t *testing.T) {
 	r := ready(
 		manifest.CheckSpec{Name: "x", Level: "L3", Exercise: "echo hi", Expect: []string{"bogus predicate"}},
 	)
-	checks := runChecks(r, Opts{}, newFakeOps(), nil)
+	checks := runChecks(r, Opts{}, newFakeOps(), nil, false)
 	if checks[0].State != evidence.CheckFail || !strings.Contains(checks[0].Reason, "bogus predicate") {
 		t.Errorf("x: state %q reason %q, want fail naming the erroring expect", checks[0].State, checks[0].Reason)
 	}
@@ -192,9 +192,58 @@ func TestRunChecksExpectError(t *testing.T) {
 
 func TestRunChecksNoExpectsPassesVacuously(t *testing.T) {
 	r := ready(manifest.CheckSpec{Name: "x", Level: "L1", Exercise: "exit 7"})
-	checks := runChecks(r, Opts{}, newFakeOps(), nil)
+	checks := runChecks(r, Opts{}, newFakeOps(), nil, false)
 	if checks[0].State != evidence.CheckPass {
 		t.Errorf("x: state %q, want pass (no expects, exercise spawned)", checks[0].State)
+	}
+}
+
+// TestRunChecksUnattachedGatesServiceRungs proves an Endpoints-substrate that
+// never attached fails L3+ checks gracefully (clear reason, no shell-out) while
+// L0–L2 checks still run.
+func TestRunChecksUnattachedGatesServiceRungs(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "unit", Level: "L2", Exercise: "echo ok", Expect: []string{"exitCode(unit)==0"}},
+		manifest.CheckSpec{Name: "health", Level: "L3", Exercise: "curl http://example/x", Expect: []string{"exitCode(health)==0"}},
+		manifest.CheckSpec{Name: "effect", Level: "L4", Exercise: "drive.fire", Expect: []string{"exitCode(effect)==0"}},
+	)
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{Substrate: "k8s-attach"}, ops, nil, true)
+	if checks[0].State != evidence.CheckPass {
+		t.Errorf("unit (L2): state %q, want pass — a no-service rung must still run", checks[0].State)
+	}
+	for _, c := range checks[1:] {
+		if c.State != evidence.CheckFail {
+			t.Errorf("%s (%s): state %q, want fail", c.Name, c.Level, c.State)
+		}
+		if !strings.Contains(c.Reason, "not attached") {
+			t.Errorf("%s: reason %q should say not attached", c.Name, c.Reason)
+		}
+	}
+	if strings.Join(ops.ran, ",") != "unit" {
+		t.Errorf("ran %v — an unattached L3+ check must not shell out", ops.ran)
+	}
+}
+
+// TestRunChecksUnresolvedPlaceholderNeverShellsOut proves a check whose
+// exercise still carries an endpoint placeholder (substrate reported no
+// locator) fails gracefully rather than running a half-substituted command.
+func TestRunChecksUnresolvedPlaceholderNeverShellsOut(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "health", Level: "L3",
+			Exercise: "curl http://${resources.appservice.host}:${resources.appservice.port}/x",
+			Expect:   []string{"exitCode(health)==0"}},
+	)
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{Substrate: "k8s-attach"}, ops, nil, false)
+	if checks[0].State != evidence.CheckFail {
+		t.Fatalf("health: state %q, want fail", checks[0].State)
+	}
+	if !strings.Contains(checks[0].Reason, "not attached") {
+		t.Errorf("health: reason %q should say not attached", checks[0].Reason)
+	}
+	if len(ops.ran) != 0 {
+		t.Errorf("ran %v — must not shell out a command with an unresolved endpoint", ops.ran)
 	}
 }
 

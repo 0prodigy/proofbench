@@ -7,6 +7,7 @@ package checkdriver
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/launchwings/proofbench/internal/evidence"
@@ -80,4 +81,21 @@ func SubstituteEndpoints(s string, endpoints map[string]string) string {
 		s = strings.ReplaceAll(s, "${resources."+name+".port}", port)
 	}
 	return s
+}
+
+// endpointPlaceholder matches a proofbench endpoint placeholder — the
+// ${resources.<name>.host|port} and ${endpoints.<name>} grammar
+// SubstituteEndpoints fills. It deliberately does NOT match ordinary shell
+// variable expansions (`$FOO`, `${FOO}`, `${FOO:+...}`) so exercises that
+// legitimately reference process env are left alone.
+var endpointPlaceholder = regexp.MustCompile(`\$\{(?:resources\.[^}]*|endpoints\.[^}]*)\}`)
+
+// UnresolvedEndpoints returns the endpoint placeholders still present in s
+// after SubstituteEndpoints — i.e. resources/endpoints the substrate could not
+// report a locator for. A non-empty result means the substrate is not attached
+// (or a placeholder names a resource the manifest never declared): the check
+// must not shell out with a half-substituted command. Ordinary shell
+// variables are never returned.
+func UnresolvedEndpoints(s string) []string {
+	return endpointPlaceholder.FindAllString(s, -1)
 }

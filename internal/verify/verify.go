@@ -59,7 +59,7 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 		return nil, nil, err
 	}
 	endpoints := resolveEndpoints(r, o)
-	checks := runChecks(r, o, b, endpoints)
+	checks := runChecks(r, o, b, endpoints, unattached(r, o, endpoints))
 	b.M.Checks = append(b.M.Checks, checks...)
 	level := proofLevel(checks)
 	b.M.ProofLevel = level
@@ -75,7 +75,7 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 // endpoints (resource/service name -> host:port, resolved via the substrate's
 // optional Endpoints capability) are substituted into exercise strings so the
 // drive verbs stay substrate-blind (they always dial localhost).
-func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]string) []evidence.Check {
+func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]string, notAttached bool) []evidence.Check {
 	out := make([]evidence.Check, 0, len(r.Checks))
 	for _, spec := range r.Checks {
 		c := evidence.Check{
@@ -89,6 +89,18 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 			out = append(out, c)
 			continue
 		}
+		// An Endpoints-substrate that never attached (no forwards / cluster
+		// unreachable) cannot exercise a check that needs the service up:
+		// L3 (up+healthy) and above per the proof ladder. Fail those
+		// gracefully with a clear reason instead of shelling out a command
+		// against a service that is not reachable. L0–L2 (static/build/unit)
+		// need no service, so they still run.
+		if notAttached && needsService(spec.Level) {
+			c.State = evidence.CheckFail
+			c.Reason = unattachedReason(o.Substrate, nil)
+			out = append(out, c)
+			continue
+		}
 		// A non-exec driver dispatches through the CheckDriver family; the
 		// default exec path stays byte-identical to keep verify tests green.
 		if spec.Driver != "" && spec.Driver != checkdriver.KindExec {
@@ -99,6 +111,12 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 		if err != nil {
 			c.State = evidence.CheckFail
 			c.Reason = err.Error()
+			out = append(out, c)
+			continue
+		}
+		if unresolved := checkdriver.UnresolvedEndpoints(cmd); len(unresolved) > 0 {
+			c.State = evidence.CheckFail
+			c.Reason = unattachedReason(o.Substrate, unresolved)
 			out = append(out, c)
 			continue
 		}
@@ -152,6 +170,72 @@ func resolveExercise(r *manifest.Ready, exercise string, endpoints map[string]st
 		return "", fmt.Errorf("unknown drive verb %q", name)
 	}
 	return checkdriver.SubstituteEndpoints(v.Run, endpoints), nil
+}
+
+// unattachedReason explains why a check could not run: its exercise still
+// carries endpoint placeholders the substrate never resolved, meaning the
+// substrate is not attached (its Up never ran, or the cluster is unreachable).
+// The message is generic across substrates; for k8s-attach it names the
+// concrete recovery so a QA/devops caller sees "cluster unreachable / not
+// attached" rather than a shell "bad substitution" crash.
+func unattachedReason(kind string, unresolved []string) string {
+	target := "the service"
+	if len(unresolved) > 0 {
+		target = strings.Join(unresolved, ", ")
+	}
+	if kind == substrate.KindK8sAttach {
+		return fmt.Sprintf(
+			"cluster unreachable / not attached: no forwarded endpoint for %s "+
+				"(run `pb up --substrate k8s-attach` against a reachable cluster first)",
+			target)
+	}
+	return fmt.Sprintf(
+		"substrate %q reported no endpoint for %s (bring it up with `pb up --substrate %s` first)",
+		kind, target, kind)
+}
+
+// needsService reports whether a proof-ladder rung requires the service to be
+// up and reachable: L3 (up+healthy) and above per spec/v0/ready.schema.json.
+// L0 (static), L1 (build), L2 (unit) and any unparseable level do not.
+func needsService(level string) bool {
+	n, ok := levelNum(level)
+	return ok && n >= 3
+}
+
+// unattached reports whether the selected substrate needs an attachment it does
+// not currently have: it implements the optional Endpoints capability and the
+// manifest declares resources reachable only via that capability, yet no
+// endpoint resolved (Up never ran, or the cluster is unreachable). local and
+// compose — which don't implement Endpoints — are never "unattached" here.
+func unattached(r *manifest.Ready, o Opts, endpoints map[string]string) bool {
+	dir := o.Dir
+	if dir == "" {
+		dir = "."
+	}
+	s, err := substrate.New(o.Substrate, dir)
+	if err != nil {
+		return false
+	}
+	if _, ok := s.(substrate.Endpoints); !ok {
+		return false
+	}
+	return len(endpoints) == 0 && declaresAttachTargets(r)
+}
+
+// declaresAttachTargets reports whether the manifest names anything an
+// Endpoints-substrate would forward: a sources.k8s locator or any resource with
+// a via.k8s locator. Without such a target there is nothing to attach, so an
+// empty endpoint map is expected, not a failure.
+func declaresAttachTargets(r *manifest.Ready) bool {
+	if r.Sources["k8s"] != "" {
+		return true
+	}
+	for _, res := range r.Resources {
+		if res.Via["k8s"] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveEndpoints fills a name -> host:port map for every resource (and the
@@ -213,6 +297,11 @@ func driveCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOp
 	if err := d.Preflight(); err != nil {
 		c.State = evidence.CheckNotRun
 		c.Reason = err.Error()
+		return c
+	}
+	if resolved := checkdriver.SubstituteEndpoints(spec.Exercise, endpoints); len(checkdriver.UnresolvedEndpoints(resolved)) > 0 {
+		c.State = evidence.CheckFail
+		c.Reason = unattachedReason(o.Substrate, checkdriver.UnresolvedEndpoints(resolved))
 		return c
 	}
 	env := checkdriver.Env{Dir: dir, Endpoints: endpoints}
