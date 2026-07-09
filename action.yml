@@ -1,0 +1,121 @@
+name: proofbench-verify
+description: Run pb verify and attach the evidence bundle
+
+inputs:
+  manifest:
+    description: Path to the ready.yaml manifest, relative to working-directory
+    required: false
+    default: ready.yaml
+  substrate:
+    description: Substrate to verify against (local|compose|k8s-attach; k8s-attach requires cluster credentials on the runner)
+    required: false
+    default: local
+  working-directory:
+    description: Directory to run pb in (contains the manifest and the repo under test)
+    required: false
+    default: .
+  evidence-dir:
+    description: Root directory for evidence bundles, relative to working-directory
+    required: false
+    default: .proofbench/evidence
+  allow-inconclusive:
+    description: >-
+      When 'true', an inconclusive verdict passes the step instead of
+      failing it. Default 'false': an unproven change must not read as green.
+    required: false
+    default: 'false'
+
+outputs:
+  verdict:
+    description: The verify verdict read from the bundle's manifest.json (pass|fail|inconclusive)
+    value: ${{ steps.verify.outputs.verdict }}
+  bundle-path:
+    description: Path to the evidence bundle, relative to the repo root
+    value: ${{ steps.verify.outputs.bundle-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+
+    - name: Build pb
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        # TODO: no `pb` release exists yet. Once v0 is tagged, replace this
+        # build-from-source step with a pinned release binary download.
+        go build -o "${{ github.action_path }}/pb" ./cmd/pb
+
+    - name: Run pb verify
+      id: verify
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set +e
+        output=$("${{ github.action_path }}/pb" verify \
+          --manifest "${{ inputs.manifest }}" \
+          --substrate "${{ inputs.substrate }}" \
+          --evidence-root "${{ inputs.evidence-dir }}")
+        rc=$?
+        set -e
+        echo "$output"
+
+        # pb prints "bundle:  <dir>" (relative to working-directory) on
+        # every path that reaches verify.Run, pass or fail.
+        bundle_rel=$(printf '%s\n' "$output" | sed -n 's/^bundle:  *//p' | tail -n1)
+
+        if [ -z "$bundle_rel" ]; then
+          # verify.Run never ran (e.g. bad manifest) - nothing to attach.
+          # Fall back to the evidence root so partial output isn't lost.
+          echo "::error::pb verify (exit $rc) produced no bundle path"
+          echo "verdict=fail" >> "$GITHUB_OUTPUT"
+          echo "bundle-path=${{ inputs.working-directory }}/${{ inputs.evidence-dir }}" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        bundle_path="${{ inputs.working-directory }}/$bundle_rel"
+        bundle_path="${bundle_path#./}"
+        echo "bundle-path=$bundle_path" >> "$GITHUB_OUTPUT"
+
+        bundle_manifest="$bundle_rel/manifest.json"
+        if [ ! -f "$bundle_manifest" ]; then
+          echo "::error::evidence bundle $bundle_rel has no manifest.json (pb exit $rc)"
+          echo "verdict=fail" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        verdict=$(grep -o '"verdict"[[:space:]]*:[[:space:]]*"[a-zA-Z]*"' "$bundle_manifest" \
+          | head -n1 | sed -E 's/.*"([a-zA-Z]+)"$/\1/')
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+        case "$verdict" in
+          pass)
+            exit 0
+            ;;
+          inconclusive)
+            if [ "${{ inputs.allow-inconclusive }}" = "true" ]; then
+              exit 0
+            fi
+            echo "::error::verdict is inconclusive (pb exit $rc); set allow-inconclusive: 'true' to accept"
+            exit 1
+            ;;
+          fail)
+            echo "::error::verdict is fail (pb exit $rc)"
+            exit 1
+            ;;
+          *)
+            echo "::error::unrecognized verdict '$verdict' in $bundle_manifest (pb exit $rc)"
+            exit 1
+            ;;
+        esac
+
+    - name: Upload evidence bundle
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: proofbench-evidence
+        path: ${{ steps.verify.outputs.bundle-path }}
+        if-no-files-found: warn

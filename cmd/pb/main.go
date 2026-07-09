@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/launchwings/proofbench/internal/agentruntime"
 	"github.com/launchwings/proofbench/internal/evidence"
 	"github.com/launchwings/proofbench/internal/manifest"
 	"github.com/launchwings/proofbench/internal/report"
@@ -37,18 +38,26 @@ Usage:
   pb evidence validate BUNDLE_DIR
   pb evidence show     BUNDLE_DIR
   pb init   [--out FILE|-] [--force] [DIR]
-  pb up     [--substrate local|compose] [--manifest ready.yaml]
-  pb ready  [--substrate local|compose] [--manifest ready.yaml]
-  pb seed   [--substrate local|compose] [--manifest ready.yaml]
-  pb down   [--substrate local|compose] [--manifest ready.yaml]
-  pb verify [--ticket T] [--claim C] [--evidence-root DIR] [--only a,b] [--substrate local|compose] [--manifest ready.yaml]
+  pb lint   [--manifest ready.yaml]
+  pb up     [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb ready  [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb seed   [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb down   [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb verify [--ticket T] [--claim C] [--evidence-root DIR] [--only a,b]
+            [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+            [--pairs-with RUNID] [--kind before|after]
+  pb explore [--manifest ready.yaml] [--out DIR] [--runtime claude-code] [--max-turns N]
+             (experimental: requires PB_EXPERIMENTAL=1; proposes checks only, never a verdict)
   pb report BUNDLE_DIR
   pb hub    [--root DIR] [--out FILE]
   pb version
 
 Exit codes: "pb evidence run" exits with the wrapped command's real exit
 code; "pb evidence assert" exits 1 when the predicate fails, 2 on
-evaluation error; every other command exits nonzero on failure.
+evaluation error; "pb lint" exits 1 with the named validation error; "pb
+explore" exits 2 when PB_EXPERIMENTAL is not set to "1", 3 when the round
+did not run (not-run), 4 when it ran but produced no proposal
+(inconclusive); every other command exits nonzero on failure.
 `
 
 func main() {
@@ -65,10 +74,14 @@ func run(args []string) int {
 		return cmdEvidence(args[1:])
 	case "init":
 		return cmdInit(args[1:])
+	case "lint":
+		return cmdLint(args[1:])
 	case "up", "ready", "seed", "down":
 		return cmdSubstrate(args[0], args[1:])
 	case "verify":
 		return cmdVerify(args[1:])
+	case "explore":
+		return cmdExplore(args[1:])
 	case "report":
 		return cmdReport(args[1:])
 	case "hub":
@@ -391,11 +404,33 @@ func cmdInit(args []string) int {
 	return 0
 }
 
+// -------------------------------------------------------------------- lint
+
+// cmdLint validates a ready.yaml without bringing anything up: manifest.Load
+// already runs (*Ready).Validate, so lint just surfaces that result as an
+// exit code, one named error at a time (manifest.Validate returns its first
+// failure, not a list).
+func cmdLint(args []string) int {
+	fs := flag.NewFlagSet("pb lint", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		return failf("lint: unexpected argument %q (use --manifest to specify the manifest path)", fs.Arg(0))
+	}
+	if _, err := manifest.Load(*manifestPath); err != nil {
+		return fail(err)
+	}
+	fmt.Println("ok")
+	return 0
+}
+
 // -------------------------------------------------- up / ready / seed / down
 
 func cmdSubstrate(verb string, args []string) int {
 	fs := flag.NewFlagSet("pb "+verb, flag.ContinueOnError)
-	kind := fs.String("substrate", substrate.KindLocal, "local|compose")
+	kind := fs.String("substrate", substrate.KindLocal, "local|compose|k8s-attach")
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -432,10 +467,15 @@ func cmdVerify(args []string) int {
 	claim := fs.String("claim", "", "claim under verification")
 	evidenceRoot := fs.String("evidence-root", "evidence", "root directory for evidence bundles")
 	only := fs.String("only", "", "comma-separated check names to run (default: all)")
-	kind := fs.String("substrate", substrate.KindLocal, "local|compose")
+	substrateKind := fs.String("substrate", substrate.KindLocal, "local|compose|k8s-attach")
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	pairsWith := fs.String("pairs-with", "", "runId of the paired bundle (before/after pairing)")
+	bundleKind := fs.String("kind", "", "before|after (this bundle's role in a paired run)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *bundleKind != "" && *bundleKind != "before" && *bundleKind != "after" {
+		return failf("verify: --kind: %q is not a valid pairing kind (allowed: before|after)", *bundleKind)
 	}
 	r, err := manifest.Load(*manifestPath)
 	if err != nil {
@@ -445,8 +485,10 @@ func cmdVerify(args []string) int {
 		EvidenceRoot: *evidenceRoot,
 		Ticket:       *ticket,
 		Claim:        *claim,
-		Substrate:    *kind,
+		Substrate:    *substrateKind,
 		Dir:          filepath.Dir(*manifestPath),
+		PairsWith:    *pairsWith,
+		Kind:         *bundleKind,
 	}
 	if *only != "" {
 		opts.Only = strings.Split(*only, ",")
@@ -465,6 +507,50 @@ func cmdVerify(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// ----------------------------------------------------------------- explore
+
+// cmdExplore runs one pb-explore round via the AgentRuntime family
+// (agentruntime.Explore). It is experimental (backlog #17): gated behind
+// PB_EXPERIMENTAL=1, and it only ever proposes checks — never a verdict, and
+// it never edits ready.yaml.
+func cmdExplore(args []string) int {
+	if os.Getenv("PB_EXPERIMENTAL") != "1" {
+		fmt.Fprintln(os.Stderr, "pb: explore is experimental; set PB_EXPERIMENTAL=1")
+		return 2
+	}
+	fs := flag.NewFlagSet("pb explore", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	out := fs.String("out", filepath.Join(".proofbench", "explore"), "output directory for round artifacts")
+	runtimeKind := fs.String("runtime", agentruntime.KindClaudeCode, "agent runtime kind")
+	maxTurns := fs.Int("max-turns", 30, "agent turn budget")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	r, err := manifest.Load(*manifestPath)
+	if err != nil {
+		return fail(err)
+	}
+	res, err := agentruntime.Explore(r, filepath.Dir(*manifestPath), *out, *runtimeKind, *maxTurns)
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Printf("status: %s\n", res.Status)
+	if res.Reason != "" {
+		fmt.Printf("reason: %s\n", res.Reason)
+	}
+	switch res.Status {
+	case agentruntime.StatusProposed:
+		fmt.Printf("proposal: %s\n", filepath.Join(*out, "proposed-checks.json"))
+		return 0
+	case agentruntime.StatusNotRun:
+		return 3
+	case agentruntime.StatusInconclusive:
+		return 4
+	default:
+		return 1
+	}
 }
 
 // ------------------------------------------------------------ report / hub

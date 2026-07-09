@@ -9,15 +9,15 @@ independently-grabbable slice, demoable on its own; no blocked-by chains. Sizes:
 ### 1. `pb lint` — manifest validation verb · S
 `manifest.Load` (`internal/manifest/parse.go`) validates on load, but no standalone verb exists — the
 ENG-20190 confirmation flagged it. Add a `lint` case to the `cmd/pb/main.go` dispatch, next to `init`.
-- [ ] `pb lint [--manifest ready.yaml]` exits 0 on valid, 1 with named errors
-- [ ] Each `internal/manifest/testdata/invalid_*.yaml` fixture yields a distinct, actionable message
-- [ ] `rootUsage` documents the verb
+- [x] `pb lint [--manifest ready.yaml]` exits 0 on valid, 1 with named errors
+- [x] Each `internal/manifest/testdata/invalid_*.yaml` fixture yields a distinct, actionable message
+- [x] `rootUsage` documents the verb
 
 ### 2. Bundle pairing through `pb verify` · S
 `--pairs-with` exists on `pb evidence new` (`evidence.NewOpts.PairsWith`), but `verify.Opts`
 (`internal/verify/verify.go`) cannot set it or `Kind`, so `pb verify` can't emit paired before/after runs.
-- [ ] `pb verify --pairs-with RUNID --kind before|after` populates `pairsWith`/`kind` in manifest.json
-- [ ] Covered in `verify_test.go`; documented in `rootUsage`
+- [x] `pb verify --pairs-with RUNID --kind before|after` populates `pairsWith`/`kind` in manifest.json
+- [x] Covered in `verify_test.go`; documented in `rootUsage`
 
 ### 3. Run reaper + substrate preflight · M
 `internal/substrate/compose.go` leaks resources when a run is killed; docker-mode.md prescribes
@@ -74,8 +74,9 @@ MCP-wired — mapping screenshot/JSON-sidecar output into `artifacts[]`/`checks[
 Run `pb verify` in a workflow (PLAN §2: CI can invoke us); the single static binary (ADR-0012) makes
 this a thin composite action pinned to a release.
 - [ ] Action installs pinned `pb`, runs verify against the repo's ready.yaml, sets status from verdict
-- [ ] Evidence bundle uploaded as a workflow artifact; `inconclusive` distinguished from `fail`
-- [ ] Usage snippet in README
+      (builds from source for now; TODO in `action.yml` to switch to a pinned v0 release binary)
+- [x] Evidence bundle uploaded as a workflow artifact; `inconclusive` distinguished from `fail`
+- [x] Usage snippet in README
 
 ### 10. GitHub App posting bundle markdown on PRs · L
 The Stage-1 viral surface (product-shape-ruling). `internal/report/markdown.go` already renders bundle
@@ -136,8 +137,9 @@ Stage-1 scope (product-shape-ruling): prototyped behind a flag on Lyric tickets.
 the `AgentRuntime` process-boundary adapter outside the Apache-2.0 core (ADR-0009); one exploratory
 round whose only durable output is committed automation (ADR-0010, ADR-0002). Includes a
 Stagehand-vs-Playwright-codegen spike for durable-spec generation (ADR-0007 note).
-- [ ] `pb explore` runs only behind an experimental flag; core builds without the SDK adapter
+- [x] `pb explore` runs only behind an experimental flag; core builds without the SDK adapter
 - [ ] Output is a proposed `checks[]` diff + spec files — never a verdict; agent artifacts flagged
+      (the `checks[]` proposal diff lands via `agentruntime.Explore`; spec-file generation is unbuilt)
 - [ ] Exercised once on a real Lyric ticket; survival of generated checks recorded (kill-metric input)
 
 ## Launch

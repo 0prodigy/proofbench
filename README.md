@@ -111,6 +111,25 @@ Writes `.pb/hub/index.html` — an HTML index over every bundle under `evidence/
 
 ---
 
+## GitHub Action
+
+`action.yml` at the repo root wraps `pb verify` for CI — raise a PR, get end-to-end proof as a workflow artifact.
+
+```yaml
+- uses: launchwings/proofbench@main
+  with:
+    manifest: ready.yaml
+    substrate: local
+    working-directory: .
+    evidence-dir: .proofbench/evidence
+```
+
+`@v0` will be the pinned ref once the first tagged release lands; until then, use `@main`.
+
+The step's own exit code follows the bundle's `verdict` (from `manifest.json`), not `pb`'s raw exit status: `pass` succeeds, `fail` always fails the job, and `inconclusive` fails the job too unless you set `allow-inconclusive: 'true'` — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (`if: always()`), and the step exposes `verdict` and `bundle-path` outputs for later steps (e.g. a PR comment).
+
+---
+
 ## Non-goals
 
 Proofbench is **not**:
