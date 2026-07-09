@@ -1,0 +1,30 @@
+# Headless runtime: first adapter is genuine Claude Code CLI shell-out, inheriting customer auth
+
+The embedded runtime's first adapter is **headless Claude Code**: Proofbench shells out to the **customer-installed, genuine `claude` binary** (`claude -p --output-format stream-json`) rather than linking the Claude Agent SDK. The adapter inherits whatever auth the customer already has — a subscription OAuth token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`), an `ANTHROPIC_API_KEY`, or Bedrock/Vertex credentials — with zero Proofbench involvement in credentials. Auth is entirely Claude Code's own concern; Proofbench never collects, stores, proxies, or pools credentials. This supersedes ADR-0009's consequence note that Agent SDK use "requires metered API keys (subscription OAuth tokens are disallowed)" for the specific case of a genuine-CLI shell-out — that constraint holds only for SDK-linked runtimes.
+
+**ToS grounding:** Anthropic's own `claude-code-action` officially supports `CLAUDE_CODE_OAUTH_TOKEN` for Pro/Max ("Pro and Max users can generate this by running `claude setup-token` locally"). Since Jan 2026, Anthropic server-side-enforces that only the genuine Claude Code client may use subscription OAuth; the Feb 2026 legal-page clarification bans SDK/third-party-harness use of subscription tokens "in any other product, tool, or service — including the Agent SDK." The line Anthropic draws: the customer using their own subscription through the genuine Claude Code client (interactive, CI, scripts wrapping the CLI) is ordinary use; a vendor offering Claude login or pooling/proxying plan credentials on users' behalf is prohibited. A genuine-CLI shell-out invoked by the customer in their own environment sits on the sanctioned side of that line; SDK-linking with consumer OAuth does not.
+
+**Constraints that are part of this decision, not implementation detail:**
+
+- Never pass `--bare` on the subscription path — bare mode skips OAuth/keychain reads and does not read `CLAUDE_CODE_OAUTH_TOKEN`.
+- Never `--dangerously-skip-permissions` inside a customer repo.
+- Warn when `ANTHROPIC_API_KEY` is present alongside a subscription token — in `-p` mode the API key is always used when present and silently outranks the subscription (surprise metered spend).
+- Failure taxonomy maps to honest `not-run`/`inconclusive` states, never a false pass/fail: `auth_invalid` (authentication_failed, oauth_org_not_allowed, expired login), `rate_limited` (rate_limit, overloaded, billing_error — including the 5-hour rolling window and weekly cap), `budget_exhausted` (`error_max_turns`), `protocol_error` (non-zero exit with unparseable stdout, or `error_during_execution`/`error_interrupted`/`error_initialization`).
+- **Non-goal:** Proofbench never offers Claude login and never routes requests through plan credentials on behalf of users.
+
+**Agent-neutral contract:** the same adapter shape — discover binary → inherit customer auth → one-shot exec with a prompt → parse a terminal JSON record — fits `codex exec --json` (ChatGPT-plan CI auth is explicitly blessed by OpenAI's own docs), `gemini -p` (cached Google OAuth or `GEMINI_API_KEY`), and `openhands --headless` (BYO key via `LLM_API_KEY`; must run inside Proofbench's own sandbox since its headless mode is always-approve with no permission gating of its own).
+
+## Considered Options
+
+- **Link the Claude Agent SDK directly** — rejected: its own docs state subscription-auth is prohibited for SDK-based products ("Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK"), and the TS SDK just spawns a native Claude Code binary under the hood anyway — SDK-linking buys nothing over `stream-json` on a pipe while adding a hard dependency into the core and naming the exact prohibited path.
+- **API-key-only, no subscription support** — rejected: it forecloses the sanctioned, officially-supported subscription path (`claude-code-action`'s own pattern) and forces every customer onto metered spend even when they already pay for Pro/Max/Team/Enterprise.
+- **Proofbench-hosted/pooled Claude credentials** — rejected outright: this is precisely the "route requests through plan credentials on behalf of users" pattern the Feb 2026 clarification prohibits, and it would make Proofbench a credential custodian, which ADR-0011 (BYOC security posture) already rules against for infra credentials generally.
+
+## Consequences
+
+- The Apache-2.0 core stays license-clean and process-boundary-only, consistent with ADR-0009's existing adapter seam — this is a refinement of *how* the first adapter authenticates, not a new architectural boundary.
+- Proofbench's cost model is no longer uniformly "API spend that must be priced into PAYG/subscription tiers" (ADR-0009): a customer running on their own Claude subscription incurs zero incremental Proofbench-side inference cost, while API-key/Bedrock/Vertex customers still meter as before. Pricing (ADR-0004) must account for this split.
+- Binary discovery and version pinning become part of the evidence record (`claude --version` captured per run); a missing/unexecutable binary yields `not_run(runtime_unavailable)`, never a failed check.
+- Rate-limit and budget exhaustion (5-hour rolling window, weekly cap) are Proofbench's problem to schedule around, not the customer's to babysit — the harness must back off and retry the next window rather than mark a proof round failed.
+- Enterprise customers on Team/Enterprise plans (Commercial Terms, not the Feb-2026 consumer-OAuth clarification) have the cleanest legal footing; Proofbench should recommend Team/Enterprise for at-scale automated use and get written confirmation from Anthropic sales, since advertised limits "assume ordinary, individual usage."
+- Adding a second engine (Codex, Gemini, OpenHands) is one more shell-out adapter sharing the same discover/auth-inherit/exec/parse contract and failure taxonomy, not a redesign — validating ADR-0009's "multi-agent-ready by construction" claim.

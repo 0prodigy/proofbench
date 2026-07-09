@@ -10,3 +10,5 @@ The embedded agent roles (explorer, builder, fixer) run on the Claude Agent SDK 
 ## Consequences
 
 Single-vendor exposure to Anthropic pricing/ToS for the embedded runtime, mitigated (not eliminated) by the adapter seam. Agent SDK use requires metered API keys (subscription OAuth tokens are disallowed), so every explorer/builder/fixer run is API spend that must be priced into PAYG/subscription tiers.
+
+**Amended 2026-07-10 by ADR-0014:** the first shipped adapter is headless Claude Code CLI shell-out inheriting customer auth (subscription included); the Agent SDK consequence above applies only to SDK-linked runtimes.
