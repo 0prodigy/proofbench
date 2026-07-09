@@ -41,18 +41,18 @@ var assertHTTPClient = &http.Client{Timeout: 10 * time.Second}
 // The jsonpath/contains predicates read a captured mongo/appservice JSON
 // document (e.g. an execution doc): path segments are dotted keys, with a
 // bare numeric segment indexing into an array (execution.stages.0.state).
-// ponytail: dotted-key + numeric-index paths only — no wildcards or filters;
+// NOTE: dotted-key + numeric-index paths only — no wildcards or filters;
 // contains scans one level of array/object for the value.
 func (b *Bundle) Assert(expr string) (observed string, ok bool, err error) {
 	expr = strings.TrimSpace(expr)
 	open := strings.Index(expr, "(")
-	close := strings.LastIndex(expr, ")")
-	if open < 0 || close < open {
+	closeIdx := strings.LastIndex(expr, ")")
+	if open < 0 || closeIdx < open {
 		return "", false, fmt.Errorf("malformed expression %q", expr)
 	}
 	fn := strings.TrimSpace(expr[:open])
-	arg := strings.TrimSpace(expr[open+1 : close])
-	rest := strings.TrimSpace(expr[close+1:])
+	arg := strings.TrimSpace(expr[open+1 : closeIdx])
+	rest := strings.TrimSpace(expr[closeIdx+1:])
 	if arg == "" {
 		return "", false, fmt.Errorf("malformed expression %q: empty argument", expr)
 	}

@@ -48,7 +48,7 @@ func TestAssert(t *testing.T) {
 			`{"name":"publish","state":"SUCCEEDED"}]}`,
 	})
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(201)
 	}))
 	defer srv.Close()

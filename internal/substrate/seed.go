@@ -51,7 +51,7 @@ func seedOrder(steps []manifest.SeedStep) ([]manifest.SeedStep, error) {
 			}
 		}
 	}
-	// ponytail: O(n²) Kahn scan — seed lists are tiny.
+	// NOTE: O(n²) Kahn scan — seed lists are tiny.
 	order := make([]manifest.SeedStep, 0, len(steps))
 	done := make([]bool, len(steps))
 	for len(order) < len(steps) {

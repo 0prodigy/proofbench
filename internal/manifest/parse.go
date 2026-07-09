@@ -27,6 +27,17 @@ var validLevels = map[string]bool{
 	"L5": true,
 }
 
+// validDrivers is the closed set of known CheckSpec.Driver values: ""
+// (absent, defaults to exec) plus every registered CheckDriver kind. manifest
+// cannot import internal/checkdriver (checkdriver already imports manifest —
+// it would cycle), so this set must be kept in lockstep BY HAND with
+// checkdriver.Kinds() and the "driver" enum in spec/v0/ready.schema.json.
+var validDrivers = map[string]bool{
+	"":           true,
+	"exec":       true,
+	"playwright": true,
+}
+
 // Load reads and parses a ready.yaml at path into a Ready, then runs
 // Validate on it.
 func Load(path string) (*Ready, error) {
@@ -37,7 +48,7 @@ func Load(path string) (*Ready, error) {
 
 	var r Ready
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
-	dec.KnownFields(true) // ponytail: strict — unknown fields are rejected loudly
+	dec.KnownFields(true) // strict: unknown fields are rejected loudly
 	if err := dec.Decode(&r); err != nil {
 		return nil, fmt.Errorf("manifest.Load: parse error in %q: %w", path, err)
 	}
@@ -56,7 +67,8 @@ func Load(path string) (*Ready, error) {
 //     are parseable durations (defaulted to 60s/2s when absent)
 //   - seed step names are unique; each After entry resolves to a seed name or
 //     a resource name; references may not form a cycle among seed-step names
-//   - check names are unique; level is in L0-L5; exercise is non-empty
+//   - check names are unique; level is in L0-L5; exercise is non-empty;
+//     driver (if set) is one of exec|playwright
 //   - a check exercise of form "drive.<name>" must reference an existing drive
 //     verb in r.Drive
 func (r *Ready) Validate() error {
@@ -138,8 +150,10 @@ func validateProbe(p Probe) error {
 		return fmt.Errorf("manifest.Validate: run.ready: probe must have at most one of http/tcp/exec, got %d", count)
 	}
 
-	// ponytail: defaults applied at validation time; callers should read Probe
-	// fields only after Validate has run (or use helper accessors).
+	// Validate only checks parseability here; it does not apply the 60s/2s
+	// defaults itself. An empty Timeout/Interval is valid input — the
+	// runtime caller (the substrate probing readiness) applies the default
+	// when the field is empty.
 	if p.Timeout != "" {
 		if _, err := time.ParseDuration(p.Timeout); err != nil {
 			return fmt.Errorf("manifest.Validate: run.ready.timeout: %q is not a valid duration: %w", p.Timeout, err)
@@ -256,6 +270,10 @@ func validateChecks(r *Ready) error {
 
 		if !validLevels[c.Level] {
 			return fmt.Errorf("manifest.Validate: checks[%q].level: %q is not a valid proof-ladder rung (allowed: L0-L5)", c.Name, c.Level)
+		}
+
+		if !validDrivers[c.Driver] {
+			return fmt.Errorf("manifest.Validate: checks[%q].driver: %q is not a valid check driver (allowed: exec|playwright)", c.Name, c.Driver)
 		}
 
 		if strings.TrimSpace(c.Exercise) == "" {

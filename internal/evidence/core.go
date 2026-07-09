@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,6 @@ import (
 )
 
 // validPhases is the set of allowed phase enum values.
-// ponytail: simple map lookup; no reflection or generated code.
 var validPhases = map[string]bool{
 	PhaseRepro:    true,
 	PhaseVerify:   true,
@@ -53,13 +53,25 @@ var validProvenances = map[string]bool{
 	ProvenanceTool:    true,
 }
 
+// validKinds is the set of allowed kind enum values: "" (bundle stands
+// alone) or a before/after pairing role (spec/v0/evidence-v2.schema.json).
+var validKinds = map[string]bool{
+	"":       true,
+	"before": true,
+	"after":  true,
+}
+
 // New creates a new evidence bundle directory under root, named
 // <ts>-<phase> (runId), writes an initial schema:2 manifest with
 // StartedAt set to now (RFC3339) and Verdict left empty until SetVerdict,
-// and returns the open Bundle. Phase must be a valid phase enum value.
+// and returns the open Bundle. Phase must be a valid phase enum value; Kind,
+// if set, must be "before" or "after".
 func New(root string, o NewOpts) (*Bundle, error) {
 	if !validPhases[o.Phase] {
 		return nil, fmt.Errorf("evidence.New: invalid phase %q", o.Phase)
+	}
+	if !validKinds[o.Kind] {
+		return nil, fmt.Errorf("evidence.New: invalid kind %q", o.Kind)
 	}
 
 	now := time.Now().UTC()
@@ -107,6 +119,13 @@ func Open(dir string) (*Bundle, error) {
 		return nil, fmt.Errorf("evidence.Open: parse manifest: %w", err)
 	}
 
+	// Only schema 1 (legacy, upgraded below) and schema 2 (current) are
+	// understood; anything else (including a missing/zero schema) is a
+	// bundle Open cannot safely interpret, never a silent pass-through.
+	if m.Schema != 1 && m.Schema != 2 {
+		return nil, fmt.Errorf("evidence.Open: unsupported schema %d (want 1 or 2)", m.Schema)
+	}
+
 	// Upgrade schema:1 in memory — v1 has same field names, just missing v2-only
 	// fields (checks, proofLevel, pins, provenance on artifacts).
 	// We normalise nulls written by evidence.sh (path:null / sha256:null on link artifacts).
@@ -134,7 +153,7 @@ func (b *Bundle) Save() error {
 		return fmt.Errorf("evidence.Save: marshal: %w", err)
 	}
 
-	// ponytail: atomic write via temp file + rename to avoid partial reads.
+	// Atomic write via temp file + rename to avoid partial reads.
 	tmp := filepath.Join(b.Dir, ".manifest.tmp")
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("evidence.Save: write tmp: %w", err)
@@ -152,6 +171,9 @@ func (b *Bundle) Save() error {
 // the bundle are registered in place. The artifact records the file's
 // sha256 and provenance "agent", with meta attached verbatim.
 func (b *Bundle) Add(srcPath, typ, name string, meta map[string]any) error {
+	if !validArtifactTypes[typ] {
+		return fmt.Errorf("evidence.Add: invalid artifact type %q", typ)
+	}
 	abs, err := filepath.Abs(srcPath)
 	if err != nil {
 		return fmt.Errorf("evidence.Add: abs path: %w", err)
@@ -278,10 +300,12 @@ func (b *Bundle) Link(executionID, url string) error {
 	return b.Save()
 }
 
-// Seal scans the bundle directory for files present on disk but absent from
-// the manifest (excluding manifest.json itself) and registers each as an
-// artifact of type log with provenance agent, so nothing in the bundle is
-// untracked at verdict time.
+// Seal scans the bundle directory RECURSIVELY for files present on disk but
+// absent from the manifest (excluding manifest.json and .manifest.tmp) and
+// registers each as an artifact of type log with provenance agent, so
+// nothing in the bundle is untracked at verdict time — including a driver's
+// subdirectory (e.g. playwright-<check>/trace.zip), not just the top level.
+// A subdir file's artifact Path is its path relative to the bundle dir.
 func (b *Bundle) Seal() error {
 	bundleDir, err := filepath.Abs(b.Dir)
 	if err != nil {
@@ -303,36 +327,42 @@ func (b *Bundle) Seal() error {
 		registered[ap] = true
 	}
 
-	entries, err := os.ReadDir(bundleDir)
-	if err != nil {
-		return fmt.Errorf("evidence.Seal: readdir: %w", err)
-	}
-
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	// WalkDir visits entries in lexical order at each directory level, so
+	// artifact append order stays deterministic without an extra sort.
+	err = filepath.WalkDir(bundleDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("evidence.Seal: walk %s: %w", path, walkErr)
 		}
-		if e.Name() == "manifest.json" || e.Name() == ".manifest.tmp" {
-			continue
+		if d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(bundleDir, path)
+		if rerr != nil {
+			return fmt.Errorf("evidence.Seal: rel %s: %w", path, rerr)
+		}
+		if rel == "manifest.json" || rel == ".manifest.tmp" {
+			return nil
+		}
+		if registered[path] {
+			return nil
 		}
 
-		abs := filepath.Join(bundleDir, e.Name())
-		if registered[abs] {
-			continue
-		}
-
-		sum, err := sha256File(abs)
-		if err != nil {
-			return fmt.Errorf("evidence.Seal: sha256 %s: %w", abs, err)
+		sum, serr := sha256File(path)
+		if serr != nil {
+			return fmt.Errorf("evidence.Seal: sha256 %s: %w", path, serr)
 		}
 
 		b.M.Artifacts = append(b.M.Artifacts, Artifact{
 			Type:       ArtifactLog,
-			Name:       strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())),
-			Path:       e.Name(),
+			Name:       strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel)),
+			Path:       rel,
 			SHA256:     sum,
 			Provenance: ProvenanceAgent,
 		})
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	return b.Save()
@@ -363,7 +393,7 @@ func (b *Bundle) SetVerdict(verdict, note string) error {
 }
 
 // Validate checks a bundle on disk: the manifest parses (schema 1 or 2),
-// all enum fields (phase, verdict, check states, artifact types, provenance)
+// all enum fields (phase, kind, verdict, check states, artifact types, provenance)
 // hold valid values, every artifact path exists in the bundle directory
 // (link artifacts excepted), and each recorded sha256 matches the file's
 // current content.
@@ -379,6 +409,9 @@ func Validate(dir string) error {
 	}
 	if m.Verdict != "" && !validVerdicts[m.Verdict] {
 		return fmt.Errorf("evidence.Validate: invalid verdict %q", m.Verdict)
+	}
+	if !validKinds[m.Kind] {
+		return fmt.Errorf("evidence.Validate: invalid kind %q", m.Kind)
 	}
 
 	bundleDir, err := filepath.Abs(dir)

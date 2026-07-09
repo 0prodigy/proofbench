@@ -17,8 +17,8 @@ type execDriver struct {
 // Preflight always succeeds: bash is the harness's own shell (ADR-0012).
 func (d *execDriver) Preflight() error { return nil }
 
-// Exercise runs the (endpoint-substituted) exercise string via cap.Exec.
-func (d *execDriver) Exercise(spec manifest.CheckSpec, env Env, cap evidence.Capture) (int, error) {
+// Exercise runs the (endpoint-substituted) exercise string via capture.Exec.
+func (d *execDriver) Exercise(spec manifest.CheckSpec, env Env, capture evidence.Capture) (int, error) {
 	cmd := SubstituteEndpoints(spec.Exercise, env.Endpoints)
-	return cap.Exec(spec.Name, []string{cmd}, true)
+	return capture.Exec(spec.Name, []string{cmd}, true)
 }

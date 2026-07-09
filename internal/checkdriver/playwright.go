@@ -32,29 +32,16 @@ func (d *playwrightDriver) Preflight() error {
 // output at a per-check dir inside the bundle so traces/screenshots land where
 // cap.File can seal them. Endpoints are injected as PB_ENDPOINT_<NAME> env so
 // the spec dials localhost without baking cluster hostnames.
-func (d *playwrightDriver) Exercise(spec manifest.CheckSpec, env Env, cap evidence.Capture) (int, error) {
+func (d *playwrightDriver) Exercise(spec manifest.CheckSpec, env Env, capture evidence.Capture) (int, error) {
 	specFile := strings.TrimSpace(spec.Exercise)
 	if specFile == "" {
 		return 0, fmt.Errorf("playwright: check %q has an empty exercise (spec path)", spec.Name)
 	}
 
-	outDir := filepath.Join(cap.BundleDir(), "playwright-"+spec.Name)
+	outDir := filepath.Join(capture.BundleDir(), "playwright-"+spec.Name)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return 0, fmt.Errorf("playwright: mkdir output: %w", err)
 	}
-
-	// Build env: endpoints as PB_ENDPOINT_<NAME>, plus auth Vars and session.
-	envv := os.Environ()
-	for name, hostport := range env.Endpoints {
-		envv = append(envv, "PB_ENDPOINT_"+strings.ToUpper(sanitize(name))+"="+hostport)
-	}
-	for k, v := range env.Vars {
-		envv = append(envv, k+"="+v)
-	}
-	if env.Session != "" {
-		envv = append(envv, "PB_SESSION="+env.Session)
-	}
-	envv = append(envv, "PLAYWRIGHT_OUTPUT_DIR="+outDir)
 
 	// Run via the capture so the driver's own stdout/exit is recorded as a
 	// harness-provenance command artifact; the tool-produced files below are
@@ -65,7 +52,7 @@ func (d *playwrightDriver) Exercise(spec manifest.CheckSpec, env Env, cap eviden
 	)
 	// Persist the assembled env to the spawned shell by prefixing exports.
 	exports := envExports(env)
-	code, err := cap.Exec(spec.Name, []string{exports + cmd}, true)
+	code, err := capture.Exec(spec.Name, []string{exports + cmd}, true)
 	if err != nil {
 		return 0, err
 	}
@@ -84,7 +71,7 @@ func (d *playwrightDriver) Exercise(spec manifest.CheckSpec, env Env, cap eviden
 		case ".zip": // playwright trace bundle
 			typ = evidence.ArtifactRecording
 		}
-		_ = cap.File(typ, spec.Name+"-"+e.Name(), p, map[string]any{"tool": "playwright"})
+		_ = capture.File(typ, spec.Name+"-"+e.Name(), p, map[string]any{"tool": "playwright"})
 		return nil
 	})
 

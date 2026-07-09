@@ -20,7 +20,7 @@ import (
 
 // localSubstrate runs the service as bare processes on the host
 // (process-compose semantics), sourcing env from run.local.env.
-// ponytail: unix-only (process groups via syscall); Windows is out of scope.
+// NOTE: unix-only (process groups via syscall); Windows is out of scope.
 type localSubstrate struct {
 	dir string
 }
@@ -78,7 +78,7 @@ func (s *localSubstrate) Up(r *manifest.Ready) error {
 	go func() { _ = cmd.Wait() }()
 
 	pid := cmd.Process.Pid
-	// ponytail: no liveness check on an existing pidfile — a second Up
+	// NOTE: no liveness check on an existing pidfile — a second Up
 	// overwrites it and orphans the first process group.
 	if err := os.WriteFile(s.pidfile(r), []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
@@ -117,7 +117,7 @@ func (s *localSubstrate) Down(r *manifest.Ready) error {
 	// signal when the pid is alive and its command line still looks like
 	// what Up started (the manifest's start command, or its bash -lc
 	// wrapper). Otherwise just drop the pidfile.
-	// ponytail: ceiling — a command-line heuristic; a recycled pid running a
+	// NOTE: ceiling — a command-line heuristic; a recycled pid running a
 	// same-looking command still matches, and an argv-rewriting exec of an
 	// argument-less start slips past it (leaked, not mis-killed). Real
 	// ownership needs process start-time or pidfd tracking.
@@ -128,13 +128,36 @@ func (s *localSubstrate) Down(r *manifest.Ready) error {
 	if !cmdlineLooksLikeStart(string(out), r.Run.Local.Start) {
 		return nil // an unrelated process owns this pid now
 	}
-	// ponytail: SIGTERM, fixed 200ms grace, SIGKILL — no configurable drain.
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-		return nil // group already gone
-	}
+	// NOTE: SIGTERM, fixed 200ms grace, SIGKILL — no configurable drain.
+	// Any SIGTERM errno (including EPERM) is ignored here rather than treated
+	// as "group already gone": only the SIGKILL + pidGone check below gets to
+	// decide that, so a real leak still surfaces loudly.
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	time.Sleep(200 * time.Millisecond)
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
+
+	// Confirm the kill actually landed: a leaked process (pid survives
+	// SIGKILL) must not be indistinguishable from a clean stop.
+	if !pidGone(pid) {
+		return fmt.Errorf("local.Down: pid %d survived SIGKILL — kill it manually", pid)
+	}
 	return nil
+}
+
+// pidGone polls pid's liveness (signal 0) up to 3 times, 100ms apart,
+// returning true as soon as the OS reports no such process. It gives a
+// just-SIGKILLed process a short window to actually exit before Down
+// declares it leaked.
+func pidGone(pid int) bool {
+	for i := 0; i < 3; i++ {
+		if syscall.Kill(pid, 0) == syscall.ESRCH {
+			return true
+		}
+		if i < 2 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return false
 }
 
 // cmdlineLooksLikeStart reports whether a ps command line plausibly belongs
@@ -166,7 +189,7 @@ func serviceName(r *manifest.Ready) string {
 	if r.Service != "" {
 		return r.Service
 	}
-	return "service" // ponytail: unnamed manifest still gets a pid/log file
+	return "service" // NOTE: unnamed manifest still gets a pid/log file
 }
 
 // parseEnvFile reads KEY=VAL lines, ignoring blank lines and # comments.
@@ -237,7 +260,7 @@ func poll(timeout, interval time.Duration, what string, attempt func() error) er
 }
 
 func probeTiming(p manifest.Probe) (timeout, interval time.Duration, err error) {
-	timeout, interval = 60*time.Second, time.Second // ponytail: fixed defaults
+	timeout, interval = 60*time.Second, time.Second // NOTE: fixed defaults
 	if p.Timeout != "" {
 		if timeout, err = time.ParseDuration(p.Timeout); err != nil {
 			return 0, 0, fmt.Errorf("ready.timeout: %w", err)

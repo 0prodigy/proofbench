@@ -22,6 +22,8 @@ type Opts struct {
 	Substrate    string   // substrate kind (local|compose|k8s-attach)
 	Dir          string   // repo dir containing the manifest; "" = "."
 	Only         []string // restrict to these check names; empty = all
+	PairsWith    string   // runId of the paired bundle; plumbed into the bundle's manifest.pairsWith
+	Kind         string   // before|after; plumbed into the bundle's manifest.kind
 }
 
 // Summary is the machine-readable result of a verification run.
@@ -38,19 +40,28 @@ type bundleOps interface {
 	Assert(expr string) (observed string, ok bool, err error)
 }
 
-// Run executes the manifest's checks per o: up + ready + seed on the
-// substrate, evaluate each CheckSpec's expect predicates, record tri-state
-// results and artifacts into a new evidence bundle, set the verdict last,
-// and return the sealed bundle plus a summary.
+// Run evaluates the manifest's declared checks' expect predicates, records
+// tri-state results and artifacts into a new evidence bundle, sets the
+// verdict last, and returns the sealed bundle plus a summary.
 //
-// Substrate bring-up is the CLI's job (pb up runs first); Run only records
-// the substrate in the bundle's surface.
+// Substrate bring-up (up + ready + seed) is the CLI's job (pb up runs
+// first); Run only validates the substrate kind and records it in the
+// bundle's surface — an unknown kind fails the run fast rather than silently
+// degrading to a substrate-blind local exec (see substrate.New).
 func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	root := o.EvidenceRoot
 	if root == "" {
 		root = "./evidence"
 	}
-	no := evidence.NewOpts{Ticket: o.Ticket, Claim: o.Claim, Phase: evidence.PhaseVerify}
+	dir := o.Dir
+	if dir == "" {
+		dir = "."
+	}
+	s, err := substrate.New(o.Substrate, dir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify.Run: %w", err)
+	}
+	no := evidence.NewOpts{Ticket: o.Ticket, Claim: o.Claim, Phase: evidence.PhaseVerify, PairsWith: o.PairsWith, Kind: o.Kind}
 	if o.Substrate != "" {
 		no.Surface = map[string]string{"substrate": o.Substrate}
 	}
@@ -58,8 +69,8 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	endpoints := resolveEndpoints(r, o)
-	checks := runChecks(r, o, b, endpoints, unattached(r, o, endpoints))
+	endpoints := resolveEndpoints(r, s)
+	checks := runChecks(r, o, b, endpoints, unattached(r, s, endpoints))
 	b.M.Checks = append(b.M.Checks, checks...)
 	level := proofLevel(checks)
 	b.M.ProofLevel = level
@@ -101,56 +112,7 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 			out = append(out, c)
 			continue
 		}
-		// A non-exec driver dispatches through the CheckDriver family; the
-		// default exec path stays byte-identical to keep verify tests green.
-		if spec.Driver != "" && spec.Driver != checkdriver.KindExec {
-			out = append(out, driveCheck(r, spec, o, ops, endpoints, c))
-			continue
-		}
-		cmd, err := resolveExercise(r, spec.Exercise, endpoints)
-		if err != nil {
-			c.State = evidence.CheckFail
-			c.Reason = err.Error()
-			out = append(out, c)
-			continue
-		}
-		if unresolved := checkdriver.UnresolvedEndpoints(cmd); len(unresolved) > 0 {
-			c.State = evidence.CheckFail
-			c.Reason = unattachedReason(o.Substrate, unresolved)
-			out = append(out, c)
-			continue
-		}
-		if _, err := ops.Run(spec.Name, []string{cmd}, true); err != nil {
-			// Harness-level spawn/capture failure — the exercise never ran.
-			c.State = evidence.CheckFail
-			c.Reason = "exercise: " + err.Error()
-			out = append(out, c)
-			continue
-		}
-		// ponytail: a nonzero exit is only a failure if an expect says so
-		// (exitCode(...)==0); a check with zero expects passes vacuously.
-		c.State = evidence.CheckPass
-		observed := make([]string, 0, len(spec.Expect))
-		for _, expr := range spec.Expect {
-			obs, ok, err := ops.Assert(expr)
-			if err != nil {
-				c.State = evidence.CheckFail
-				if c.Reason == "" {
-					c.Reason = expr + ": " + err.Error()
-				}
-				observed = append(observed, "error: "+err.Error())
-				continue
-			}
-			observed = append(observed, obs)
-			if !ok {
-				c.State = evidence.CheckFail
-				if c.Reason == "" {
-					c.Reason = "expect failed: " + expr
-				}
-			}
-		}
-		c.Observed = strings.Join(observed, "; ")
-		out = append(out, c)
+		out = append(out, runCheck(r, spec, o, ops, endpoints, c))
 	}
 	return out
 }
@@ -207,15 +169,9 @@ func needsService(level string) bool {
 // manifest declares resources reachable only via that capability, yet no
 // endpoint resolved (Up never ran, or the cluster is unreachable). local and
 // compose — which don't implement Endpoints — are never "unattached" here.
-func unattached(r *manifest.Ready, o Opts, endpoints map[string]string) bool {
-	dir := o.Dir
-	if dir == "" {
-		dir = "."
-	}
-	s, err := substrate.New(o.Substrate, dir)
-	if err != nil {
-		return false
-	}
+// s is the substrate Run already constructed and validated; unattached never
+// re-resolves the kind, so an invalid kind can't silently read as "attached".
+func unattached(r *manifest.Ready, s substrate.Substrate, endpoints map[string]string) bool {
 	if _, ok := s.(substrate.Endpoints); !ok {
 		return false
 	}
@@ -243,16 +199,10 @@ func declaresAttachTargets(r *manifest.Ready) bool {
 // local/compose (which don't implement Endpoints) yield an empty map — their
 // locators are already local, so placeholders resolve to themselves via the
 // manifest's own env. A per-resource resolution failure is skipped, not fatal:
-// an unresolved placeholder surfaces as a runtime error in the exercise.
-func resolveEndpoints(r *manifest.Ready, o Opts) map[string]string {
-	dir := o.Dir
-	if dir == "" {
-		dir = "."
-	}
-	s, err := substrate.New(o.Substrate, dir)
-	if err != nil {
-		return nil
-	}
+// an unresolved placeholder surfaces as a runtime error in the exercise. s is
+// the substrate Run already constructed and validated; resolveEndpoints never
+// re-resolves the kind, so an invalid kind can't silently yield an empty map.
+func resolveEndpoints(r *manifest.Ready, s substrate.Substrate) map[string]string {
 	ep, ok := s.(substrate.Endpoints)
 	if !ok {
 		return nil
@@ -273,12 +223,15 @@ func resolveEndpoints(r *manifest.Ready, o Opts) map[string]string {
 	return out
 }
 
-// driveCheck exercises a check through a non-exec CheckDriver (playwright,
-// ...). Preflight failure records not-run (ADR-0012); the driver emits its
-// artifacts via the bundle's Capture seam. verify still owns tri-state:
-// expect predicates evaluate afterward exactly as for the exec path.
-func driveCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps, endpoints map[string]string, c evidence.Check) evidence.Check {
-	cap, ok := ops.(evidence.Capture)
+// runCheck exercises one check through its CheckDriver — exec (the default,
+// checkdriver.execDriver) or a named driver like playwright — dispatched the
+// same way via checkdriver.New in both cases, so execDriver is the single
+// exec implementation (no inline duplicate). Preflight failure records
+// not-run (ADR-0012); the driver emits its artifacts via the bundle's
+// Capture seam. verify still owns tri-state: expect predicates evaluate
+// afterward via evaluateExpects, same for every driver.
+func runCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps, endpoints map[string]string, c evidence.Check) evidence.Check {
+	capture, ok := ops.(evidence.Capture)
 	if !ok {
 		c.State = evidence.CheckFail
 		c.Reason = fmt.Sprintf("driver %q needs a capture-capable bundle", spec.Driver)
@@ -299,20 +252,45 @@ func driveCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOp
 		c.Reason = err.Error()
 		return c
 	}
-	if resolved := checkdriver.SubstituteEndpoints(spec.Exercise, endpoints); len(checkdriver.UnresolvedEndpoints(resolved)) > 0 {
+	// The exec driver's exercise is a shell command that may still be a
+	// "drive.<verb>" indirection into the manifest's drive verbs; every other
+	// driver's exercise (a spec file, ...) is only endpoint-substituted.
+	var exercise string
+	if spec.Driver == "" || spec.Driver == checkdriver.KindExec {
+		resolved, err := resolveExercise(r, spec.Exercise, endpoints)
+		if err != nil {
+			c.State = evidence.CheckFail
+			c.Reason = err.Error()
+			return c
+		}
+		exercise = resolved
+	} else {
+		exercise = checkdriver.SubstituteEndpoints(spec.Exercise, endpoints)
+	}
+	if unresolved := checkdriver.UnresolvedEndpoints(exercise); len(unresolved) > 0 {
 		c.State = evidence.CheckFail
-		c.Reason = unattachedReason(o.Substrate, checkdriver.UnresolvedEndpoints(resolved))
+		c.Reason = unattachedReason(o.Substrate, unresolved)
 		return c
 	}
+	spec.Exercise = exercise // already resolved; the driver's own substitution becomes a no-op
 	env := checkdriver.Env{Dir: dir, Endpoints: endpoints}
-	if _, err := d.Exercise(spec, env, cap); err != nil {
+	if _, err := d.Exercise(spec, env, capture); err != nil {
 		c.State = evidence.CheckFail
 		c.Reason = "exercise: " + err.Error()
 		return c
 	}
+	return evaluateExpects(ops, spec.Expect, c)
+}
+
+// evaluateExpects runs each expect predicate via ops.Assert, recording every
+// observed value and downgrading c to fail on the first failing/erroring
+// predicate (without stopping early) — a nonzero exit is only a failure if an
+// expect says so (exitCode(...)==0); a check with zero expects passes
+// vacuously. Shared by every CheckDriver dispatch in runCheck.
+func evaluateExpects(ops bundleOps, exprs []string, c evidence.Check) evidence.Check {
 	c.State = evidence.CheckPass
-	observed := make([]string, 0, len(spec.Expect))
-	for _, expr := range spec.Expect {
+	observed := make([]string, 0, len(exprs))
+	for _, expr := range exprs {
 		obs, ok, err := ops.Assert(expr)
 		if err != nil {
 			c.State = evidence.CheckFail
@@ -342,8 +320,8 @@ func proofLevel(checks []evidence.Check) string {
 	for _, c := range checks {
 		n, ok := levelNum(c.Level)
 		if !ok {
-			// ponytail: checks without a parseable L0–L5 level neither
-			// advance nor block the ladder.
+			// Checks without a parseable L0-L5 level neither advance nor
+			// block the ladder.
 			continue
 		}
 		switch c.State {

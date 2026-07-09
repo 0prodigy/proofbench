@@ -25,7 +25,7 @@ import (
 // non-nil only for harness failures (spawn/capture problems, a bad
 // PB_RUN_TIMEOUT), not for a nonzero exit of the command itself.
 //
-// ponytail: combined stdout+stderr; split streams when someone needs them.
+// NOTE: combined stdout+stderr; split streams when someone needs them.
 func (b *Bundle) Run(name string, argv []string, shell bool) (int, error) {
 	// Parse optional timeout from the environment up front: an unparseable
 	// PB_RUN_TIMEOUT is a harness error, never a silently disabled timeout.

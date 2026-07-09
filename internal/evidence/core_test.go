@@ -69,6 +69,65 @@ func TestNewInvalidPhase(t *testing.T) {
 	}
 }
 
+// TestKindValidation is table-driven over the kind enum ("" | before | after),
+// asserting New accepts/rejects the same values Validate does — a bundle
+// created with a given kind must be judged consistently at both seams.
+func TestKindValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    string
+		wantErr bool
+	}{
+		{"empty (unpaired)", "", false},
+		{"before", "before", false},
+		{"after", "after", false},
+		{"invalid", "sideways", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			b, err := New(root, NewOpts{Phase: PhaseVerify, Claim: "kind test", Kind: tc.kind})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("New(kind=%q): expected error, got nil", tc.kind)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("New(kind=%q): unexpected error: %v", tc.kind, err)
+			}
+			if b.M.Kind != tc.kind {
+				t.Errorf("Kind: got %q, want %q", b.M.Kind, tc.kind)
+			}
+			if err := b.SetVerdict(VerdictPass, ""); err != nil {
+				t.Fatalf("SetVerdict: %v", err)
+			}
+			if err := Validate(b.Dir); err != nil {
+				t.Errorf("Validate(kind=%q): unexpected error: %v", tc.kind, err)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsInvalidKind proves Validate independently rejects a
+// manifest whose kind was tampered with on disk after creation (not just at
+// New time), mirroring how validPhases/validVerdicts are enforced.
+func TestValidateRejectsInvalidKind(t *testing.T) {
+	root := t.TempDir()
+	b, err := New(root, NewOpts{Phase: PhaseVerify, Claim: "tampered kind"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	b.M.Kind = "sideways"
+	if err := b.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := Validate(b.Dir); err == nil {
+		t.Error("expected Validate to reject invalid kind, got nil")
+	}
+}
+
 // TestRoundTrip exercises New / Add / Seal / SetVerdict / Open.
 func TestRoundTrip(t *testing.T) {
 	root := t.TempDir()
@@ -431,5 +490,73 @@ func TestSealIdempotent(t *testing.T) {
 
 	if count1 != count2 {
 		t.Errorf("Seal is not idempotent: count went from %d to %d", count1, count2)
+	}
+}
+
+// TestSealWalksSubdirectories proves Seal claims files inside a subdirectory
+// (e.g. the playwright-<check>/ trace/screenshot subtree a driver writes),
+// not just the bundle's top level, registering the subdir file's path as its
+// path relative to the bundle dir.
+func TestSealWalksSubdirectories(t *testing.T) {
+	root := t.TempDir()
+	b, _ := New(root, NewOpts{Phase: PhaseVerify, Claim: "nested seal"})
+
+	subdir := filepath.Join(b.Dir, "playwright-e2e")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+	writeFile(t, subdir, "trace.zip", "fake trace bytes")
+
+	if err := b.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	wantPath := filepath.Join("playwright-e2e", "trace.zip")
+	found := false
+	for _, a := range b.M.Artifacts {
+		if a.Path == wantPath {
+			found = true
+			if a.Type != ArtifactLog {
+				t.Errorf("subdir artifact type: got %q, want %q", a.Type, ArtifactLog)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Seal did not register subdir file %q; artifacts: %+v", wantPath, b.M.Artifacts)
+	}
+	if err := Validate(b.Dir); err != nil {
+		t.Errorf("Validate after subdir seal: %v", err)
+	}
+}
+
+// TestAddInvalidArtifactType proves Add rejects a type outside the enum, the
+// same way File already does — a bundle written via Add must never contain a
+// type its own Validate would reject.
+func TestAddInvalidArtifactType(t *testing.T) {
+	root := t.TempDir()
+	ext := t.TempDir()
+	b, _ := New(root, NewOpts{Phase: PhaseVerify, Claim: "bad type"})
+	src := writeFile(t, ext, "x.log", "data")
+
+	if err := b.Add(src, "bogus", "x", nil); err == nil {
+		t.Fatal("Add with invalid artifact type expected an error, got nil")
+	}
+	if len(b.M.Artifacts) != 0 {
+		t.Errorf("Add with invalid type registered an artifact: %+v", b.M.Artifacts)
+	}
+}
+
+// TestOpenRejectsUnsupportedSchema proves Open rejects a schema number it
+// does not understand rather than silently trusting it.
+func TestOpenRejectsUnsupportedSchema(t *testing.T) {
+	dir := t.TempDir()
+	raw := `{"schema": 3, "runId": "x", "verdict": "pass", "artifacts": []}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if _, err := Open(dir); err == nil {
+		t.Fatal("Open(schema:3) expected an error, got nil")
+	} else if !strings.Contains(err.Error(), "3") {
+		t.Errorf("Open error %q should name the unsupported schema", err.Error())
 	}
 }

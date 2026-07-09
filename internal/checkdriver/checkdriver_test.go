@@ -18,12 +18,12 @@ type fakeCapture struct {
 	execErr error
 }
 
-func (f *fakeCapture) Exec(name string, argv []string, shell bool) (int, error) {
+func (f *fakeCapture) Exec(_ string, argv []string, _ bool) (int, error) {
 	f.execs = append(f.execs, strings.Join(argv, " "))
 	return f.exit, f.execErr
 }
 
-func (f *fakeCapture) File(typ, name, srcPath string, meta map[string]any) error {
+func (f *fakeCapture) File(typ, name, _ string, _ map[string]any) error {
 	f.files = append(f.files, typ+":"+name)
 	return nil
 }
@@ -99,14 +99,14 @@ func TestExecDriverSubstitutesAndRuns(t *testing.T) {
 	if err := d.Preflight(); err != nil {
 		t.Fatalf("exec Preflight: %v", err)
 	}
-	cap := &fakeCapture{}
+	capture := &fakeCapture{}
 	spec := manifest.CheckSpec{Name: "up", Exercise: "curl ${endpoints.appservice}/health"}
 	env := Env{Endpoints: map[string]string{"appservice": "127.0.0.1:18080"}}
-	if _, err := d.Exercise(spec, env, cap); err != nil {
+	if _, err := d.Exercise(spec, env, capture); err != nil {
 		t.Fatal(err)
 	}
-	if len(cap.execs) != 1 || cap.execs[0] != "curl 127.0.0.1:18080/health" {
-		t.Errorf("exec driver ran %v, want substituted localhost command", cap.execs)
+	if len(capture.execs) != 1 || capture.execs[0] != "curl 127.0.0.1:18080/health" {
+		t.Errorf("exec driver ran %v, want substituted localhost command", capture.execs)
 	}
 }
 

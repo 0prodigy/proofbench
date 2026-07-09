@@ -2,6 +2,7 @@ package verify
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -44,6 +45,23 @@ func (f *fakeOps) Run(name string, argv []string, shell bool) (int, error) {
 	f.ran = append(f.ran, name)
 	return code, nil
 }
+
+// Exec satisfies evidence.Capture by delegating to Run: runCheck dispatches
+// every driver (exec included) through checkdriver.New, which needs a
+// capture-capable bundle, so the test double must present one too.
+func (f *fakeOps) Exec(name string, argv []string, shell bool) (int, error) {
+	return f.Run(name, argv, shell)
+}
+
+// File satisfies evidence.Capture; no verify test drives a driver that
+// claims a driver-produced file.
+func (f *fakeOps) File(_, _, _ string, _ map[string]any) error {
+	return nil
+}
+
+// BundleDir satisfies evidence.Capture; no verify test drives a driver that
+// reads it.
+func (f *fakeOps) BundleDir() string { return "" }
 
 func (f *fakeOps) Assert(expr string) (string, bool, error) {
 	rest, isExit := strings.CutPrefix(expr, "exitCode(")
@@ -300,6 +318,33 @@ func TestVerdict(t *testing.T) {
 	}
 }
 
+// TestRunUnknownSubstrateFailsFast proves Run rejects an unknown substrate
+// kind up front rather than silently degrading to a substrate-blind local
+// exec: no bundle is created and no check runs.
+func TestRunUnknownSubstrateFailsFast(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(a)==0"}},
+	)
+	root := t.TempDir()
+	b, sum, err := Run(r, Opts{EvidenceRoot: root, Claim: "bogus substrate", Substrate: "bogus"})
+	if err == nil {
+		t.Fatal("Run(substrate=bogus) expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("Run error %q should name the bad substrate kind", err.Error())
+	}
+	if b != nil || sum != nil {
+		t.Errorf("Run(substrate=bogus) returned bundle %v summary %v, want nil, nil", b, sum)
+	}
+	entries, rerr := os.ReadDir(root)
+	if rerr != nil {
+		t.Fatalf("read evidence root: %v", rerr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Run(substrate=bogus) created %d bundle dir(s), want none", len(entries))
+	}
+}
+
 // TestRunEndToEnd exercises the exported Run against the real evidence
 // package; it skips while the evidence slice is still stubbed.
 func TestRunEndToEnd(t *testing.T) {
@@ -327,5 +372,39 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	if b.M.ProofLevel != "L2" {
 		t.Errorf("manifest proofLevel %q, want L2", b.M.ProofLevel)
+	}
+}
+
+// TestRunPairingFieldsLandInManifest proves --pairs-with/--kind (plumbed via
+// Opts.PairsWith/Opts.Kind) reach the sealed bundle's manifest.json, reading
+// it back from disk (not just the in-memory Bundle) to prove the round trip.
+func TestRunPairingFieldsLandInManifest(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(a)==0"}},
+	)
+	b, _, err := Run(r, Opts{
+		EvidenceRoot: t.TempDir(),
+		Claim:        "paired run",
+		Substrate:    "local",
+		PairsWith:    "20260101-120000-verify",
+		Kind:         "after",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if b.M.PairsWith != "20260101-120000-verify" {
+		t.Errorf("manifest pairsWith %q, want 20260101-120000-verify", b.M.PairsWith)
+	}
+	if b.M.Kind != "after" {
+		t.Errorf("manifest kind %q, want after", b.M.Kind)
+	}
+
+	reopened, err := evidence.Open(b.Dir)
+	if err != nil {
+		t.Fatalf("evidence.Open: %v", err)
+	}
+	if reopened.M.PairsWith != "20260101-120000-verify" || reopened.M.Kind != "after" {
+		t.Errorf("reopened manifest pairsWith=%q kind=%q, want 20260101-120000-verify/after",
+			reopened.M.PairsWith, reopened.M.Kind)
 	}
 }

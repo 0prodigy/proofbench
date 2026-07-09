@@ -126,18 +126,6 @@ func WriteHub(root, outFile string) error {
 		if _, serr := os.Stat(mpath); os.IsNotExist(serr) {
 			return nil
 		}
-		// Check we haven't already added this dir (immediate-child scan).
-		already := false
-		for _, hb := range bundles {
-			// Compare abs paths via the dir we stored in sortKey.
-			if filepath.Clean(hb.sortKey) == filepath.Clean(path) {
-				already = true
-				break
-			}
-		}
-		if already {
-			return fs.SkipDir
-		}
 		b, oerr := evidence.Open(path)
 		if oerr != nil {
 			skipped = append(skipped, fmt.Sprintf("%s — %s", rel, oerr.Error()))

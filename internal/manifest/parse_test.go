@@ -336,6 +336,25 @@ func TestValidate_Checks(t *testing.T) {
 				{Name: "e2e", Level: "L5", Exercise: "playwright tests/e2e/order.spec.ts"},
 			},
 		},
+		{
+			name: "unknown driver rejected",
+			checks: []CheckSpec{
+				{Name: "e2e", Level: "L5", Exercise: "tests/e2e/order.spec.ts", Driver: "bogus"},
+			},
+			wantErr: "bogus",
+		},
+		{
+			name: "playwright driver valid",
+			checks: []CheckSpec{
+				{Name: "e2e", Level: "L5", Exercise: "tests/e2e/order.spec.ts", Driver: "playwright"},
+			},
+		},
+		{
+			name: "explicit exec driver valid",
+			checks: []CheckSpec{
+				{Name: "ping", Level: "L3", Exercise: "curl :8080", Driver: "exec"},
+			},
+		},
 	}
 
 	for _, tc := range cases {

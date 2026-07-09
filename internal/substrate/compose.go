@@ -37,7 +37,7 @@ func (s *composeSubstrate) Up(r *manifest.Ready) error {
 	if err := s.compose(file, "up", "-d", "--wait"); err == nil {
 		return nil
 	}
-	// ponytail: older compose lacks --wait (and --wait also fails on
+	// NOTE: older compose lacks --wait (and --wait also fails on
 	// unhealthy services); retry plain up and do the readiness wait ourselves.
 	if err := s.compose(file, "up", "-d"); err != nil {
 		return fmt.Errorf("compose up: %w", err)

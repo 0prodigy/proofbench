@@ -424,6 +424,25 @@ func TestLocalDownIdempotent(t *testing.T) {
 	}
 }
 
+// TestPidGone exercises the liveness poll Down uses to confirm a SIGKILL
+// actually landed: an alive process must never be reported gone, and an
+// exited (reaped) process must be reported gone without waiting out the
+// full poll budget.
+func TestPidGone(t *testing.T) {
+	if pidGone(os.Getpid()) {
+		t.Fatal("pidGone reported the current (alive) process as gone")
+	}
+
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run true: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if !pidGone(pid) {
+		t.Fatalf("pidGone reported exited pid %d as still alive", pid)
+	}
+}
+
 // --------------------------------------------------------- compose substrate
 
 func TestComposeUnavailableTypedError(t *testing.T) {

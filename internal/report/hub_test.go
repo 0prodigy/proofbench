@@ -383,12 +383,3 @@ func TestWriteHub_NewestFirst(t *testing.T) {
 		t.Error("expected newer bundle to appear before older bundle in hub")
 	}
 }
-
-// ─── min helper (Go 1.21 added built-in min, but 1.23 has it) ─────────────────
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

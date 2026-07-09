@@ -174,7 +174,7 @@ func (s *k8sAttach) Seed(r *manifest.Ready) error {
 // Down kills only the port-forwards this substrate opened (by recorded pid)
 // and removes the forwards file. It never deletes cluster objects (Shape-A,
 // ADR-0011). Missing/stale state is not an error — Down is idempotent.
-func (s *k8sAttach) Down(r *manifest.Ready) error {
+func (s *k8sAttach) Down(_ *manifest.Ready) error {
 	fwds, err := s.loadForwards()
 	if err != nil {
 		if os.IsNotExist(err) {

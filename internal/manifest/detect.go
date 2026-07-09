@@ -21,7 +21,7 @@ import (
 // error is the result of (*Ready).Validate() on the proposed manifest; callers
 // may still use the manifest and surface the validation error as edit hints.
 //
-// ponytail: detects only what exists on disk; no network, no exec, no shell.
+// NOTE: detects only what exists on disk; no network, no exec, no shell.
 func Detect(dir string) (*Ready, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -124,10 +124,10 @@ type composeHealthcheck struct {
 	Test interface{} `yaml:"test"`
 }
 
-func parseComposeInto(data []byte, filename string, r *Ready) {
+func parseComposeInto(data []byte, _ string, r *Ready) {
 	var top composeTop
 	if err := yaml.Unmarshal(data, &top); err != nil {
-		// ponytail: best-effort; ignore unparseable compose files.
+		// NOTE: best-effort; ignore unparseable compose files.
 		return
 	}
 	if r.Resources == nil {

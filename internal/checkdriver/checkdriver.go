@@ -37,10 +37,10 @@ type Driver interface {
 	// grants, ...). A Preflight failure makes the check record not-run with
 	// this reason (ADR-0012) — never a fail, never a silent pass.
 	Preflight() error
-	// Exercise runs spec.Exercise, emitting artifacts via cap. The int is the
-	// exit code (or driver-mapped equivalent) for exitCode() predicates. A
+	// Exercise runs spec.Exercise, emitting artifacts via capture. The int is
+	// the exit code (or driver-mapped equivalent) for exitCode() predicates. A
 	// non-nil error is a harness failure: the exercise never ran.
-	Exercise(spec manifest.CheckSpec, env Env, cap evidence.Capture) (int, error)
+	Exercise(spec manifest.CheckSpec, env Env, capture evidence.Capture) (int, error)
 }
 
 // New returns the driver for kind, rooted at dir. kind "" defaults to exec.
