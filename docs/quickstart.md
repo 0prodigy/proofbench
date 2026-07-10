@@ -208,6 +208,99 @@ The format is open. See `spec/` for the JSON Schema.
 
 ---
 
+## k8s-attach (BYOC)
+
+`k8s-attach` is the fourth substrate: it never creates or deletes anything in
+a cluster (Shape-A, ADR-0011). `pb up --substrate k8s-attach` only asserts that
+the target pods are live and opens `kubectl port-forward` tunnels; `pb down`
+only kills the forwards it opened.
+
+```
+pb up --substrate k8s-attach --manifest ready.yaml
+```
+
+```
+forward svc/appservice:8000 -> 127.0.0.1:54217
+```
+
+```
+pb ready --manifest ready.yaml
+```
+
+```
+ready tcp 127.0.0.1:54217 -> ok
+```
+
+One `forward ...` line per tunnel opened (one per unique locator — a resource
+and `sources.k8s` naming the same locator share a single tunnel), and one
+`ready ...` line naming the resolved probe and its outcome.
+
+### Naming the cluster context
+
+Put a `workspace.yaml` next to your manifest naming the kubectl context and
+the granted namespace to forward into:
+
+```yaml
+contexts:
+  k8s-attach: "redcat@redcat"   # <kube-context>@<namespace>
+```
+
+Override at run time without editing the file:
+
+```
+export PB_K8S_CONTEXT=redcat
+export PB_K8S_NAMESPACE=redcat
+```
+
+`PB_K8S_CONTEXT` / `PB_K8S_NAMESPACE` always win over `workspace.yaml`.
+
+### Resource placeholders
+
+`resources.<name>.via.k8s` names what to forward (e.g. `svc/appservice:8000`).
+`pb up` binds each to an ephemeral local port; reference the live forward
+anywhere in the manifest — probes, drive verbs, checks — with:
+
+```
+${resources.<name>.host}
+${resources.<name>.port}
+```
+
+Env can also be **derived** from a live pod instead of a checked-in file:
+
+```yaml
+run:
+  local:
+    env:
+      derive:
+        from: k8s-pod
+        pod: "deploy/appservice"
+```
+
+### Attach-only guarantee
+
+`k8s-attach` is read/observe only: port-forward, read (`kubectl get`), and
+`exec`-based env derivation. It never applies, creates, deletes, or scales a
+cluster object. Destructive actions a drive verb performs (firing an
+execution, writing a scenario doc) are the drive verb's own doing and must
+carry a `gates[]` entry — the substrate itself only opens tunnels.
+
+### Redeploy caveat
+
+A port-forward pins to the pod(s) live when `pb up` ran. If the target rolls
+out (a new deploy, a pod restart) while forwards are open, the tunnel goes
+stale — the local port stays bound but the far end is gone. `pb ready` /
+`pb verify` will fail against a dead forward. Recover with:
+
+```
+pb down --manifest ready.yaml
+pb up --substrate k8s-attach --manifest ready.yaml
+```
+
+There is no live re-attach yet; always cycle `down`/`up` after a rollout of
+anything you're attached to.
+
+---
+
 ## Next steps
 
 - Add your own `ready.yaml` to a real service.

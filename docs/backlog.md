@@ -162,3 +162,48 @@ ladder + 60-second demo GIF (PR comment with an evidence bundle), post with the 
 - [ ] Name cleared per §10 avoid-list; repo public under the final name, Apache-2.0 (ADR-0003)
 - [ ] Flip repo public at `github.com/launchwings/proofbench` after availability checks (PLAN §10)
 - [ ] README + demo GIF done; HN post drafted with the SetupBench numbers from issue 18
+
+## Field feedback (2026-07-10 e2e)
+
+Source: two-company + redcat end-to-end runs on 2026-07-10 — issues 21–25 below were all confirmed live,
+not theorized.
+
+### 21. Forward liveness + re-attach after rollout · M
+k8s-attach (`internal/substrate/k8sattach.go`) pins a port-forward to the pod(s) live at `pb up` time;
+a rollout during the run leaves the tunnel silently dead (docs/quickstart.md "redeploy caveat" — today
+the only recovery is `pb down && pb up`). Detect and self-heal instead of forcing a manual cycle.
+- [ ] `pb ready`/`pb verify` detect a dead forward (closed local port or broken pipe) and name it, not a
+      bare dial-refused error
+- [ ] `k8sAttach` reopens a stale forward automatically (or with a `--reattach` flag) without a full
+      `down`/`up` cycle
+- [ ] A rollout mid-run is covered by a substrate test that kills the forwarded pod and asserts recovery
+
+### 22. Value capture/chaining in the expect grammar · M
+`internal/evidence/assert.go`'s grammar has no way to capture a value produced by one drive verb (e.g.
+an id) for use in a later predicate; customers shell-wrap today (write to a file, grep it back out).
+- [ ] A capture syntax (e.g. `capture(<name>) <- jsonpath(...)`) records a named value on the bundle
+- [ ] A later predicate can reference a captured name in place of a literal
+- [ ] Documented in spec/v0/ready.schema.json's `expect` description alongside the existing predicates
+
+### 23. `pb drive <verb>` for smoke-driving entrypoints · S
+Manifests declare `drive[]` verbs, but there's no standalone way to fire one outside `pb verify` — new
+users onboarding a manifest have no fast way to smoke-test a single drive verb by hand.
+- [ ] `pb drive <verb> [--manifest ready.yaml]` runs one named drive verb and prints its output
+- [ ] Honest error when the verb name isn't declared, listing the known verbs
+- [ ] `rootUsage` documents the verb
+
+### 24. Check artifacts written to cwd should land in the sealed bundle automatically · S
+Drive verbs and checks commonly redirect output into a cwd-relative file (e.g. `> execution.json`,
+per the ENG-17397 fixture's `read-execution`); today `pb evidence add`/claim is a separate manual step,
+so it's easy to seal a bundle missing the file a predicate just read.
+- [ ] A check whose `exercise` or `expect` references a cwd-relative path auto-claims that file into the
+      bundle's `artifacts[]` before sealing
+- [ ] `pb verify` sealing fails loudly (not silently) if a referenced path can't be found to claim
+
+### 25. Replica-aware attach note · S
+`k8s-attach` forwards `svc/<name>` (`internal/substrate/k8sattach.go` `forwardTargets`), which reaches
+exactly one pod behind the service; on a multi-replica deployment, evidence captured through the forward
+reflects that one pod only, not the fleet.
+- [ ] docs/quickstart.md's k8s-attach section calls out single-pod evidence scope explicitly
+- [ ] Multi-forward (one tunnel per replica) considered and either scoped as a follow-up issue or ruled
+      out with a named reason
