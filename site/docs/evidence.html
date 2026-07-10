@@ -1,129 +1,118 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Evidence bundle · Proofbench docs</title>
-<meta name="description" content="Anatomy of an evidence bundle: manifest.json fields, tri-state checks, provenance, pairing, seal, and pins — generated from spec/v0/evidence-v2.schema.json.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="../assets/site.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evidence &amp; provenance · Proofbench docs</title>
+<meta name="description" content="Anatomy of a Proofbench evidence bundle: tri-state checks, the provenance enum, before/after pairing, seal + sha256, and pins — the harness collects the evidence, never the agent." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
     <nav class="nav-links">
-      <a href="./quickstart.html">Docs</a>
-      <a href="./spec.html">Spec</a>
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main class="docs-layout">
-  <aside class="toc">
-    <p class="toc-title">Docs</p>
-    <ul>
-      <li><a href="./quickstart.html">Quickstart</a></li>
-      <li><a href="./manifest.html">Readiness manifest</a></li>
-      <li><a href="./evidence.html" class="active" aria-current="page">Evidence bundle</a></li>
-      <li><a href="./proof-ladder.html">Proof ladder</a></li>
-      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
-      <li><a href="./headless-agents.html">Headless agents</a></li>
-    </ul>
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
   </aside>
 
-  <article class="prose">
-    <h1>Evidence bundle</h1>
-    <p>An <strong>evidence bundle</strong> is the portable, tamper-evident output directory of one verification run: an evidence manifest (<code>manifest.json</code>) plus captured artifacts. The harness collects the evidence — not the agent's narration.</p>
+  <main id="content" class="prose">
+    <h1>Evidence &amp; provenance</h1>
+    <p>An <strong>evidence bundle</strong> is the portable, tamper-evident output directory of one verification run: a manifest (<code>manifest.json</code>) plus the captured artifacts it references. The harness collects the evidence — never the agent's narration.</p>
     <pre><code>evidence/20260704-101500-verify/
   manifest.json          # schema v2: checks, artifacts, verdict, proof level
   01-up.log              # captured stdout+stderr from the health check drive
   02-order-roundtrip.log # captured stdout+stderr from the order drive verb</code></pre>
-    <p>This page is generated from <a href="https://github.com/launchwings/proofbench/blob/main/spec/v0/evidence-v2.schema.json"><code>spec/v0/evidence-v2.schema.json</code></a> — field descriptions below are the schema's own.</p>
 
-    <h2>manifest.json — top level</h2>
-    <table>
-      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td><code>schema</code></td><td>integer (const 2)</td><td>yes</td><td>Bundle schema version. Must be 2 for evidence bundle v2.</td></tr>
-        <tr><td><code>ticket</code></td><td>string</td><td>no</td><td>Optional ticket or issue identifier this bundle is attached to (e.g. 'ENG-20190').</td></tr>
-        <tr><td><code>runId</code></td><td>string</td><td>yes</td><td>Unique, human-readable run identifier. Conventionally '&lt;YYYYMMDD&gt;-&lt;HHMMSS&gt;-&lt;phase&gt;' (e.g. '20260704-101500-reverify').</td></tr>
-        <tr><td><code>claim</code></td><td>string</td><td>yes</td><td>One-sentence statement of what this run is intended to prove (e.g. 'sync(verse) propagates to sequenceNote on release').</td></tr>
-        <tr><td><code>phase</code></td><td>string (enum)</td><td>yes</td><td>Lifecycle stage this bundle documents. One of: repro (reproduce the problem), verify (first verification), reverify (re-check after a fix), fix (the fix run itself), report (summary/rollup).</td></tr>
-        <tr><td><code>kind</code></td><td>string (enum: before, after)</td><td>no</td><td>Pairing role within a before/after pair. Omit when the bundle stands alone.</td></tr>
-        <tr><td><code>pairsWith</code></td><td>string</td><td>no</td><td>runId of the complementary bundle in a before/after pair. Bundles pair by explicit ID, not by convention.</td></tr>
-        <tr><td><code>surface</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>Free-form key-value map describing the execution surface (e.g. substrate, cluster, env). Kept as a flat map so it is substrate-agnostic.</td></tr>
-        <tr><td><code>pins</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>Key-value map of exact versions/SHAs for every artifact exercised, making the run reproducible (e.g. repo commit, image digest).</td></tr>
-        <tr><td><code>proofLevel</code></td><td>string (enum L0–L5)</td><td>no</td><td>Highest proof-ladder rung reached by this bundle.</td></tr>
-        <tr><td><code>startedAt</code></td><td>string (date-time)</td><td>yes</td><td>RFC 3339 timestamp when the run started.</td></tr>
-        <tr><td><code>finishedAt</code></td><td>string (date-time)</td><td>no</td><td>RFC 3339 timestamp when the run finished (including verdict seal). Omitted if the run was abandoned.</td></tr>
-        <tr><td><code>checks</code></td><td>Check[]</td><td>no</td><td>Ordered list of machine-evaluated predicate results. Every declared check must appear, using 'not-run' rather than omitting — never default-green.</td></tr>
-        <tr><td><code>artifacts</code></td><td>Artifact[]</td><td>yes</td><td>Ordered list of all captured files and links in this bundle directory. Set at verdict-seal time; unregistered files are auto-registered.</td></tr>
-        <tr><td><code>verdict</code></td><td>string (enum)</td><td>yes</td><td>Overall outcome of the bundle, set last from artifacts and checks. Tri-state: pass (all checks passed), fail (at least one check failed), inconclusive (checks could not run, e.g. a human gate blocked execution).</td></tr>
-        <tr><td><code>note</code></td><td>string</td><td>no</td><td>Human-readable annotation on the verdict (e.g. reason for inconclusive, override rationale).</td></tr>
-      </tbody>
-    </table>
+    <p>Every artifact recorded in <code>manifest.json</code> looks like this — trimmed from the landing page's own pipeline entry:</p>
+    <pre><code>{
+  "type": "command", "name": "03-fire",
+  "sha256": "a3f1c2...",
+  "provenance": "harness",
+  "meta": { "cmd": "./scripts/create-order.sh", "exitCode": 0 }
+}</code></pre>
+    <p>For the exact type and field for every property, see the <a href="evidence-format.html">evidence bundle format reference</a> — generated field-by-field from <code>spec/v0/evidence-v2.schema.json</code>.</p>
 
-    <h2>checks[] (Check)</h2>
-    <p>A machine-evaluated predicate result. State is explicitly <strong>tri-state</strong> — <code>not-run</code> must be used rather than omitting a check that did not execute:</p>
+    <h2>Tri-state checks</h2>
+    <p>Every declared check reports one of three states — never a silent default-green:</p>
     <p>
       <span class="badge badge-pass">pass</span>
       <span class="badge badge-fail">fail</span>
       <span class="badge badge-inconclusive">not-run</span>
     </p>
-    <table>
-      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td><code>name</code></td><td>string</td><td>yes</td><td>Unique name of this check within the bundle, matching the corresponding CheckSpec in ready.yaml where applicable.</td></tr>
-        <tr><td><code>state</code></td><td>string (enum)</td><td>yes</td><td>Tri-state result: pass (predicate held), fail (predicate did not hold), not-run (check was declared but could not execute).</td></tr>
-        <tr><td><code>level</code></td><td>string (enum L0–L5)</td><td>no</td><td>Proof-ladder rung this check contributes to (e.g. 'L4'). Mirrors CheckSpec.level from ready.yaml.</td></tr>
-        <tr><td><code>expect</code></td><td>string</td><td>no</td><td>The predicate expression declared for this check (e.g. 'db.orders.rows &gt; @before').</td></tr>
-        <tr><td><code>observed</code></td><td>string</td><td>no</td><td>The actual observed value that was evaluated against the predicate (e.g. '42 &gt; 17').</td></tr>
-        <tr><td><code>reason</code></td><td>string</td><td>no</td><td>Explanation for a fail or not-run result (e.g. 'gate: cluster deploy pending', 'exit code 1').</td></tr>
-        <tr><td><code>artifacts</code></td><td>string[]</td><td>no</td><td>Names of artifacts (matching Artifact.name) that provide evidence for this check's result.</td></tr>
-      </tbody>
-    </table>
-
-    <h2>artifacts[] (Artifact)</h2>
-    <p>One captured file or link inside the bundle directory. Provenance distinguishes harness-collected from agent-supplied artifacts (anti-fabrication).</p>
-    <table>
-      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td><code>type</code></td><td>string (enum)</td><td>yes</td><td>Artifact kind: command (captured shell command with exit code), snapshot (before/after data snapshot), screenshot (UI screenshot), log (free-form log file), recording (video/trace recording), link (external URL reference).</td></tr>
-        <tr><td><code>name</code></td><td>string</td><td>yes</td><td>Short identifier for this artifact, used as a reference key in Check.artifacts. Must be unique within the bundle.</td></tr>
-        <tr><td><code>path</code></td><td>string</td><td>yes</td><td>Relative path to the artifact file within the bundle directory (e.g. '03-fire.log'). For type 'link', this is the URL.</td></tr>
-        <tr><td><code>sha256</code></td><td>string (64 hex)</td><td>no</td><td>Hex-encoded SHA-256 digest of the artifact file. Omitted for type 'link'. Used for tamper-evidence.</td></tr>
-        <tr><td><code>provenance</code></td><td>string (enum)</td><td>no</td><td>Who produced this artifact (ADR-0013): 'harness' (teed subprocess captured by the pb harness), 'tool' (harness-directed external tool output — trace/screenshot the harness chose but did not tee), or 'agent' (supplied by the agent — requires scrutiny).</td></tr>
-        <tr><td><code>meta</code></td><td>object</td><td>no</td><td>Type-specific metadata. For 'command': cmd (string), exitCode (integer), durationSec (number). For 'snapshot': table (string), rowsBefore (integer), rowsAfter (integer). Other types may use free-form keys.</td></tr>
-      </tbody>
-    </table>
+    <p>A check that couldn't execute (a gate wasn't approved, a required input was unset) is recorded as <code>not-run</code> with a <code>reason</code> — never omitted, and never a fabricated pass. From the landing page's own trust section, a real shape:</p>
+    <pre><code>"checks": [
+  { "name": "order-roundtrip", "state": "pass",
+    "artifacts": ["03-fire", "sn-post"] },
+  { "name": "e2e-ui", "state": "not-run",
+    "reason": "gate: cluster deploy pending" }
+]</code></pre>
 
     <h2>Provenance (ADR-0013)</h2>
-    <p>Provenance is a three-value enum — the sharp semantics <em>are</em> the product's anti-fabrication claim:</p>
+    <p>Provenance is a three-value enum on every artifact — the sharp semantics <em>are</em> the product's anti-fabrication claim:</p>
     <ul>
       <li><strong>harness</strong> — strictly harness-spawned and teed: the binary ran the process and captured the bytes itself.</li>
       <li><strong>tool</strong> — harness-directed tool output (Playwright traces, screenshots): the harness chose the tool, its flags, and its output path, but did not tee the bytes.</li>
-      <li><strong>agent</strong> — operator/agent-supplied files, including Seal's sweep. Only harness provenance can anchor a verdict.</li>
+      <li><strong>agent</strong> — operator/agent-supplied files, including Seal's sweep of untracked files. Only harness provenance can anchor a verdict.</li>
     </ul>
 
-    <h2>Pairing</h2>
-    <p>Explicit before/after linkage of two evidence bundles by <code>runId</code> — <code>kind</code> (<code>before</code>/<code>after</code>) plus <code>pairsWith</code>. Bundles pair by explicit ID, never inferred from naming conventions.</p>
+    <h2>Pairing (before/after)</h2>
+    <p>A bundle may name its role in an explicit before/after pair via <code>kind</code> (<code>before</code> / <code>after</code>) and <code>pairsWith</code>, the <code>runId</code> of its complement. Pairing is always by explicit ID — never inferred from filename or timestamp convention, so a report can't accidentally compare the wrong two runs.</p>
 
-    <h2>Seal</h2>
-    <p>The verdict-time step that registers every remaining captured file into the evidence manifest with its hash, so nothing goes unrecorded.</p>
+    <h2>Seal + sha256</h2>
+    <p>At verdict time, <strong>Seal</strong> recursively scans the bundle directory for any file present on disk but absent from the manifest — including a driver's own subdirectory, like a Playwright <code>trace.zip</code> — and registers each as an artifact (provenance <code>agent</code>) with its path relative to the bundle root. Nothing in the bundle goes untracked. Every non-link artifact carries a hex-encoded <strong>SHA-256</strong> digest of its file contents, giving the bundle tamper-evidence: if the file on disk changes after the seal, the digest no longer matches.</p>
 
     <h2>Pins</h2>
-    <p>Key-value map of exact versions/SHAs for every artifact exercised — repo commit, image digest, cluster context — making the run reproducible.</p>
+    <p>A flat key-value map of exact versions/SHAs for everything exercised in the run — repo commit, image digest, cluster context — so the run can be reproduced or its target unambiguously identified later.</p>
 
     <h2>Real example — k8s-attach verify bundle</h2>
     <p>Trimmed from a real ENG-17397 run against the <code>redcat</code> cluster. Three checks record honest <code>not-run</code> because their <code>requires</code> inputs were unset or their exercise target didn't exist yet — not a fabricated pass:</p>
@@ -190,17 +179,21 @@
   "verdict": "pass",
   "note": "1 pass, 0 fail, 3 not-run"
 }</code></pre>
-    <p>The verdict here is <code>pass</code> because the only check that ran, passed — but the report still names <code>L3</code>, not "done", and the <code>not-run</code> entries stay in the bundle rather than being dropped, so the next reader sees exactly what was and wasn't proven. See the <a href="./proof-ladder.html">proof ladder</a> for what each rung requires.</p>
-  </article>
-</main>
+    <p>The verdict here is <code>pass</code> because the only check that ran, passed — but the report still names <code>L3</code>, not "done", and the <code>not-run</code> entries stay in the bundle rather than being dropped, so the next reader sees exactly what was and wasn't proven. See the <a href="proof-ladder.html">proof ladder</a> for what each rung requires.</p>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="proof-ladder.html">← Proof ladder</a>
+    </nav>
+  </main>
+</div>
 
 <footer class="footer">
   <div class="container">
     <div class="footer-brand">
       <a class="nav-logo" href="../index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
@@ -209,17 +202,20 @@
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
-        <a href="./quickstart.html">Docs</a>
-        <a href="./spec.html">Spec</a>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
         <a href="https://github.com/launchwings/proofbench">GitHub</a>
-        <a href="./evidence-format.html">Evidence format</a>
+        <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
   <div class="footer-bottom">
-    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
 </body>
 </html>

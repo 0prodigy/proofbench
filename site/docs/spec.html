@@ -1,60 +1,88 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Spec · Proofbench docs</title>
-<meta name="description" content="Proofbench spec/v0: the two versioned JSON Schema documents that are the interoperability contract — ready.yaml and the evidence bundle manifest.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="../assets/site.css">
+<meta name="description" content="Overview of spec/v0: the versioned JSON Schema documents that are Proofbench's interoperability contract, and the versioning policy that governs them." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
     <nav class="nav-links">
-      <a href="./quickstart.html">Docs</a>
-      <a href="./spec.html">Spec</a>
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main class="docs-layout">
-  <aside class="toc">
-    <p class="toc-title">Docs</p>
-    <ul>
-      <li><a href="./quickstart.html">Quickstart</a></li>
-      <li><a href="./manifest.html">Readiness manifest</a></li>
-      <li><a href="./evidence.html">Evidence bundle</a></li>
-      <li><a href="./proof-ladder.html">Proof ladder</a></li>
-      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
-      <li><a href="./headless-agents.html">Headless agents</a></li>
-    </ul>
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
   </aside>
 
-  <article class="prose">
+  <main id="content" class="prose">
     <h1>Spec — spec/v0</h1>
-    <p>The versioned JSON Schema (draft 2020-12) definitions for the two core Proofbench documents live at <a href="https://github.com/launchwings/proofbench/tree/main/spec/v0"><code>spec/v0</code></a> in the repo. The schemas are the <strong>interoperability contract</strong>: any tool that produces or consumes these documents — the <code>pb</code> CLI, the hub renderer, third-party runners — must conform to them.</p>
+    <p>The versioned JSON Schema (draft 2020-12) definitions for Proofbench's core documents live at <a href="https://github.com/launchwings/proofbench/tree/main/spec/v0"><code>spec/v0</code></a> in the repo. The schemas are the <strong>interoperability contract</strong>: any tool that produces or consumes these documents — the <code>pb</code> CLI, the hub renderer, third-party runners — must conform to them.</p>
 
-    <h2>Documents</h2>
-    <h3><a href="./manifest.html"><code>ready.schema.json</code> — Readiness Manifest</a></h3>
+    <h2>What's normative</h2>
+    <p>Two documents in <code>spec/v0</code> are normative today:</p>
+
+    <h3><a href="manifest.html"><code>ready.schema.json</code> — Readiness Manifest</a></h3>
     <p>Governs <code>ready.yaml</code>, the per-repo declarative spec of how a service becomes runnable and testable on any substrate. A manifest answers: what are this service's dependencies, how do you start it, how do you know it's healthy, how do you exercise it, and what must be true for the run to be valid?</p>
     <p>Key design principle: <strong>derive, don't restate.</strong> A manifest points into existing truth (compose files, <code>devcontainer.json</code>, <code>AGENTS.md</code>) via <code>sources</code> rather than duplicating it.</p>
-    <p>Required top-level fields: <code>service</code>, <code>run</code> (specifically <code>run.modes</code>). See the full <a href="./manifest.html">field-by-field reference</a>.</p>
+    <p>Required top-level fields: <code>service</code>, <code>run</code> (specifically <code>run.modes</code>). See the full <a href="manifest.html">field-by-field reference</a>.</p>
 
-    <h3><a href="./evidence.html"><code>evidence-v2.schema.json</code> — Evidence Bundle Manifest</a></h3>
+    <h3><a href="evidence-format.html"><code>evidence-v2.schema.json</code> — Evidence Bundle Manifest</a></h3>
     <p>Governs <code>evidence/&lt;runId&gt;/manifest.json</code>, the machine-checkable record of one verification run. A bundle answers: what was claimed, what was exercised, what was observed, and what is the verdict?</p>
-    <p>Required top-level fields: <code>schema</code> (must be <code>2</code>), <code>runId</code>, <code>claim</code>, <code>phase</code>, <code>startedAt</code>, <code>artifacts</code>, <code>verdict</code>. See the full <a href="./evidence.html">evidence bundle reference</a>.</p>
+    <p>Required top-level fields: <code>schema</code> (must be <code>2</code>), <code>runId</code>, <code>claim</code>, <code>phase</code>, <code>startedAt</code>, <code>artifacts</code>, <code>verdict</code>. See the full <a href="evidence-format.html">evidence bundle format reference</a>, or <a href="evidence.html">evidence &amp; provenance</a> for the concepts behind it.</p>
+
+    <h3>What isn't schema'd yet</h3>
+    <p><code>workspace.yaml</code> — the org-level file naming cluster contexts and composing repos into a graph for <code>k8s-attach</code> — has <strong>no JSON Schema in <code>spec/v0</code> yet</strong>. It's real and in use (see the <a href="configuration.html">workspace.yaml &amp; env reference</a> for the current field set and the real <code>fixtures/k8s-attach/workspace.yaml</code>), but it isn't part of the versioned interoperability contract today. Treat it as documented convention, not a guaranteed-stable schema, until a <code>workspace.schema.json</code> lands here.</p>
 
     <h2>Versioning policy</h2>
     <p><code>spec/v0</code> is <strong>frozen once the <code>v0</code> tag is pushed to the repository.</strong> After that point:</p>
@@ -65,17 +93,22 @@
     </ul>
 
     <h2>Proof ladder</h2>
-    <p>Every evidence bundle names the highest rung it reached — see the full <a href="./proof-ladder.html">proof ladder reference</a>. A bundle that does not reach its declared check's level must record the blocking check as <code>not-run</code> with a <code>reason</code>, and set <code>verdict</code> to <code>inconclusive</code>.</p>
-  </article>
-</main>
+    <p>Every evidence bundle names the highest rung it reached — see the full <a href="proof-ladder.html">proof ladder reference</a>. A bundle that does not reach its declared check's level must record the blocking check as <code>not-run</code> with a <code>reason</code>, and set <code>verdict</code> to <code>inconclusive</code>.</p>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="evidence-format.html">← Evidence bundle format</a>
+      <a class="page-nav-next" href="proof-ladder.html">Proof ladder →</a>
+    </nav>
+  </main>
+</div>
 
 <footer class="footer">
   <div class="container">
     <div class="footer-brand">
       <a class="nav-logo" href="../index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
@@ -84,17 +117,20 @@
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
-        <a href="./quickstart.html">Docs</a>
-        <a href="./spec.html">Spec</a>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
         <a href="https://github.com/launchwings/proofbench">GitHub</a>
-        <a href="./evidence-format.html">Evidence format</a>
+        <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
   <div class="footer-bottom">
-    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
 </body>
 </html>

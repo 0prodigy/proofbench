@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onboard your repo · Proofbench docs</title>
+<meta name="description" content="Add ready.yaml to a real service — pb init, the scaffold-rejection lint error by design, field-by-field edits, and a real run reaching L4." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
+  </aside>
+
+  <main id="content" class="prose">
+    <h1>Onboard your repo</h1>
+    <p>The quickstart runs a manifest someone already wrote. This walks the other direction: a real service with no <code>ready.yaml</code> yet, brought to a passing <code>L4</code> verdict. Every command below ran for real, in order, in a scratch directory — paste them in the same order and you get the same shape of result.</p>
+
+    <h2>The service</h2>
+    <p>A ~35-line toy — <code>noteservice</code>. <code>GET /health</code> for liveness, <code>POST /notes</code> appends the request body to <code>notes.log</code>. No framework, no dependencies:</p>
+    <pre><code>#!/usr/bin/env python3
+# noteservice: GET /health (liveness), POST /notes (appends body to notes.log).
+# Start with: python3 app.py   Port: 8931
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+PORT = 8931
+NOTES_LOG = "notes.log"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}\n')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/notes":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            with open(NOTES_LOG, "ab") as f:
+                f.write(body + b"\n")
+            self.send_response(201)
+            self.end_headers()
+            self.wfile.write(b'{"status":"created"}\n')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+if __name__ == "__main__":
+    print(f"noteservice listening on :{PORT}")
+    HTTPServer(("", PORT), Handler).serve_forever()</code></pre>
+
+    <h2>pb init</h2>
+    <p>Run it from the service's directory, no flags needed:</p>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb init</div>
+        <div class="term-line t-out">ready.yaml</div>
+        <div class="term-line t-out">next steps:</div>
+        <div class="term-line t-out">&nbsp;&nbsp;1. edit ready.yaml — set start:, ready:, and a checks: block</div>
+        <div class="term-line t-out">&nbsp;&nbsp;2. pb lint          # validate the manifest</div>
+        <div class="term-line t-out">&nbsp;&nbsp;3. pb verify        # bring up, exercise, produce an evidence bundle</div>
+      </div>
+    </div>
+    <p><code>pb init</code> detects project shape from things already in the repo (Docker Compose files, a <code>Procfile</code>, <code>package.json</code> scripts, a <code>Makefile</code>, <code>go.mod</code>) plus a best-effort grep for a health-check path and port. This service has none of those build files, so it writes a draft that's honest about what it couldn't figure out:</p>
+    <pre><code>service: noteservice
+role: 'TODO: describe this service'
+run:
+    modes:
+        - local
+    local:
+        start: 'echo TODO: set your start command'
+    ready:
+        http: :8931/health</code></pre>
+    <p>Note what it got right without being told: the readiness probe (<code>:8931/health</code>, grepped straight from <code>app.py</code>). What it couldn't derive — a start command — it marks with a literal <code>TODO</code> placeholder rather than guessing.</p>
+
+    <h2>pb lint on the unedited draft</h2>
+    <p>Run <code>pb lint</code> before touching anything:</p>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb lint</div>
+        <div class="term-line t-fail">pb: manifest.Validate: run.start is generated scaffolding — replace "echo TODO: set your start command" with your real start command</div>
+      </div>
+    </div>
+    <p>Exit code 1. This is by design, not a bug: <code>pb init</code> always writes a file (so there's something to edit) but <code>pb lint</code> refuses to pass an unedited scaffold — a manifest that would silently "start" a service by echoing a string never actually runs the product. Fixing this one line is the whole job of the next section. Run <code>pb help init</code> or <code>pb help lint</code> anytime for the full flag list.</p>
+
+    <h2>Edit ready.yaml, field by field</h2>
+    <p>Full field reference: <a href="manifest.html">ready.yaml</a>. Here's what each field means as we set it:</p>
+    <ul>
+      <li><code>service</code> — the name recorded in every bundle this manifest produces (<code>surface</code> / bundle identity). <code>pb init</code> already set this from the directory name.</li>
+      <li><code>role</code> — a one-sentence description; documentation only, replace the <code>TODO</code>.</li>
+      <li><code>run.local.start</code> — the real command that boots the service as a bare process: <code>python3 app.py</code>.</li>
+      <li><code>run.ready</code> — the probe <code>pb ready</code> polls until healthy. <code>pb init</code> already found it; add a timeout and poll interval.</li>
+      <li><code>drive.&lt;verb&gt;</code> — a real product entrypoint the harness may exercise, named so <code>checks[]</code> can reference it as <code>drive.&lt;verb&gt;</code>. Here, the actual <code>POST /notes</code> call — never a test look-alike.</li>
+      <li><code>checks[]</code> — what gets verified: a proof-ladder <code>level</code>, what to <code>exercise</code>, and <code>expect</code> predicates that must all hold.</li>
+    </ul>
+    <pre><code>service: noteservice
+role: Minimal HTTP note-capture service (Proofbench onboarding walkthrough)
+
+run:
+  modes: [local]
+  local:
+    start: python3 app.py
+  ready:
+    http: ":8931/health"
+    timeout: 30s
+    interval: 1s
+
+drive:
+  create-note:
+    run: "curl -sf -X POST http://localhost:8931/notes -H 'Content-Type: application/json' -d '{\"text\":\"first note\"}'"
+    output: json
+
+checks:
+  - name: up
+    level: L3
+    exercise: "curl -sf http://localhost:8931/health"
+    expect:
+      - "http(http://localhost:8931/health)==200"
+
+  - name: note-roundtrip
+    level: L4
+    exercise: drive.create-note
+    expect:
+      - "exitCode(note-roundtrip)==0"
+      - "rows(notes.log)>0"</code></pre>
+    <p>Two checks, two rungs: <code>up</code> proves the process is healthy (<code>L3</code>); <code>note-roundtrip</code> proves the drive verb ran and its effect landed — a row in <code>notes.log</code> (<code>L4</code>). See the <a href="proof-ladder.html">proof ladder</a> for what each rung means.</p>
+
+    <h2>pb lint, green</h2>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb lint</div>
+        <div class="term-line t-pass">ok</div>
+      </div>
+    </div>
+
+    <h2>pb up, pb ready</h2>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb up --manifest ready.yaml</div>
+        <div class="term-line t-out">up: noteservice (local)</div>
+        <div class="term-line t-cmd">pb ready --manifest ready.yaml</div>
+        <div class="term-line t-pass">ready: http :8931/health ok</div>
+      </div>
+    </div>
+
+    <h2>pb verify, reaching L4</h2>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb verify --manifest ready.yaml --ticket ONB-001 \</div>
+        <div class="term-line t-cmd">&nbsp;&nbsp;--claim "notes endpoint appends to notes.log"</div>
+        <div class="term-line t-out">{"status":"ok"}</div>
+        <div class="term-line t-out">{"status":"created"}</div>
+        <div class="term-line t-out">bundle:  evidence/20260710-053718-verify</div>
+        <div class="term-line t-out">proof:   L4</div>
+        <div class="term-line t-out">verdict: pass</div>
+        <div class="term-line t-out">note:    2 pass, 0 fail, 0 not-run</div>
+        <div class="term-line t-pass">&nbsp;&nbsp;[pass] up</div>
+        <div class="term-line t-pass">&nbsp;&nbsp;[pass] note-roundtrip</div>
+      </div>
+    </div>
+    <p><code>proof: L4</code> — the drive verb ran and the harness confirmed the effect (a row in <code>notes.log</code>), not just that the process was up. See the <a href="quickstart.html">quickstart</a> for what each output line means.</p>
+
+    <h2>pb report</h2>
+    <pre><code>pb report evidence/20260710-053718-verify</code></pre>
+    <pre><code>✅ **PASS** — notes endpoint appends to notes.log
+
+proof level L4 · phase verify · substrate=local
+
+| check | state | expect | observed |
+|---|---|---|---|
+| up | pass | http(http://localhost:8931/health)==200 | status=200 |
+| note-roundtrip | pass | exitCode(note-roundtrip)==0 &amp;&amp; rows(notes.log)&gt;0 | exitCode=0; rows=1 |
+
+**Artifacts**
+
+- `up`, exit 0, 0.0s
+- `note-roundtrip`, exit 0, 0.0s
+
+---
+`evidence/20260710-053718-verify` · run `20260710-053718-verify`</code></pre>
+
+    <h2>pb down</h2>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb down --manifest ready.yaml</div>
+        <div class="term-line t-out">down: noteservice (pid 58634) stopped</div>
+      </div>
+    </div>
+
+    <h2 id="when-verify-fails">When verify fails</h2>
+    <p>With the service stopped (<code>pb down</code> above already did that — the same real failure shows up if you instead point <code>run.ready.http</code> at the wrong port), running <code>pb verify</code> again produces an honest fail, not a hang or a false pass:</p>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">noteservice</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb verify --manifest ready.yaml --ticket ONB-001 \</div>
+        <div class="term-line t-cmd">&nbsp;&nbsp;--claim "notes endpoint appends to notes.log"</div>
+        <div class="term-line t-out">bundle:  evidence/20260710-053749-verify</div>
+        <div class="term-line t-out">proof:   none</div>
+        <div class="term-line t-out">verdict: fail</div>
+        <div class="term-line t-out">note:    0 pass, 2 fail (up, note-roundtrip), 0 not-run</div>
+        <div class="term-line t-fail">&nbsp;&nbsp;[fail] up — http(http://localhost:8931/health)==200: Get "http://localhost:8931/health": dial tcp [::…</div>
+        <div class="term-line t-fail">&nbsp;&nbsp;[fail] note-roundtrip — expect failed: exitCode(note-roundtrip)==0</div>
+      </div>
+    </div>
+    <p>Exit code 1. <code>proof: none</code> — no rung was earned, not even <code>L3</code>, because the up check itself failed. Each <code>[fail]</code> line names its own reason after the em dash: a connection refused for <code>up</code> (truncated with an ellipsis when the underlying Go error is long — still legible), and a predicate failure for <code>note-roundtrip</code> once the drive verb couldn't reach a dead service. The bundle is written anyway — a fail is still evidence you can hand to whoever's debugging it.</p>
+    <p>Recover with <code>pb up --manifest ready.yaml</code>, then <code>pb ready</code>, then re-run <code>pb verify</code>.</p>
+
+    <h2>Clean up</h2>
+    <pre><code>rm -rf evidence notes.log .pb</code></pre>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a href="quickstart.html">← Quickstart</a>
+      <a class="page-nav-next" href="k8s-attach.html">Next: Attach your cluster →</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings. v0.1.0-dev.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
+</body>
+</html>

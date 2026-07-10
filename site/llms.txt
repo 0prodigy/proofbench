@@ -1,0 +1,40 @@
+# Proofbench
+
+> Proofbench is an open-source harness AI coding agents use to prove their changes work — functionally, end-to-end — on your real infrastructure. A readiness manifest (`ready.yaml`) declares how a service becomes runnable and testable; the harness (never the agent) runs it and writes a portable, schema'd evidence bundle. Apache-2.0.
+
+## Site
+
+- [index.html](index.html): Landing page — the proof ladder, the five-step evidence pipeline, substrate quickstart tabs (local/compose/k8s-attach), the headless-agent subscription promise, and a comparison against LLM code review.
+
+## Docs — start
+
+- [docs/quickstart.html](docs/quickstart.html): Bring up `examples/basic`, run `pb up`/`ready`/`seed`/`verify`, and read the evidence bundle it produces — a full walkthrough in about 60 seconds.
+- [docs/onboard-your-repo.html](docs/onboard-your-repo.html): `pb init` auto-detects your repo (Procfile, compose file, `package.json` scripts, `AGENTS.md`) and drafts `ready.yaml`; `pb lint` validates it before your first run.
+
+## Docs — guides
+
+- [docs/k8s-attach.html](docs/k8s-attach.html): `k8s-attach` is attach-only against your own cluster — it only ever runs `kubectl get`, `kubectl port-forward`, and (for env derivation) `kubectl exec`, never create/apply/delete/patch/scale.
+- [docs/ci.html](docs/ci.html): `action.yml` GitHub Action reference — inputs, outputs, exit-code gating on the bundle's verdict, and a complete workflow example.
+- [docs/headless-agents.html](docs/headless-agents.html): `pb explore` shells out to the customer's own genuine `claude` binary, inheriting whatever subscription or API auth is already installed — Proofbench never touches credentials.
+
+## Docs — reference
+
+- [docs/manifest.html](docs/manifest.html): Field-by-field reference for `ready.yaml`, generated from `spec/v0/ready.schema.json`.
+- [docs/configuration.html](docs/configuration.html): `workspace.yaml` context/namespace naming, `PB_K8S_CONTEXT`/`PB_K8S_NAMESPACE` overrides, and env derivation from a live pod.
+- [docs/cli.html](docs/cli.html): Full `pb` command reference — `evidence`, `init`, `lint`, `up`/`ready`/`seed`/`down`, `verify`, `explore`, `report`, `hub` — flags, exit codes, and an example per command.
+- [docs/evidence-format.html](docs/evidence-format.html): Field-by-field reference for `evidence/<runId>/manifest.json`, generated from `spec/v0/evidence-v2.schema.json`.
+- [docs/spec.html](docs/spec.html): The two versioned JSON Schema documents that are the interoperability contract — `ready.yaml` and the evidence bundle manifest.
+
+## Docs — concepts
+
+- [docs/proof-ladder.html](docs/proof-ladder.html): The L0–L5 scale of verification depth every run must name, from static-valid to end-to-end observed.
+- [docs/evidence.html](docs/evidence.html): Anatomy of an evidence bundle — tri-state checks, the provenance enum, before/after pairing, seal + SHA-256, and pins.
+
+## Repository (source of truth)
+
+- [PLAN.md](https://github.com/launchwings/proofbench/blob/main/PLAN.md): Roadmap and design rationale.
+- [spec/README.md](https://github.com/launchwings/proofbench/blob/main/spec/README.md): Versioning policy for the `spec/v0` schemas.
+- [spec/v0/ready.schema.json](https://github.com/launchwings/proofbench/blob/main/spec/v0/ready.schema.json): Readiness manifest JSON Schema (draft 2020-12).
+- [spec/v0/evidence-v2.schema.json](https://github.com/launchwings/proofbench/blob/main/spec/v0/evidence-v2.schema.json): Evidence bundle manifest JSON Schema (draft 2020-12).
+- [docs/adr/](https://github.com/launchwings/proofbench/tree/main/docs/adr): Architecture decision records — identity/scope, trust boundary, licensing, driver architecture, auth/secrets, BYOC security posture, agent-runtime and headless-subscription decisions, and more.
+- [CONTRIBUTING.md](https://github.com/launchwings/proofbench/blob/main/CONTRIBUTING.md): Build/test commands and package map.

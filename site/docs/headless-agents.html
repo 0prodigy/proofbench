@@ -5,98 +5,131 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Headless agents · Proofbench docs</title>
 <meta name="description" content="pb explore shells out to the customer's own genuine Claude Code CLI, inheriting whatever subscription or API auth is already installed — Proofbench never touches credentials.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
     <nav class="nav-links">
-      <a href="./quickstart.html">Docs</a>
-      <a href="./spec.html">Spec</a>
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main class="docs-layout">
-  <aside class="toc">
-    <p class="toc-title">Docs</p>
-    <ul>
-      <li><a href="./quickstart.html">Quickstart</a></li>
-      <li><a href="./manifest.html">Readiness manifest</a></li>
-      <li><a href="./evidence.html">Evidence bundle</a></li>
-      <li><a href="./proof-ladder.html">Proof ladder</a></li>
-      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
-      <li><a href="./headless-agents.html" class="active" aria-current="page">Headless agents</a></li>
-    </ul>
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html" class="active" aria-current="page">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
   </aside>
 
-  <article class="prose">
+  <main id="content" class="prose">
     <h1>Headless agents</h1>
     <p><span class="badge badge-inconclusive">experimental</span></p>
-    <p><code>pb explore</code> is the embedded runtime that lets Proofbench itself drive an agent for an <strong>exploratory round</strong> — a single agent-driven computer-use or browser session — rather than only replaying checks a human already wrote. This feature is experimental (ADR-0014) and sits behind a flag.</p>
+    <p><code>pb explore</code> runs your agents on <strong>your own subscription</strong>: Proofbench shells out to the customer-installed, genuine <code>claude</code> binary (<code>claude -p --output-format stream-json</code>) rather than linking the Claude Agent SDK, and inherits whatever auth is already installed — a subscription OAuth token, an API key, or Bedrock/Vertex credentials. Auth is entirely Claude Code's own concern; credentials never touch Proofbench (ADR-0014).</p>
 
-    <h2>First adapter: genuine headless Claude Code</h2>
-    <p>The embedded runtime's first adapter is <strong>headless Claude Code</strong>: Proofbench shells out to the <strong>customer-installed, genuine <code>claude</code> binary</strong> (<code>claude -p --output-format stream-json</code>) rather than linking the Claude Agent SDK.</p>
-    <div class="term">
-        <div class="term-chrome">
-          <span class="term-dot f"></span>
-          <span class="term-dot n"></span>
-          <span class="term-dot p"></span>
-        </div>
-        <div class="term-body">
-          <div class="term-line t-cmd">claude -p --output-format stream-json "..."</div>
-        </div>
-      </div>
-
-    <h2>Subscription auth story</h2>
-    <p>The adapter inherits whatever auth the customer already has — a subscription OAuth token from <code>claude setup-token</code> (<code>CLAUDE_CODE_OAUTH_TOKEN</code>), an <code>ANTHROPIC_API_KEY</code>, or Bedrock/Vertex credentials — with <strong>zero Proofbench involvement in credentials</strong>. Auth is entirely Claude Code's own concern; Proofbench never collects, stores, proxies, or pools credentials.</p>
-    <p>This is customer-operated genuine CLI, not credential proxying: the customer using their own subscription through the genuine Claude Code client (interactive, CI, scripts wrapping the CLI) is ordinary use; a vendor offering Claude login or pooling/proxying plan credentials on users' behalf is prohibited. Proofbench sits on the sanctioned side of that line by construction — it never offers Claude login and never routes requests through plan credentials on behalf of users.</p>
+    <h2><code>pb explore</code> walkthrough</h2>
+    <p>Experimental and gated behind an env var — it exits 2 immediately if unset:</p>
+    <pre><code>PB_EXPERIMENTAL=1 pb explore --manifest ready.yaml \
+  --out .proofbench/explore --runtime claude-code --max-turns 30</code></pre>
+    <p><code>--out</code>, <code>--runtime</code>, and <code>--max-turns</code> all have the defaults shown above; only <code>--manifest</code> plus <code>PB_EXPERIMENTAL=1</code> are required. One round asks the agent to propose <strong>new</strong> checks for surfaces the manifest's existing <code>checks[]</code>, drive verbs, and resources don't already cover — read-only exploration, no file edits, no prose, JSON matching a fixed schema only.</p>
+    <p>A round writes exactly two files to <code>--out</code>:</p>
     <ul>
-      <li>Never pass <code>--bare</code> on the subscription path — bare mode skips OAuth/keychain reads and does not read <code>CLAUDE_CODE_OAUTH_TOKEN</code>.</li>
-      <li>Never <code>--dangerously-skip-permissions</code> inside a customer repo.</li>
-      <li>Warn when <code>ANTHROPIC_API_KEY</code> is present alongside a subscription token — in <code>-p</code> mode the API key is always used when present and silently outranks the subscription (surprise metered spend).</li>
+      <li><code>round.json</code> — always written: status, reason, session ID, cost, turn count, duration, permission denials, runtime version.</li>
+      <li><code>proposed-checks.json</code> — only when the round's status is <code>proposed</code>: the raw <code>{"checks": [...]}</code> array matching the schema.</li>
     </ul>
+    <p><code>pb explore</code> <strong>never</strong> writes or edits <code>ready.yaml</code>, and it <strong>never</strong> produces a verdict — a proposal is a suggestion for a human (or a later, separate step) to commit, not a pass/fail claim.</p>
+    <div class="stat-line">
+      one exploratory round: <strong>9 turns</strong> · <strong>8 proposed checks</strong> · <strong>$1.70</strong> on the operator's own plan
+    </div>
 
     <h2>Failure taxonomy</h2>
-    <p>Failures map to honest <code>not-run</code>/<code>inconclusive</code> states, never a false pass/fail:</p>
+    <p>Every failure maps to an honest <code>not-run</code> or <code>inconclusive</code> status — never a false pass/fail. <code>pb explore</code>'s own exit code follows the same split: <code>0</code> proposed, <code>2</code> <code>PB_EXPERIMENTAL</code> unset, <code>3</code> not-run, <code>4</code> inconclusive.</p>
     <table>
-      <thead><tr><th>Category</th><th>Triggers</th></tr></thead>
+      <thead><tr><th>Category</th><th>Triggers</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td><code>auth_invalid</code></td><td>authentication_failed, oauth_org_not_allowed, expired login</td></tr>
-        <tr><td><code>rate_limited</code></td><td>rate_limit, overloaded, billing_error — including the 5-hour rolling window and weekly cap</td></tr>
-        <tr><td><code>budget_exhausted</code></td><td><code>error_max_turns</code></td></tr>
-        <tr><td><code>protocol_error</code></td><td>non-zero exit with unparseable stdout, or <code>error_during_execution</code>/<code>error_interrupted</code>/<code>error_initialization</code></td></tr>
+        <tr><td><code>runtime_unavailable</code></td><td>missing/unexecutable <code>claude</code> binary</td><td><code>not-run</code></td></tr>
+        <tr><td><code>auth_invalid</code></td><td><code>authentication_failed</code>, <code>oauth_org_not_allowed</code>, expired login</td><td><code>not-run</code></td></tr>
+        <tr><td><code>rate_limited</code></td><td><code>rate_limit</code>, <code>overloaded</code>, <code>billing_error</code> — including the 5-hour rolling window and weekly cap</td><td><code>not-run</code></td></tr>
+        <tr><td><code>budget_exhausted</code></td><td><code>error_max_turns</code></td><td><code>inconclusive</code></td></tr>
+        <tr><td><code>protocol_error</code></td><td>non-zero exit with unparseable stdout, <code>error_during_execution</code>/<code>error_interrupted</code>/<code>error_initialization</code>, or a clean exit that skips <code>structured_output</code></td><td><code>inconclusive</code></td></tr>
       </tbody>
     </table>
-    <p>Binary discovery and version pinning become part of the evidence record (<code>claude --version</code> captured per run); a missing/unexecutable binary yields <code>not_run(runtime_unavailable)</code>, never a failed check. Rate-limit and budget exhaustion are Proofbench's problem to schedule around — the harness backs off and retries the next window rather than marking a proof round failed.</p>
+    <p>Binary discovery and version pinning become part of the evidence record (<code>claude --version</code> captured every round). Rate-limit and budget exhaustion are Proofbench's problem to schedule around — the harness backs off and retries the next window rather than marking a proof round failed.</p>
 
-    <h2>Agent-neutral contract</h2>
-    <p>The same adapter shape — discover binary → inherit customer auth → one-shot exec with a prompt → parse a terminal JSON record — fits <code>codex exec --json</code> (ChatGPT-plan CI auth is explicitly blessed by OpenAI's own docs), <code>gemini -p</code> (cached Google OAuth or <code>GEMINI_API_KEY</code>), and <code>openhands --headless</code> (BYO key via <code>LLM_API_KEY</code>; must run inside Proofbench's own sandbox since its headless mode is always-approve with no permission gating of its own). Adding a second engine is one more shell-out adapter sharing the same discover/auth-inherit/exec/parse contract and failure taxonomy, not a redesign.</p>
+    <h2>Security invariants</h2>
+    <ul>
+      <li>Never <code>--bare</code> on the subscription path — bare mode skips OAuth/keychain reads and doesn't read <code>CLAUDE_CODE_OAUTH_TOKEN</code>.</li>
+      <li>Never <code>--dangerously-skip-permissions</code> inside a customer repo.</li>
+      <li><code>--allowedTools Read,Glob,Grep</code> / <code>--disallowedTools WebFetch,WebSearch</code> on every round — an exploratory round reads the repo, it never fetches the network.</li>
+      <li>A warning (not a refusal) when <code>ANTHROPIC_API_KEY</code> is present alongside a subscription token — in <code>-p</code> mode the API key is always used when present and silently outranks the subscription, risking surprise metered spend.</li>
+    </ul>
+
+    <h2><code>PB_CLAUDE_BIN</code></h2>
+    <p>Overrides which <code>claude</code> binary <code>pb explore</code> shells out to — set it to point at a specific install; otherwise Proofbench looks up <code>claude</code> on <code>PATH</code>. A miss (unset override that doesn't resolve, or no <code>claude</code> on <code>PATH</code>) is a <code>not-run</code> with <code>runtime_unavailable</code>, never a failed check.</p>
+
+    <h2>Agent-neutral by construction</h2>
+    <p>The same shape — discover binary, inherit customer auth, one-shot exec with a prompt, parse a terminal JSON record — fits <code>codex exec --json</code>, <code>gemini -p</code>, and <code>openhands --headless</code>. Adding a second engine is one more shell-out adapter sharing this contract and failure taxonomy, not a redesign.</p>
 
     <h2>What counts as proof</h2>
-    <p>Nothing the agent merely <em>observed</em> in an exploratory round counts as proof. The only lasting output is <strong>durable automation</strong> — committed <code>checks[]</code> entries and Playwright specs — replayed deterministically by the harness thereafter. An exploratory round earns a rung on the <a href="./proof-ladder.html">proof ladder</a> only once it lands as a check the harness itself can re-run.</p>
-  </article>
-</main>
+    <p>Nothing an agent merely <em>observed</em> in an exploratory round counts as proof. The only lasting output is durable automation — committed <code>checks[]</code> entries and Playwright specs — replayed deterministically by the harness thereafter. A proposal earns a rung on the <a href="proof-ladder.html">proof ladder</a> only once it lands as a check the harness itself can re-run.</p>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="ci.html">&larr; CI &amp; GitHub Action</a>
+      <a class="page-nav-next" href="manifest.html">ready.yaml &rarr;</a>
+    </nav>
+  </main>
+</div>
 
 <footer class="footer">
   <div class="container">
     <div class="footer-brand">
       <a class="nav-logo" href="../index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
@@ -105,10 +138,10 @@
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
-        <a href="./quickstart.html">Docs</a>
-        <a href="./spec.html">Spec</a>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
         <a href="https://github.com/launchwings/proofbench">GitHub</a>
-        <a href="./evidence-format.html">Evidence format</a>
+        <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
@@ -117,5 +150,8 @@
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
 </body>
 </html>

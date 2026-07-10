@@ -3,81 +3,93 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>k8s-attach (BYOC) · Proofbench docs</title>
-<meta name="description" content="The fourth substrate: attach-only against your own cluster. Never creates or deletes cluster objects — only port-forwards and reads.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Attach your cluster · Proofbench docs</title>
+<meta name="description" content="k8s-attach is attach-only against your own cluster: it only runs kubectl get, kubectl port-forward, and (for env derivation) kubectl exec — never create, apply, delete, patch, or scale.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
     <nav class="nav-links">
-      <a href="./quickstart.html">Docs</a>
-      <a href="./spec.html">Spec</a>
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main class="docs-layout">
-  <aside class="toc">
-    <p class="toc-title">Docs</p>
-    <ul>
-      <li><a href="./quickstart.html">Quickstart</a></li>
-      <li><a href="./manifest.html">Readiness manifest</a></li>
-      <li><a href="./evidence.html">Evidence bundle</a></li>
-      <li><a href="./proof-ladder.html">Proof ladder</a></li>
-      <li><a href="./k8s-attach.html" class="active" aria-current="page">k8s-attach (BYOC)</a></li>
-      <li><a href="./headless-agents.html">Headless agents</a></li>
-    </ul>
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html" class="active" aria-current="page">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
   </aside>
 
-  <article class="prose">
-    <h1>k8s-attach (BYOC)</h1>
-    <p><code>k8s-attach</code> is the fourth substrate: it never creates or deletes anything in a cluster (Shape-A, ADR-0011). <code>pb up --substrate k8s-attach</code> only asserts that the target pods are live and opens <code>kubectl port-forward</code> tunnels; <code>pb down</code> only kills the forwards it opened.</p>
+  <main id="content" class="prose">
+    <h1>Attach your cluster (k8s-attach)</h1>
+    <p><code>k8s-attach</code> is the fourth substrate: the whole proof runs against a cluster you already deployed. <code>pb up --substrate k8s-attach</code> never creates, applies, deletes, patches, or scales anything (Shape-A, ADR-0011) — it asserts the target is live and opens <code>kubectl port-forward</code> tunnels so the harness's substrate-blind drivers and checks can dial <code>127.0.0.1:&lt;port&gt;</code> exactly as they would against <code>local</code> or <code>compose</code>.</p>
 
-    <div class="term">
-        <div class="term-chrome">
-          <span class="term-dot f"></span>
-          <span class="term-dot n"></span>
-          <span class="term-dot p"></span>
-        </div>
-        <div class="term-body">
-          <div class="term-line t-cmd">pb up --substrate k8s-attach --manifest ready.yaml</div>
-          <div class="term-line t-out">forward svc/appservice:8000 -&gt; 127.0.0.1:54217</div>
-        </div>
-      </div>
-    <div class="term">
-        <div class="term-chrome">
-          <span class="term-dot f"></span>
-          <span class="term-dot n"></span>
-          <span class="term-dot p"></span>
-        </div>
-        <div class="term-body">
-          <div class="term-line t-cmd">pb ready --manifest ready.yaml</div>
-          <div class="term-line t-pass">ready tcp 127.0.0.1:54217 -&gt; ok</div>
-        </div>
-      </div>
-    <p>One <code>forward ...</code> line per tunnel opened (one per unique locator — a resource and <code>sources.k8s</code> naming the same locator share a single tunnel), and one <code>ready ...</code> line naming the resolved probe and its outcome.</p>
+    <h2>What attach-only means</h2>
+    <p>Every kubectl invocation k8s-attach makes is one of exactly three read/observe verbs:</p>
+    <ul>
+      <li><code>kubectl get</code> — confirm a pod/deployment/service exists and is ready, read a service's own label selector, read a pod's container image digest(s).</li>
+      <li><code>kubectl port-forward</code> — open one local-to-cluster tunnel per declared resource.</li>
+      <li><code>kubectl exec -- env</code> — read a live pod's process environment, and only when the manifest opts in with <code>env.derive.from: k8s-pod</code>.</li>
+    </ul>
+    <p>It never runs <code>apply</code>, <code>create</code>, <code>delete</code>, <code>patch</code>, or <code>scale</code>. Whatever a drive verb does against the cluster (firing an execution, writing a scenario doc) is the drive verb's own doing, not the substrate's — see <a href="#gating">gating destructive drive verbs</a> below.</p>
+
+    <h2>Prerequisites</h2>
+    <ul>
+      <li><code>kubectl</code> on <code>PATH</code>, resolving to a working kubeconfig context. (<code>k8s-attach unavailable: kubectl not found in PATH</code> if it isn't.)</li>
+      <li>A namespace you're already granted <code>get</code>/<code>port-forward</code>/<code>exec</code> access to.</li>
+      <li>The target service already deployed and healthy — <code>pb up</code> asserts liveness, it never deploys anything.</li>
+    </ul>
 
     <h2>Naming the cluster context</h2>
     <p>Put a <code>workspace.yaml</code> next to your manifest naming the kubectl context and the granted namespace to forward into:</p>
     <pre><code>contexts:
   k8s-attach: "redcat@redcat"   # &lt;kube-context&gt;@&lt;namespace&gt;</code></pre>
-    <p>Override at run time without editing the file:</p>
-    <pre><code>export PB_K8S_CONTEXT=redcat
-export PB_K8S_NAMESPACE=redcat</code></pre>
-    <p><code>PB_K8S_CONTEXT</code> / <code>PB_K8S_NAMESPACE</code> always win over <code>workspace.yaml</code>. From the real fixture (<code>fixtures/k8s-attach/workspace.yaml</code>): no cluster credentials live in this file (ADR-0008) — only a context name resolved from the local kubeconfig, plus a namespace.</p>
+    <p>No cluster credentials live in this file (ADR-0008) — only a context <em>name</em> resolved from your local kubeconfig, plus a namespace. From the real ENG-17397 fixture (<code>fixtures/k8s-attach/workspace.yaml</code>):</p>
     <pre><code>services:
   appservice: /Users/prodigy/lyric/appservice
   metadata-service: /Users/prodigy/lyric/metadata-service
@@ -85,7 +97,13 @@ export PB_K8S_NAMESPACE=redcat</code></pre>
 contexts:
   k8s-attach: "redcat@redcat"</code></pre>
 
-    <h2>Resource placeholders</h2>
+    <h2>Environment overrides</h2>
+    <p>Override at run time without editing the file — these always win over <code>workspace.yaml</code>:</p>
+    <pre><code>export PB_K8S_CONTEXT=redcat
+export PB_K8S_NAMESPACE=redcat</code></pre>
+    <p>If neither a workspace context nor <code>PB_K8S_NAMESPACE</code> resolves a namespace, <code>pb up</code> fails fast: <code>k8s-attach: no namespace resolved (set PB_K8S_NAMESPACE or a workspace.yaml context 'name@namespace')</code>.</p>
+
+    <h2>Resource placeholders and env derivation</h2>
     <p><code>resources.&lt;name&gt;.via.k8s</code> names what to forward (e.g. <code>svc/appservice:8000</code>). <code>pb up</code> binds each to an ephemeral local port; reference the live forward anywhere in the manifest — probes, drive verbs, checks — with:</p>
     <pre><code>${resources.&lt;name&gt;.host}
 ${resources.&lt;name&gt;.port}</code></pre>
@@ -97,11 +115,16 @@ ${resources.&lt;name&gt;.port}</code></pre>
         from: k8s-pod
         pod: "deploy/appservice"</code></pre>
 
-    <h2>Attach-only guarantee</h2>
-    <p><code>k8s-attach</code> is read/observe only: port-forward, read (<code>kubectl get</code>), and <code>exec</code>-based env derivation. It never applies, creates, deletes, or scales a cluster object.</p>
+    <h2>Bringing it up and verifying</h2>
+    <pre><code>export PB_K8S_CONTEXT=redcat
+export PB_K8S_NAMESPACE=redcat
+pb up --substrate k8s-attach --manifest ready.yaml
+pb ready --manifest ready.yaml
+pb verify --substrate k8s-attach --manifest ready.yaml</code></pre>
+    <p>One <code>forward ...</code> line prints per tunnel actually opened — a resource's <code>via.k8s</code> and <code>sources.k8s</code> naming the identical locator are deduplicated into a single tunnel rather than opening a redundant second one. One <code>ready ...</code> line names the resolved probe and its outcome; <code>pb ready</code> substitutes the forwarded <code>127.0.0.1:&lt;port&gt;</code> addresses into the probe before polling, so the manifest's probe stays substrate-blind.</p>
 
-    <h2>requires-gating</h2>
-    <p>Destructive actions a drive verb performs (firing an execution, writing a scenario doc) are the drive verb's own doing and must carry a <code>gates[]</code> entry — the substrate itself only opens tunnels. Checks that need an ID the harness can't fabricate (an execution ID, a scenario ID) declare it in <code>requires</code>; unset at verify time, the check records honest <code>not-run</code> rather than a hard fail or a fake pass. From the real ENG-17397 fixture (<code>fixtures/k8s-attach/eng-17397-actions-controls.ready.yaml</code>):</p>
+    <h2 id="gating">Gating destructive drive verbs</h2>
+    <p>The substrate itself only opens tunnels. A drive verb that mutates cluster state (firing an execution, writing a scenario doc) must carry its own <code>gates[]</code> entry, and a check that needs an ID the harness can't fabricate (an execution ID, a scenario ID) declares it in <code>requires</code> — unset at verify time, the check records honest <code>not-run</code> instead of a hard fail or a fake pass. From the real ENG-17397 fixture:</p>
     <pre><code>checks:
   - name: action-resolution
     level: L4
@@ -120,23 +143,61 @@ gates:
     reason: >-
       writes scenarios.selectedNotesActions on a live scenario doc; confirm
       the scenario is a throwaway proof scenario, not a shared fixture.</code></pre>
-    <p>In a real run, two <code>L4</code> checks and the <code>L5</code> Playwright check recorded honest <code>not-run</code> because <code>PB_EXECUTION_ID</code> was unset and a spec file hadn't landed yet — see the <a href="./evidence.html">evidence bundle reference</a> for the actual bundle. The proof level was reported at <code>L3</code>, not inflated.</p>
 
-    <h2>Redeploy caveat</h2>
-    <p>A port-forward pins to the pod(s) live when <code>pb up</code> ran. If the target rolls out (a new deploy, a pod restart) while forwards are open, the tunnel goes stale — the local port stays bound but the far end is gone. <code>pb ready</code> / <code>pb verify</code> will fail against a dead forward. Recover with:</p>
+    <h2>The real run, against redcat</h2>
+    <p>The ENG-17397 Actions &amp; Controls proof, attach-only against the <code>redcat</code> BYOC cluster:</p>
+    <div class="term">
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">redcat-cluster · k8s-attach</span>
+      </div>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb up --substrate k8s-attach --manifest ready.yaml</div>
+        <div class="term-line t-out">forward svc/appservice:8000 -&gt; 127.0.0.1:56493</div>
+        <div class="term-line t-out">up: appservice (k8s-attach)</div>
+        <div class="term-line t-cmd">pb ready --manifest ready.yaml</div>
+        <div class="term-line t-out">ready: appservice ok</div>
+        <div class="term-line t-cmd">pb verify --substrate k8s-attach --manifest ready.yaml</div>
+        <div class="term-line t-out">bundle:  evidence/20260710-010422-verify</div>
+        <div class="term-line t-out">proof:   L3</div>
+        <div class="term-line t-out">verdict: pass</div>
+        <div class="term-line t-pass">  [pass] appservice-up</div>
+        <div class="term-line t-notrun">  [not-run] action-resolution</div>
+        <div class="term-line t-notrun">  [not-run] stage-progress</div>
+        <div class="term-line t-notrun">  [not-run] stage-log-observed</div>
+      </div>
+    </div>
+    <p>Two <code>L4</code> checks and the <code>L5</code> Playwright check recorded honest <code>not-run</code>: <code>PB_EXECUTION_ID</code> was unset and the stage-log spec hadn't landed yet. The proof level was reported at <code>L3</code>, not inflated to match the manifest's highest declared check.</p>
+
+    <h2>Pins: proving which build you tested</h2>
+    <p>k8s-attach implements the optional <code>Pinner</code> capability: every bundle records the resolved <code>k8s.namespace</code> / <code>k8s.context</code>, plus each forwarded target's backing pod image digest, keyed <code>image.&lt;name&gt;</code>. A digest lookup resolves the concrete pod behind a locator (a service's own selector when it has one, else the <code>app=&lt;name&gt;</code> convention) and reads it with a read-only:</p>
+    <pre><code>kubectl get pod/&lt;pod&gt; -o jsonpath='{range .status.containerStatuses[*]}{.imageID}{","}{end}'</code></pre>
+    <p>A per-target lookup failure is skipped, not fatal — pins are best-effort provenance, and a missing pin is reported by its absence, never faked.</p>
+
+    <h2>Teardown</h2>
+    <p><code>pb down --manifest ready.yaml</code> kills only the port-forwards this run opened, by recorded pid — it never deletes anything in-cluster. It removes <code>.pb/k8s-forwards.json</code> and then removes the substrate's own <code>.pb</code> directory <em>only if that leaves it empty</em>, so any other substrate/seed state left there is untouched. Down is idempotent: missing or already-stale forward state is not an error.</p>
+
+    <h2>Troubleshooting: a forward dies mid-check</h2>
+    <p>A port-forward pins to the pod(s) live when <code>pb up</code> ran. If the target rolls out — a new deploy, a pod restart — while forwards are open, the tunnel goes stale: the local port stays bound but the far end is gone. This doesn't crash <code>pb</code>; the next <code>pb ready</code> or <code>pb verify</code> surfaces it as a normal, named check failure pointing at exactly which check hit it, e.g.:</p>
+    <pre><code>[fail] appservice-up — http :8391/healthz: connection refused</code></pre>
+    <p>Recover by cycling the substrate — there is no live re-attach yet:</p>
     <pre><code>pb down --manifest ready.yaml
 pb up --substrate k8s-attach --manifest ready.yaml</code></pre>
-    <p>There is no live re-attach yet; always cycle <code>down</code>/<code>up</code> after a rollout of anything you're attached to.</p>
-  </article>
-</main>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="onboard-your-repo.html">&larr; Onboard your repo</a>
+      <a class="page-nav-next" href="ci.html">CI &amp; GitHub Action &rarr;</a>
+    </nav>
+  </main>
+</div>
 
 <footer class="footer">
   <div class="container">
     <div class="footer-brand">
       <a class="nav-logo" href="../index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
@@ -145,10 +206,10 @@ pb up --substrate k8s-attach --manifest ready.yaml</code></pre>
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
-        <a href="./quickstart.html">Docs</a>
-        <a href="./spec.html">Spec</a>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
         <a href="https://github.com/launchwings/proofbench">GitHub</a>
-        <a href="./evidence-format.html">Evidence format</a>
+        <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
@@ -157,5 +218,8 @@ pb up --substrate k8s-attach --manifest ready.yaml</code></pre>
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
 </body>
 </html>

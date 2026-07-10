@@ -1,6 +1,6 @@
 # Proofbench
 
-**The system of record for agent proof** — an open harness AI coding agents use to prove their changes work, functionally and end-to-end, on any company's setup, backed by portable evidence bundles.
+**The system of record for agent proof.** AI coding agents say a change works; Proofbench proves it — functionally, end-to-end, on your real infrastructure — and writes a portable evidence bundle the harness collects, never the agent's own narration. Bring your own agent, your own compute; Proofbench is the harness in between.
 
 Two pillars:
 
@@ -29,7 +29,7 @@ Every `pb verify` run names the rung reached. A report that doesn't name a rung 
 
 ## Install
 
-Requires Go 1.23+.
+Requires Go 1.23+. Proofbench isn't public yet — the clone step below works today from a checkout you already have access to; public availability is coming.
 
 ```
 git clone https://github.com/launchwings/proofbench
@@ -41,79 +41,55 @@ Add `bin/` to your `PATH`, or copy `bin/pb` to `/usr/local/bin`.
 
 ---
 
-## 60-second walkthrough
+## 60-second quickstart
 
-### 1. Generate a manifest
-
-```
-pb init
-```
-
-Auto-detects your repo (Procfile, compose file, `package.json` scripts, `AGENTS.md`) and writes `ready.yaml`. Edit it to taste — or use the generated manifest as-is for a first run.
-
-### 2. Bring the service up
+[`examples/basic`](examples/basic/) is a minimal HTTP order-capture service with a `ready.yaml` already written — no Docker required. This is the actual output of running it:
 
 ```
-pb up --substrate local
+cd examples/basic
+pb up --substrate local --manifest ready.yaml
+```
+```
+up: basic-orders (local)
 ```
 
-Starts the service described in `ready.yaml` on the local substrate (bare process). Use `--substrate compose` to use Docker Compose instead.
-
-### 3. Wait for readiness
-
 ```
-pb ready
+pb ready --manifest ready.yaml
 ```
-
-Polls the probe declared in `run.ready` until it passes or times out.
-
-### 4. Seed data
-
 ```
-pb seed
+ready: http :8391/healthz ok
 ```
 
-Runs each step in `seed[]` in dependency order.
-
-### 5. Run a verification
-
 ```
-pb verify --ticket ENG-123 --claim "orders endpoint persists to disk"
+pb verify --manifest ready.yaml --ticket ENG-001 --claim "orders endpoint appends to orders.json"
 ```
-
-Executes every `checks[]` entry in the manifest, wraps each command in the capture harness, evaluates the declared predicates, and writes an evidence bundle under `evidence/`.
-
-Output:
-
 ```
-bundle:  evidence/20260704-101500-verify
+{"status":"ok"}
+{"status":"created"}
+bundle:  evidence/20260710-053615-verify
 proof:   L4
 verdict: pass
+note:    2 pass, 0 fail, 0 not-run
   [pass] up
   [pass] order-roundtrip
 ```
 
-### 6. Render a report
-
 ```
-pb report evidence/20260704-101500-verify
+pb down --manifest ready.yaml
 ```
-
-Prints a Markdown report for the bundle — paste it into a PR comment or ticket.
-
-### 7. Build a hub index
-
 ```
-pb hub
+down: basic-orders (pid 56419) stopped
 ```
 
-Writes `.pb/hub/index.html` — an HTML index over every bundle under `evidence/`. Open it in a browser to browse all runs.
+`pb report evidence/20260710-053615-verify` prints a Markdown report for the bundle — paste it into a PR comment or ticket. `pb hub --root evidence --out .pb/hub/index.html` writes an HTML index over every bundle under `evidence/`.
+
+For your own repo instead of the example, run `pb init` — it auto-detects your project (Procfile, compose file, `package.json` scripts, `AGENTS.md`) and drafts a `ready.yaml` to edit to taste. See the [full quickstart](docs/quickstart.md) for every step in detail, including seeding and the hub index.
 
 ---
 
 ## GitHub Action
 
-`action.yml` at the repo root wraps `pb verify` for CI — raise a PR, get end-to-end proof as a workflow artifact.
+`action.yml` at the repo root wraps `pb verify` for CI — raise a PR, get end-to-end proof as a workflow artifact. This reference will work as written **once `launchwings/proofbench` is public**; until then, point `uses:` at a private checkout of this repo.
 
 ```yaml
 - uses: launchwings/proofbench@main
@@ -126,7 +102,7 @@ Writes `.pb/hub/index.html` — an HTML index over every bundle under `evidence/
 
 `@v0` will be the pinned ref once the first tagged release lands; until then, use `@main`.
 
-The step's own exit code follows the bundle's `verdict` (from `manifest.json`), not `pb`'s raw exit status: `pass` succeeds, `fail` always fails the job, and `inconclusive` fails the job too unless you set `allow-inconclusive: 'true'` — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (`if: always()`), and the step exposes `verdict` and `bundle-path` outputs for later steps (e.g. a PR comment).
+The step's own exit code follows the bundle's `verdict` (from `manifest.json`), not `pb`'s raw exit status: `pass` succeeds, `fail` always fails the job, and `inconclusive` fails the job too unless you set `allow-inconclusive: 'true'` — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (`if: always()`), and the step exposes `verdict` and `bundle-path` outputs for later steps (e.g. a PR comment). Full reference: [site/docs/ci.html](site/docs/ci.html) (docs site publishing soon).
 
 ---
 
@@ -143,12 +119,27 @@ Proofbench is **not**:
 
 ## Docs
 
+Start here:
+
+- [docs/quickstart.md](docs/quickstart.md) — the full walkthrough this README's 60-second version is drawn from, including seeding and the hub index
+- [examples/basic/](examples/basic/) — the runnable example service + `ready.yaml` used above
+- [site/docs/manifest.html](site/docs/manifest.html) — full field-by-field `ready.yaml` reference, generated from the schema (site publishing soon; open the file directly for now)
+- [spec/](spec/) — the versioned `ready.yaml` / evidence bundle JSON Schemas (v0), the interoperability contract
+- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test commands and the package map
+
+Design rationale and roadmap:
+
 - [PLAN.md](PLAN.md) — roadmap and design rationale
 - [docs/adr/](docs/adr/) — architecture decision records
 - [docs/prd-stage1.md](docs/prd-stage1.md) — Stage 1 PRD (OSS wedge)
 - [docs/backlog.md](docs/backlog.md) — backlog
 - [CONTEXT.md](CONTEXT.md) — project context
-- [spec/](spec/) — manifest and evidence bundle schemas (v0)
+
+---
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE). The evidence bundle format is open and portable; export your data any time.
 
 ---
 

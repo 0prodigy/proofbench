@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI &amp; GitHub Action · Proofbench docs</title>
+<meta name="description" content="action.yml wraps pb verify for CI: build pb, run verify, gate the job on the bundle's verdict, and upload the evidence bundle as a workflow artifact on every run.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html" class="active" aria-current="page">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
+  </aside>
+
+  <main id="content" class="prose">
+    <h1>CI &amp; GitHub Action</h1>
+    <p><code>action.yml</code> at the repo root wraps <code>pb verify</code> for CI: it builds <code>pb</code>, runs a verification against your manifest, gates the job on the bundle's own <code>verdict</code>, and uploads the evidence bundle as a workflow artifact on every run — pass or fail.</p>
+    <blockquote>The action references <code>launchwings/proofbench</code>, which isn't public yet. The workflow below is the real, complete interface — drop it in once the repo is public, or point <code>uses:</code> at a private fork/checkout meanwhile.</blockquote>
+
+    <h2>Inputs</h2>
+    <table>
+      <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>manifest</code></td><td><code>ready.yaml</code></td><td>Path to the manifest, relative to <code>working-directory</code>.</td></tr>
+        <tr><td><code>substrate</code></td><td><code>local</code></td><td><code>local</code> | <code>compose</code> | <code>k8s-attach</code> — <code>k8s-attach</code> requires cluster credentials on the runner.</td></tr>
+        <tr><td><code>working-directory</code></td><td><code>.</code></td><td>Directory to run <code>pb</code> in (contains the manifest and the repo under test).</td></tr>
+        <tr><td><code>evidence-dir</code></td><td><code>.proofbench/evidence</code></td><td>Root directory for evidence bundles, relative to <code>working-directory</code>.</td></tr>
+        <tr><td><code>allow-inconclusive</code></td><td><code>'false'</code></td><td>When <code>'true'</code>, an <code>inconclusive</code> verdict passes the step instead of failing it. An unproven change must not read as green.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Outputs</h2>
+    <table>
+      <thead><tr><th>Output</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>verdict</code></td><td>The verify verdict read from the bundle's <code>manifest.json</code> (<code>pass</code>|<code>fail</code>|<code>inconclusive</code>).</td></tr>
+        <tr><td><code>bundle-path</code></td><td>Path to the evidence bundle, relative to the repo root.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>What the action does</h2>
+    <ol>
+      <li>Sets up Go (<code>actions/setup-go@v5</code>, pinned to the action's own <code>go.mod</code>).</li>
+      <li>Builds <code>pb</code> from source. There's no tagged release yet — once <code>v0</code> is tagged this step becomes a pinned release-binary download instead of a from-source build.</li>
+      <li>Runs <code>pb verify</code> with your inputs, captures its output, and parses the <code>bundle: &lt;dir&gt;</code> line <code>pb</code> prints on every path that reaches the verify runner — pass or fail.</li>
+      <li>Reads <code>verdict</code> out of the bundle's own <code>manifest.json</code> (not <code>pb</code>'s raw process exit code) and gates the step on it.</li>
+      <li>Uploads the evidence bundle as a workflow artifact named <code>proofbench-evidence</code>, <code>if: always()</code> — even a failed or inconclusive run leaves a bundle to inspect.</li>
+    </ol>
+
+    <h2>Exit-code gating</h2>
+    <p>The step's own exit code follows the bundle's <code>verdict</code>, never <code>pb</code>'s raw exit status:</p>
+    <pre><code>case "$verdict" in
+  pass)
+    exit 0
+    ;;
+  inconclusive)
+    if [ "${{ inputs.allow-inconclusive }}" = "true" ]; then
+      exit 0
+    fi
+    echo "::error::verdict is inconclusive (pb exit $rc); set allow-inconclusive: 'true' to accept"
+    exit 1
+    ;;
+  fail)
+    echo "::error::verdict is fail (pb exit $rc)"
+    exit 1
+    ;;
+esac</code></pre>
+    <p><code>pass</code> succeeds unconditionally. <code>fail</code> always fails the job. <code>inconclusive</code> fails the job too, unless you opt in with <code>allow-inconclusive: 'true'</code> — a run that didn't reach its declared proof level must not read as green by default. A missing bundle path or an unrecognized verdict string also fails the step, loudly, rather than silently passing.</p>
+
+    <h2>A complete workflow</h2>
+    <pre><code>name: proofbench
+on:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: launchwings/proofbench@main
+        id: verify
+        with:
+          manifest: ready.yaml
+          substrate: local
+          working-directory: .
+          evidence-dir: .proofbench/evidence
+          allow-inconclusive: 'false'
+
+      - name: Report verdict
+        if: always()
+        run: |
+          echo "verdict: ${{ steps.verify.outputs.verdict }}"
+          echo "bundle:  ${{ steps.verify.outputs.bundle-path }}"</code></pre>
+    <p><code>@v0</code> will be the pinned ref once the first tagged release lands; until then, use <code>@main</code>.</p>
+
+    <h2>Substrate note</h2>
+    <p>Setting <code>substrate: k8s-attach</code> in CI means the runner itself needs a working kubeconfig context and granted namespace access — see <a href="k8s-attach.html">attach your cluster</a> for what that substrate does and doesn't do to the cluster.</p>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="k8s-attach.html">&larr; Attach your cluster</a>
+      <a class="page-nav-next" href="headless-agents.html">Headless agents &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CLI · Proofbench docs</title>
+<meta name="description" content="Complete pb CLI reference — every command and evidence subcommand, generated from bin/pb help output: flags, examples, and exit-code semantics." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html" class="active" aria-current="page">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
+  </aside>
+
+  <main id="content" class="prose">
+    <h1>CLI reference</h1>
+    <p>Every command below is generated from a real <code>bin/pb help &lt;command&gt;</code> run against this repo's build — terminal blocks are verbatim output, not hand-written. <code>pb help &lt;command&gt;</code> and <code>pb &lt;command&gt; --help</code>/<code>-h</code> are equivalent for every command; running <code>pb</code> with no arguments, or <code>pb help</code> alone, prints the full usage summary below.</p>
+
+    <h2>Usage summary</h2>
+    <pre><code>$ pb help
+pb — prove agent changes work, end-to-end, on any setup
+
+Usage:
+  pb evidence new     --claim C --phase P [--root DIR] [--ticket T] [--kind K] [--pairs-with RUNID] [--surface k=v ...]
+  pb evidence run     --bundle DIR --name NAME [--shell] [--] CMD [ARGS...]
+  pb evidence add     --bundle DIR [--type TYPE] [--name NAME] [--meta k=v ...] SRC_PATH
+  pb evidence link    --bundle DIR EXECUTION_ID URL
+  pb evidence assert  --bundle DIR EXPR
+  pb evidence seal    --bundle DIR
+  pb evidence verdict --bundle DIR [--note NOTE] pass|fail|inconclusive
+  pb evidence validate BUNDLE_DIR
+  pb evidence show     BUNDLE_DIR
+  pb init   [--out FILE|-] [--force] [DIR]
+  pb lint   [--manifest ready.yaml]
+  pb up     [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb ready  [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb seed   [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb down   [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+  pb verify [--ticket T] [--claim C] [--evidence-root DIR] [--only a,b]
+            [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
+            [--pairs-with RUNID] [--kind before|after]
+  pb explore [--manifest ready.yaml] [--out DIR] [--runtime claude-code] [--max-turns N]
+             (experimental: requires PB_EXPERIMENTAL=1; proposes checks only, never a verdict)
+  pb report BUNDLE_DIR
+  pb hub    [--root DIR] [--out FILE]
+  pb version
+
+Exit codes: "pb evidence run" exits with the wrapped command's real exit
+code; "pb evidence assert" exits 1 when the predicate fails, 2 on
+evaluation error; "pb lint" exits 1 with the named validation error; "pb
+explore" exits 2 when PB_EXPERIMENTAL is not set to "1", 3 when the round
+did not run (not-run), 4 when it ran but produced no proposal
+(inconclusive); every other command exits nonzero on failure.
+
+Run "pb help &lt;command&gt;" for details and an example of any command.</code></pre>
+
+    <h2>version</h2>
+    <p><code>pb version</code>, <code>pb --version</code>, and <code>pb -v</code> are all the same command.</p>
+    <pre><code>$ pb version
+pb version 0.1.0-dev
+$ pb --version
+pb version 0.1.0-dev
+$ pb -v
+pb version 0.1.0-dev</code></pre>
+
+    <h2>init</h2>
+    <p>Detects the project's run/ready/seed shape and writes a starter <code>ready.yaml</code> manifest.</p>
+    <pre><code>$ pb help init
+Detects the project's run/ready/seed shape and writes a starter ready.yaml manifest.
+
+Flags:
+  -force
+    	overwrite an existing output file
+  -out string
+    	output path for the generated manifest ('-' for stdout) (default "ready.yaml")
+
+Example:
+  pb init .</code></pre>
+    <p>When it can't derive a real start command, <code>pb init</code> still writes a runnable-looking file with the literal placeholder <code>echo TODO: set your start command</code> in <code>run.local.start</code> — <a href="manifest.html">pb lint rejects that placeholder</a> once you've replaced it.</p>
+
+    <h2>lint</h2>
+    <p>Parses and validates a <code>ready.yaml</code> manifest without bringing anything up.</p>
+    <pre><code>$ pb help lint
+Parses and validates a ready.yaml manifest without bringing anything up.
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+
+Example:
+  pb lint --manifest ready.yaml</code></pre>
+    <p>Prints <code>ok</code> and exits 0 when the manifest is valid; exits 1 with the specific validation error (see the <a href="manifest.html#validation-pb-lint">Validation section</a> of the ready.yaml reference) otherwise.</p>
+
+    <h2>up / ready / seed / down</h2>
+    <p>The four substrate-lifecycle commands share the same two flags. Each brings up, probes, seeds, or tears down the service on the chosen substrate.</p>
+    <pre><code>$ pb help up
+Brings the service up on the chosen substrate (local process, docker compose, or an attached k8s workload).
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -substrate string
+    	local|compose|k8s-attach (default "local")
+
+Example:
+  pb up --manifest ready.yaml</code></pre>
+    <pre><code>$ pb help ready
+Waits for and checks the service's readiness probe (http, tcp, or exec) on the chosen substrate.
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -substrate string
+    	local|compose|k8s-attach (default "local")
+
+Example:
+  pb ready --manifest ready.yaml</code></pre>
+    <pre><code>$ pb help seed
+Runs the manifest's declared seed steps against the running service.
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -substrate string
+    	local|compose|k8s-attach (default "local")
+
+Example:
+  pb seed --manifest ready.yaml</code></pre>
+    <pre><code>$ pb help down
+Tears the service down on the chosen substrate.
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -substrate string
+    	local|compose|k8s-attach (default "local")
+
+Example:
+  pb down --manifest ready.yaml</code></pre>
+    <p>Each exits nonzero on failure — e.g. <code>up</code> against <code>k8s-attach</code> exits nonzero if <code>kubectl</code> is missing, no k8s locator is declared, or a port-forward never comes up; <code>down</code> is idempotent and treats already-torn-down state as success.</p>
+
+    <h2>verify</h2>
+    <p>Brings up the substrate, runs the manifest's checks, and produces an evidence bundle with a tri-state verdict (pass/fail/inconclusive).</p>
+    <pre><code>$ pb help verify
+Brings up the substrate, runs the manifest's checks, and produces an evidence bundle with a tri-state verdict (pass/fail/inconclusive).
+
+Flags:
+  -claim string
+    	claim under verification
+  -evidence-root string
+    	root directory for evidence bundles (default "evidence")
+  -kind string
+    	before|after (this bundle's role in a paired run)
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -only string
+    	comma-separated check names to run (default: all)
+  -pairs-with string
+    	runId of the paired bundle (before/after pairing)
+  -substrate string
+    	local|compose|k8s-attach (default "local")
+  -ticket string
+    	ticket key recorded in the bundle
+
+Example:
+  pb verify --manifest ready.yaml --claim "orders endpoint returns totals" --ticket ENG-123</code></pre>
+    <p>Exit-code semantics come straight from the proof ladder, not a generic pass/fail: <code>pb verify</code> exits 0 only when the bundle's final <code>verdict</code> is <code>pass</code>; a verdict of <code>fail</code> or <code>inconclusive</code> — including an honest <code>not-run</code> gating from an unmet <code>checks[].requires</code> or an unattached substrate — exits 1. The rung actually reached is printed on its own <code>proof:</code> line rather than folded into the exit code, so a caller can tell "ran, but only reached L3" from "never ran" by reading the bundle, not by guessing from the shell status alone.</p>
+
+    <h2>explore <span class="badge badge-inconclusive">experimental</span></h2>
+    <p>Runs one agent-driven exploration round via the embedded headless-agent runtime — see <a href="headless-agents.html">Headless agents</a> for the full adapter contract and failure taxonomy.</p>
+    <pre><code>$ PB_EXPERIMENTAL=1 pb help explore
+Experimental: runs one agent-driven exploration round that proposes checks for ready.yaml. Never produces a verdict and never edits the manifest. Requires PB_EXPERIMENTAL=1.
+
+Flags:
+  -manifest string
+    	path to ready.yaml (default "ready.yaml")
+  -max-turns int
+    	agent turn budget (default 30)
+  -out string
+    	output directory for round artifacts (default ".proofbench/explore")
+  -runtime string
+    	agent runtime kind (default "claude-code")
+
+Example:
+  PB_EXPERIMENTAL=1 pb explore --manifest ready.yaml</code></pre>
+    <p>Without <code>PB_EXPERIMENTAL=1</code> set, every <code>pb explore</code> invocation — including <code>pb help explore</code> itself — short-circuits:</p>
+    <pre><code>$ pb help explore
+pb: explore is experimental; set PB_EXPERIMENTAL=1</code></pre>
+    <p>Exit codes are distinct from the rest of the CLI: 2 when <code>PB_EXPERIMENTAL</code> isn't <code>"1"</code>, 3 when the round did not run at all (<code>not-run</code> — e.g. the agent binary is missing), 4 when it ran but produced no proposal (<code>inconclusive</code>). <code>pb explore</code> never returns a verdict and never edits <code>ready.yaml</code> itself — it only ever proposes checks for a human to commit.</p>
+
+    <h2>report</h2>
+    <p>Renders a Markdown report for a sealed evidence bundle.</p>
+    <pre><code>$ pb help report
+Renders a Markdown report for a sealed evidence bundle.
+
+Example:
+  pb report evidence/ENG-123/repro-01</code></pre>
+
+    <h2>hub</h2>
+    <p>Writes a static HTML index over every evidence bundle under a root directory.</p>
+    <pre><code>$ pb help hub
+Writes a static HTML index over every evidence bundle under a root directory.
+
+Flags:
+  -out string
+    	output file for the hub index (default ".pb/hub/index.html")
+  -root string
+    	root directory to scan for bundles (default "evidence")
+
+Example:
+  pb hub --root evidence --out .pb/hub/index.html</code></pre>
+
+    <h2>evidence</h2>
+    <p>Low-level evidence-bundle primitives for building a bundle by hand — <code>pb verify</code> drives these automatically for a full run. <code>pb help evidence &lt;subcommand&gt;</code> prints this same overview for every subcommand; per-subcommand flags are only shown by <code>pb evidence &lt;subcommand&gt; --help</code> (below), which also exits 2 (a flag-parse error) rather than 0.</p>
+    <pre><code>$ pb help evidence
+Low-level evidence-bundle primitives (new, run, add, link, assert, seal, verdict, validate, show) for building a bundle by hand. "pb verify" drives these automatically for a full run.
+
+Example:
+  pb evidence new --claim "orders endpoint returns totals" --phase verify</code></pre>
+
+    <h3>evidence new</h3>
+    <p>Creates a new bundle directory under <code>--root</code>, stamped with claim, phase, ticket, and surface metadata.</p>
+    <pre><code>$ pb evidence new --help
+Usage of pb evidence new:
+  -claim string
+    	claim under verification (required)
+  -kind string
+    	bundle kind (e.g. before|after)
+  -pairs-with string
+    	runId of the paired bundle
+  -phase string
+    	repro|verify|reverify|fix|report (required)
+  -root string
+    	root directory for evidence bundles (default "evidence")
+  -surface value
+    	surface key=value (repeatable, e.g. substrate=local)
+  -ticket string
+    	ticket key (e.g. ENG-20190)</code></pre>
+    <pre><code>pb evidence new --claim "orders endpoint returns totals" --phase verify --ticket ENG-123</code></pre>
+
+    <h3>evidence run</h3>
+    <p>Runs a command, capturing stdout/stderr and exit code as a command artifact in the bundle.</p>
+    <pre><code>$ pb evidence run --help
+Usage of pb evidence run:
+  -bundle string
+    	bundle directory (required)
+  -name string
+    	artifact name for the command log (required)
+  -shell
+    	run the command line via bash -lc</code></pre>
+    <pre><code>pb evidence run --bundle evidence/ENG-123/verify-01 --name order-roundtrip --shell -- curl -sf http://localhost:8391/orders</code></pre>
+    <p>Exits with the wrapped command's real exit code — a captured failing command does not itself make <code>pb evidence run</code> fail loudly; the exit code is both returned and recorded in the artifact.</p>
+
+    <h3>evidence add</h3>
+    <p>Attaches an existing file to the bundle as a typed artifact (screenshot, log, snapshot, recording, or link).</p>
+    <pre><code>$ pb evidence add --help
+Usage of pb evidence add:
+  -bundle string
+    	bundle directory (required)
+  -meta value
+    	meta key=value (repeatable)
+  -name string
+    	artifact name (default: source file basename)
+  -type string
+    	command|snapshot|screenshot|log|recording|link (default "log")</code></pre>
+    <pre><code>pb evidence add --bundle evidence/ENG-123/verify-01 --type snapshot orders.json</code></pre>
+
+    <h3>evidence link</h3>
+    <p>Links an external execution/run URL (e.g. a CI job or dashboard run) to a recorded execution ID.</p>
+    <pre><code>$ pb evidence link --help
+Usage of pb evidence link:
+  -bundle string
+    	bundle directory (required)</code></pre>
+    <pre><code>pb evidence link --bundle evidence/ENG-123/verify-01 exec-042 https://ci.example.com/runs/042</code></pre>
+
+    <h3>evidence assert</h3>
+    <p>Evaluates one <a href="manifest.html#checks-checkspec">expect predicate</a> against the bundle's captured artifacts.</p>
+    <pre><code>$ pb evidence assert --help
+Usage of pb evidence assert:
+  -bundle string
+    	bundle directory (required)</code></pre>
+    <pre><code>pb evidence assert --bundle evidence/ENG-123/verify-01 "exitCode(order-roundtrip)==0"</code></pre>
+    <p>Prints the observed value and exits 1 when the predicate is false, 2 on an evaluation error (e.g. a malformed expression or a missing artifact).</p>
+
+    <h3>evidence seal</h3>
+    <p>Seals the bundle: computes and writes the manifest's SHA-256 digests, closing it to further artifact writes.</p>
+    <pre><code>$ pb evidence seal --help
+Usage of pb evidence seal:
+  -bundle string
+    	bundle directory (required)</code></pre>
+    <pre><code>pb evidence seal --bundle evidence/ENG-123/verify-01</code></pre>
+
+    <h3>evidence verdict</h3>
+    <p>Sets the bundle's final tri-state verdict, with an optional human-readable note.</p>
+    <pre><code>$ pb evidence verdict --help
+Usage of pb evidence verdict:
+  -bundle string
+    	bundle directory (required)
+  -note string
+    	verdict note</code></pre>
+    <pre><code>pb evidence verdict --bundle evidence/ENG-123/verify-01 --note "set last, from artifacts" pass</code></pre>
+
+    <h3>evidence validate</h3>
+    <p>Structurally validates a bundle directory (positional <code>BUNDLE_DIR</code>, no flags of its own).</p>
+    <pre><code>$ pb evidence validate --help
+Usage of pb evidence validate:</code></pre>
+    <pre><code>$ pb evidence validate evidence/ENG-123/verify-01
+ok</code></pre>
+
+    <h3>evidence show</h3>
+    <p>Prints a bundle's manifest as formatted JSON (positional <code>BUNDLE_DIR</code>, no flags of its own).</p>
+    <pre><code>$ pb evidence show --help
+Usage of pb evidence show:</code></pre>
+    <pre><code>pb evidence show evidence/ENG-123/verify-01</code></pre>
+
+    <h2>Exit codes at a glance</h2>
+    <table>
+      <thead><tr><th>Command</th><th>0</th><th>Nonzero</th></tr></thead>
+      <tbody>
+        <tr><td><code>lint</code></td><td>manifest valid, prints <code>ok</code></td><td>1: named validation error</td></tr>
+        <tr><td><code>up</code>/<code>ready</code>/<code>seed</code>/<code>down</code></td><td>succeeded</td><td>nonzero on any failure (substrate-specific message)</td></tr>
+        <tr><td><code>verify</code></td><td>bundle verdict is <code>pass</code></td><td>1: verdict is <code>fail</code> or <code>inconclusive</code></td></tr>
+        <tr><td><code>explore</code></td><td>round produced a proposal</td><td>2: <code>PB_EXPERIMENTAL</code> unset/not <code>"1"</code>; 3: round did not run (not-run); 4: ran with no proposal (inconclusive)</td></tr>
+        <tr><td><code>evidence run</code></td><td>wrapped command exited 0</td><td>the wrapped command's own real exit code</td></tr>
+        <tr><td><code>evidence assert</code></td><td>predicate held</td><td>1: predicate false; 2: evaluation error</td></tr>
+        <tr><td>everything else</td><td>succeeded</td><td>nonzero on failure; 2 typically marks a flag-parse or usage error</td></tr>
+      </tbody>
+    </table>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a href="configuration.html" rel="prev">← workspace.yaml &amp; env</a>
+      <a href="evidence-format.html" rel="next">Evidence bundle format →</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings. v0.1.0-dev.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
+</body>
+</html>

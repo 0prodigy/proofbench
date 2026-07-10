@@ -1,101 +1,141 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Proof ladder · Proofbench docs</title>
-<meta name="description" content="The L0-L5 scale of verification depth every Proofbench run must name. The rung reached is the run's proof level — never 'done'.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="../assets/site.css">
+<meta name="description" content="The L0-L5 scale of verification depth every Proofbench run must name — from static-valid to end-to-end observed. A report that doesn't name a rung isn't a proof." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
     <nav class="nav-links">
-      <a href="./quickstart.html">Docs</a>
-      <a href="./spec.html">Spec</a>
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main class="docs-layout">
-  <aside class="toc">
-    <p class="toc-title">Docs</p>
-    <ul>
-      <li><a href="./quickstart.html">Quickstart</a></li>
-      <li><a href="./manifest.html">Readiness manifest</a></li>
-      <li><a href="./evidence.html">Evidence bundle</a></li>
-      <li><a href="./proof-ladder.html" class="active" aria-current="page">Proof ladder</a></li>
-      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
-      <li><a href="./headless-agents.html">Headless agents</a></li>
-    </ul>
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
   </aside>
 
-  <article class="prose">
+  <main id="content" class="prose">
     <h1>Proof ladder</h1>
-    <p>The <strong>proof ladder</strong> is the L0–L5 scale of verification depth every run must name, from L0 static-valid to L5 end-to-end observed; the rung reached is the run's proof level.</p>
-    <blockquote>Every <code>pb verify</code> run names the rung reached. A report that doesn't name a rung is not a proof. The rung reached is named in every report — never "done".</blockquote>
+    <p>The <strong>proof ladder</strong> is the L0–L5 scale of verification depth every run must name, from <code>L0 static-valid</code> to <code>L5 end-to-end observed</code>. The rung reached is the run's proof level.</p>
+    <blockquote>A report that doesn't name a rung isn't a proof. "Schema-valid" isn't "runs." "Exit code 0" isn't "effect verified."</blockquote>
 
     <div class="ladder in-view">
       <div class="ladder-track"><div class="ladder-fill"></div></div>
-      <div class="rung"><span class="rung-level">L0</span><span class="rung-name">static-valid</span><span class="rung-def">Manifest parses and passes schema validation — "schema-valid ≠ runs."</span></div>
-      <div class="rung"><span class="rung-level">L1</span><span class="rung-name">builds/loads</span><span class="rung-def">Service builds or loads without errors.</span></div>
-      <div class="rung"><span class="rung-level">L2</span><span class="rung-name">unit-green</span><span class="rung-def">Unit tests pass.</span></div>
-      <div class="rung"><span class="rung-level">L3</span><span class="rung-name">up+healthy</span><span class="rung-def">Service starts and health probe returns 200 (or the declared tcp/exec probe succeeds).</span></div>
-      <div class="rung"><span class="rung-level">L4</span><span class="rung-name">effect-verified</span><span class="rung-def">A drive verb produced an observable effect — data row, API response, file write. "Wired ≠ runs" gets settled here.</span></div>
-      <div class="rung"><span class="rung-level">L5</span><span class="rung-name">end-to-end observed</span><span class="rung-def">Full user-facing flow exercised and confirmed.</span></div>
+      <div class="rung"><span class="rung-level">L0</span><span class="rung-name">static-valid</span><span class="rung-def">Manifest parses and passes schema validation.</span></div>
+      <div class="rung"><span class="rung-level">L1</span><span class="rung-name">builds/loads</span><span class="rung-def">Service binary or image builds without errors.</span></div>
+      <div class="rung"><span class="rung-level">L2</span><span class="rung-name">unit-green</span><span class="rung-def">Unit/integration test suite passed.</span></div>
+      <div class="rung"><span class="rung-level">L3</span><span class="rung-name">up+healthy</span><span class="rung-def">Service started and readiness probe returned healthy.</span></div>
+      <div class="rung"><span class="rung-level">L4</span><span class="rung-name">effect-verified</span><span class="rung-def">A drive verb ran and a data/API/UI effect was observed.</span></div>
+      <div class="rung"><span class="rung-level">L5</span><span class="rung-name">end-to-end observed</span><span class="rung-def">Full user journey exercised end-to-end and confirmed.</span></div>
     </div>
 
     <h2>Why a ladder, not a checkbox</h2>
     <p>Proofbench encodes the builder-copilot lessons directly into the schema: <em>schema-valid ≠ runs; wired ≠ runs</em>. A rung is only reached when its evidence exists in the bundle — a check that records <code>not-run</code> does not silently count toward a higher level. Verify the effect, not the exit status; validate against the declared contract, not the tool's own report.</p>
 
+    <h2>What earns each rung</h2>
+    <ul>
+      <li><strong>L0 static-valid</strong> — <code>ready.yaml</code> parses and validates against <code>spec/v0/ready.schema.json</code>. Nothing has run yet.</li>
+      <li><strong>L1 builds/loads</strong> — the service binary or image builds without errors.</li>
+      <li><strong>L2 unit-green</strong> — the unit/integration test suite passed.</li>
+      <li><strong>L3 up+healthy</strong> — <code>pb up</code> started the service and <code>pb ready</code>'s probe (<code>http</code>/<code>tcp</code>/<code>exec</code>) returned healthy.</li>
+      <li><strong>L4 effect-verified</strong> — a <code>drive</code> verb exercised a real product entrypoint and a check observed the resulting data/API/UI effect, not just an exit code.</li>
+      <li><strong>L5 end-to-end observed</strong> — the full user-facing journey ran and was confirmed (e.g. a Playwright spec with screenshot/recording artifacts).</li>
+    </ul>
+
     <h2>How the rung is set</h2>
-    <p>Each <a href="./manifest.html">check in <code>ready.yaml</code></a> declares the <code>level</code> it proves. When <code>pb verify</code> runs, every declared check appears in the evidence bundle's <code>checks[]</code> with a tri-state result:</p>
+    <p>Each <a href="manifest.html">check in <code>ready.yaml</code></a> declares the <code>level</code> it proves. When <code>pb verify</code> runs, every declared check appears in the evidence bundle's <code>checks[]</code> with a tri-state result:</p>
     <p>
       <span class="badge badge-pass">pass</span>
       <span class="badge badge-fail">fail</span>
       <span class="badge badge-inconclusive">not-run</span>
     </p>
-    <p>The bundle's <code>proofLevel</code> is the highest rung whose checks all passed — a single <code>not-run</code> or <code>fail</code> at a level caps the reported rung below it. A run that only proves <code>L3</code> reports <code>L3</code>, even if an <code>L5</code> check exists in the manifest but couldn't execute. See the <a href="./evidence.html">evidence bundle reference</a> for the exact schema, and a real bundle where three checks are honestly <code>not-run</code> while the reported proof level stays at <code>L3</code>.</p>
+    <p>The bundle's <code>proofLevel</code> is the highest rung whose checks all passed — a single <code>not-run</code> or <code>fail</code> at a level caps the reported rung below it. A run that only proves <code>L3</code> reports <code>L3</code>, even if an <code>L5</code> check exists in the manifest but couldn't execute. See the <a href="evidence.html">evidence &amp; provenance reference</a> for a real bundle where three checks are honestly <code>not-run</code> while the reported proof level stays at <code>L3</code>.</p>
+
+    <h2>Exit code / verdict relationship</h2>
+    <p>The proof level and the bundle's <code>verdict</code> (<code>pass</code> / <code>fail</code> / <code>inconclusive</code>) are set together, last, from the checks — never inferred from the harness's own exit status or the agent's narration. A bundle that cannot reach its declared check's level records the blocking check as <code>not-run</code> with a <code>reason</code> and sets <code>verdict: inconclusive</code>, not <code>pass</code>. In CI, the GitHub Action's own exit code follows the bundle's <code>verdict</code>, not <code>pb</code>'s raw process exit status.</p>
 
     <h2>Example report</h2>
     <div class="term">
-        <div class="term-chrome">
-          <span class="term-dot f"></span>
-          <span class="term-dot n"></span>
-          <span class="term-dot p"></span>
-        </div>
-        <div class="term-body">
-          <div class="term-line t-cmd">pb verify --manifest ready.yaml --ticket ENG-001 --claim "orders endpoint appends to orders.json"</div>
-          <div class="term-line t-out">bundle:  evidence/20260704-101500-verify</div>
-          <div class="term-line t-out">proof:   L4</div>
-          <div class="term-line t-out">verdict: pass</div>
-          <div class="term-line t-pass">&nbsp;&nbsp;[pass] up</div>
-          <div class="term-line t-pass">&nbsp;&nbsp;[pass] order-roundtrip</div>
-        </div>
+      <div class="term-chrome">
+        <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+        <span class="term-title">pb verify</span>
       </div>
-    <p>Two <code>L3</code>/<code>L4</code> checks both passed, so the report names <code>proof: L4</code> — the highest rung actually reached, stated plainly next to the verdict.</p>
-  </article>
-</main>
+      <div class="term-body">
+        <div class="term-line t-cmd">pb verify --manifest ready.yaml --ticket ENG-001 --claim "orders endpoint appends to orders.json"</div>
+        <div class="term-line t-out">bundle:  evidence/20260704-101500-verify</div>
+        <div class="term-line t-out">proof:   L4</div>
+        <div class="term-line t-out">verdict: pass</div>
+        <div class="term-line t-pass">  [pass] up</div>
+        <div class="term-line t-pass">  [pass] order-roundtrip</div>
+      </div>
+    </div>
+    <p>Two <code>L3</code>/<code>L4</code> checks both passed, so the report names <code>proof: L4</code> — the highest rung actually reached, stated plainly next to the verdict, never "done."</p>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a class="page-nav-prev" href="spec.html">← Spec</a>
+      <a class="page-nav-next" href="evidence.html">Evidence &amp; provenance →</a>
+    </nav>
+  </main>
+</div>
 
 <footer class="footer">
   <div class="container">
     <div class="footer-brand">
       <a class="nav-logo" href="../index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
@@ -104,17 +144,20 @@
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
-        <a href="./quickstart.html">Docs</a>
-        <a href="./spec.html">Spec</a>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
         <a href="https://github.com/launchwings/proofbench">GitHub</a>
-        <a href="./evidence-format.html">Evidence format</a>
+        <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
   <div class="footer-bottom">
-    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
 </body>
 </html>

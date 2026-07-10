@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>workspace.yaml &amp; env · Proofbench docs</title>
+<meta name="description" content="Everything configurable outside ready.yaml: the org-level workspace.yaml graph (services + cluster contexts) and every PB_* environment variable Proofbench reads, with precedence rules." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="../assets/site.css">
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="quickstart.html">Docs</a>
+      <a href="spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="quickstart.html">Run the quickstart</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell container">
+  <aside class="sidebar">
+    <input class="docs-search" id="docs-search" type="search" placeholder="Search docs…" aria-label="Search docs">
+    <nav aria-label="Docs">
+      <div class="sidebar-group"><p class="sidebar-title">Start</p><ul>
+        <li><a href="quickstart.html">Quickstart</a></li>
+        <li><a href="onboard-your-repo.html">Onboard your repo</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Guides</p><ul>
+        <li><a href="k8s-attach.html">Attach your cluster</a></li>
+        <li><a href="ci.html">CI &amp; GitHub Action</a></li>
+        <li><a href="headless-agents.html">Headless agents</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Reference</p><ul>
+        <li><a href="manifest.html">ready.yaml</a></li>
+        <li><a href="configuration.html" class="active" aria-current="page">workspace.yaml &amp; env</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="evidence-format.html">Evidence bundle format</a></li>
+        <li><a href="spec.html">Spec</a></li></ul></div>
+      <div class="sidebar-group"><p class="sidebar-title">Concepts</p><ul>
+        <li><a href="proof-ladder.html">Proof ladder</a></li>
+        <li><a href="evidence.html">Evidence &amp; provenance</a></li></ul></div>
+    </nav>
+  </aside>
+
+  <main id="content" class="prose">
+    <h1>workspace.yaml &amp; environment</h1>
+    <p>Everything below is configuration that lives <strong>outside</strong> <a href="manifest.html"><code>ready.yaml</code></a>: the org-level <code>workspace.yaml</code> graph, and every environment variable Proofbench itself reads.</p>
+
+    <h2>workspace.yaml</h2>
+    <p><code>workspace.yaml</code> is the org-level graph (<code>internal/manifest/types.go</code>'s <code>Workspace</code> struct): a directory-scoped file, read from beside the manifest, that names sibling repos and cluster contexts once instead of repeating them in every <code>ready.yaml</code>.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>services</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>empty</td><td>Service name → repo path. Lets a manifest or driving script resolve a sibling repo by name instead of a hardcoded absolute path.</td></tr>
+        <tr><td><code>contexts</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>empty</td><td>Named cluster context for the <code>k8s-attach</code> substrate, value in <code>&lt;kube-context&gt;@&lt;namespace&gt;</code> form (or just <code>&lt;namespace&gt;</code>, using the current kubeconfig context). No cluster credentials ever live here — only a context <em>name</em> resolved from the local kubeconfig, plus a namespace (ADR-0008).</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Honesty note:</strong> unlike <code>ready.yaml</code>, <code>workspace.yaml</code> has <strong>no JSON schema yet</strong> — <code>manifest.LoadWorkspace</code> parses it strictly (unknown fields rejected) against the Go struct directly, but there is no <code>spec/v0/workspace.schema.json</code> to point <code>pb lint</code> or an IDE at today.</p>
+
+    <h3>The "context@namespace" convention</h3>
+    <p>Within <code>contexts</code>, the key <code>k8s-attach</code> is special: <code>internal/substrate/k8sattach.go</code>'s <code>workspaceContext</code> reads <code>Contexts["k8s-attach"]</code> first. If that key is absent but exactly one context entry exists, that sole entry is used as the default instead (so a single-cluster workspace doesn't need to name the key explicitly). The value is split on the first <code>@</code>: the part before is the kubectl context, the part after is the namespace; with no <code>@</code>, the whole value is treated as a namespace against the current kubeconfig context.</p>
+    <pre><code>contexts:
+  k8s-attach: "redcat@redcat"   # &lt;kube-context&gt;@&lt;namespace&gt;</code></pre>
+
+    <h3>Full example</h3>
+    <p>From <code>fixtures/k8s-attach/workspace.yaml</code> (real, checked-in fixture):</p>
+    <pre><code>services:
+  appservice: /Users/prodigy/lyric/appservice
+  metadata-service: /Users/prodigy/lyric/metadata-service
+
+contexts:
+  # &lt;kube-context&gt;@&lt;namespace&gt;. redcat's app namespace; adjust to the granted
+  # namespace on your kubeconfig.
+  k8s-attach: "redcat@redcat"</code></pre>
+
+    <h2>Environment variables</h2>
+    <p>Every <code>PB_*</code> variable Proofbench reads (<code>grep -rn "Getenv" internal/ cmd/</code>):</p>
+    <table>
+      <thead><tr><th>Variable</th><th>Consumed by</th><th>Effect</th><th>Default</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>PB_K8S_CONTEXT</code></td>
+          <td><code>internal/substrate/k8sattach.go</code></td>
+          <td>Overrides the kubectl context the <code>k8s-attach</code> substrate targets, taking precedence over any context named in <code>workspace.yaml</code>.</td>
+          <td>the context resolved from <code>workspace.yaml</code>, else kubectl's current-context</td>
+          <td><code>export PB_K8S_CONTEXT=redcat</code></td>
+        </tr>
+        <tr>
+          <td><code>PB_K8S_NAMESPACE</code></td>
+          <td><code>internal/substrate/k8sattach.go</code></td>
+          <td>Overrides the granted namespace the <code>k8s-attach</code> substrate port-forwards into, taking precedence over <code>workspace.yaml</code>. Required (from one source or the other) — <code>k8s-attach</code> errors if no namespace resolves at all.</td>
+          <td>the namespace resolved from <code>workspace.yaml</code></td>
+          <td><code>export PB_K8S_NAMESPACE=redcat</code></td>
+        </tr>
+        <tr>
+          <td><code>PB_EXPERIMENTAL</code></td>
+          <td><code>cmd/pb/main.go</code></td>
+          <td>Gates <code>pb explore</code> (the embedded headless-agent runtime). Must be exactly <code>"1"</code>; anything else exits 2 with an explanatory message rather than running.</td>
+          <td>unset (feature off)</td>
+          <td><code>PB_EXPERIMENTAL=1 pb explore --manifest ready.yaml</code></td>
+        </tr>
+        <tr>
+          <td><code>PB_RUN_TIMEOUT</code></td>
+          <td><code>internal/evidence/run.go</code></td>
+          <td>Maximum duration for a command captured via <code>pb evidence run</code> / a check's exercise command, in Go duration syntax. Unset means no timeout is applied; a set-but-unparseable value is an error (a typo can't silently disable the timeout).</td>
+          <td>unset (no timeout)</td>
+          <td><code>export PB_RUN_TIMEOUT=5m</code></td>
+        </tr>
+        <tr>
+          <td><code>PB_CLAUDE_BIN</code></td>
+          <td><code>internal/agentruntime/claudecode.go</code></td>
+          <td>Overrides which <code>claude</code> executable the headless Claude Code adapter shells out to (resolved via <code>exec.LookPath</code>); used when the genuine binary isn't the one on <code>PATH</code>.</td>
+          <td><code>claude</code> resolved from <code>PATH</code></td>
+          <td><code>export PB_CLAUDE_BIN=/opt/claude-code/bin/claude</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Two non-<code>PB_*</code> variables are also read directly by the headless Claude Code adapter (<code>internal/agentruntime/claudecode.go</code>) because it inherits whatever auth the customer's own <code>claude</code> install already has: <code>ANTHROPIC_API_KEY</code> and <code>CLAUDE_CODE_OAUTH_TOKEN</code>. Proofbench never reads their values, only whether both happen to be set at once (surfaced as a preflight warning, since the API key silently outranks the subscription token in <code>-p</code> mode) — see <a href="headless-agents.html">Headless agents</a> for the full auth story and failure taxonomy.</p>
+
+    <h2>Precedence: env overrides workspace</h2>
+    <p><code>newK8sAttach</code> (<code>internal/substrate/k8sattach.go</code>) resolves context/namespace in this order, each step able to override the last:</p>
+    <ol>
+      <li>Load <code>workspace.yaml</code> beside the manifest, if present — <code>Contexts["k8s-attach"]</code>, else the sole context entry, supplies the default context/namespace.</li>
+      <li><code>PB_K8S_CONTEXT</code>, if set, overrides the context.</li>
+      <li><code>PB_K8S_NAMESPACE</code>, if set, overrides the namespace.</li>
+    </ol>
+    <p>So <code>workspace.yaml</code> is the checked-in default and the two env vars are the run-time override — the same manifest and workspace file can be pointed at a different cluster for one run without editing anything:</p>
+    <pre><code>export PB_K8S_CONTEXT=staging
+export PB_K8S_NAMESPACE=staging-appservice
+pb up --substrate k8s-attach --manifest ready.yaml</code></pre>
+
+    <nav class="page-nav" aria-label="Pagination">
+      <a href="manifest.html" rel="prev">← ready.yaml</a>
+      <a href="cli.html" rel="next">CLI →</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings. v0.1.0-dev.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="quickstart.html">Docs</a>
+        <a href="spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+<script src="../assets/docs.js" defer></script>
+</body>
+</html>

@@ -224,6 +224,7 @@ h4 { font-size: var(--text-lg); line-height: 1.35; font-weight: 500; }
 p { margin: 0; color: var(--ink-2); max-width: 68ch; }
 
 code, pre, kbd { font-family: var(--font-mono); }
+pre { overflow-x: auto; max-width: 100%; min-width: 0; }
 
 .tabular { font-variant-numeric: tabular-nums; }
 
@@ -367,6 +368,11 @@ section { padding: var(--space-7) 0; }
 
 @media (max-width: 760px) {
   .nav-links { display: none; }
+}
+
+@media (max-width: 480px) {
+  /* hero/footer CTAs cover it; the bar keeps logo + theme toggle */
+  .nav-cta .btn { display: none; }
 }
 
 .footer {
@@ -535,6 +541,58 @@ section { padding: var(--space-7) 0; }
   .sidebar, .toc { position: static; border: none; padding: 0; }
   .sidebar ul, .toc ul { flex-direction: row; flex-wrap: wrap; gap: 10px var(--space-3); }
 }
+
+/* ---------- 7b. Docs shell (sidebar + search chrome) ---------- */
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-6);
+  padding: var(--space-6) 0;
+  align-items: start;
+}
+
+.docs-shell > main { min-width: 0; }
+
+/* after the base rule so the collapse wins the equal-specificity cascade */
+@media (max-width: 980px) {
+  .docs-shell { grid-template-columns: minmax(0, 1fr); }
+}
+
+.docs-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -8px 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  overflow: hidden;
+}
+
+.docs-search-results a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+}
+
+.docs-search-results a:hover { background: var(--paper); }
+.docs-search-results .result-title { font-size: var(--text-sm); color: var(--ink); font-weight: 600; }
+.docs-search-results .result-heading { font-size: var(--text-xs); color: var(--ink-3); }
+
+.page-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+
+.page-nav a { color: var(--proof); }
+.page-nav-next { text-align: right; }
 
 /* ---------- 8. Tabs / copy button ---------- */
 
