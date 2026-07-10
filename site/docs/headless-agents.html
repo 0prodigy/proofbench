@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headless agents · Proofbench docs</title>
+<meta name="description" content="pb explore shells out to the customer's own genuine Claude Code CLI, inheriting whatever subscription or API auth is already installed — Proofbench never touches credentials.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="./quickstart.html">Docs</a>
+      <a href="./spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-layout">
+  <aside class="toc">
+    <p class="toc-title">Docs</p>
+    <ul>
+      <li><a href="./quickstart.html">Quickstart</a></li>
+      <li><a href="./manifest.html">Readiness manifest</a></li>
+      <li><a href="./evidence.html">Evidence bundle</a></li>
+      <li><a href="./proof-ladder.html">Proof ladder</a></li>
+      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
+      <li><a href="./headless-agents.html" class="active" aria-current="page">Headless agents</a></li>
+    </ul>
+  </aside>
+
+  <article class="prose">
+    <h1>Headless agents</h1>
+    <p><span class="badge badge-inconclusive">experimental</span></p>
+    <p><code>pb explore</code> is the embedded runtime that lets Proofbench itself drive an agent for an <strong>exploratory round</strong> — a single agent-driven computer-use or browser session — rather than only replaying checks a human already wrote. This feature is experimental (ADR-0014) and sits behind a flag.</p>
+
+    <h2>First adapter: genuine headless Claude Code</h2>
+    <p>The embedded runtime's first adapter is <strong>headless Claude Code</strong>: Proofbench shells out to the <strong>customer-installed, genuine <code>claude</code> binary</strong> (<code>claude -p --output-format stream-json</code>) rather than linking the Claude Agent SDK.</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">claude -p --output-format stream-json "..."</div>
+        </div>
+      </div>
+
+    <h2>Subscription auth story</h2>
+    <p>The adapter inherits whatever auth the customer already has — a subscription OAuth token from <code>claude setup-token</code> (<code>CLAUDE_CODE_OAUTH_TOKEN</code>), an <code>ANTHROPIC_API_KEY</code>, or Bedrock/Vertex credentials — with <strong>zero Proofbench involvement in credentials</strong>. Auth is entirely Claude Code's own concern; Proofbench never collects, stores, proxies, or pools credentials.</p>
+    <p>This is customer-operated genuine CLI, not credential proxying: the customer using their own subscription through the genuine Claude Code client (interactive, CI, scripts wrapping the CLI) is ordinary use; a vendor offering Claude login or pooling/proxying plan credentials on users' behalf is prohibited. Proofbench sits on the sanctioned side of that line by construction — it never offers Claude login and never routes requests through plan credentials on behalf of users.</p>
+    <ul>
+      <li>Never pass <code>--bare</code> on the subscription path — bare mode skips OAuth/keychain reads and does not read <code>CLAUDE_CODE_OAUTH_TOKEN</code>.</li>
+      <li>Never <code>--dangerously-skip-permissions</code> inside a customer repo.</li>
+      <li>Warn when <code>ANTHROPIC_API_KEY</code> is present alongside a subscription token — in <code>-p</code> mode the API key is always used when present and silently outranks the subscription (surprise metered spend).</li>
+    </ul>
+
+    <h2>Failure taxonomy</h2>
+    <p>Failures map to honest <code>not-run</code>/<code>inconclusive</code> states, never a false pass/fail:</p>
+    <table>
+      <thead><tr><th>Category</th><th>Triggers</th></tr></thead>
+      <tbody>
+        <tr><td><code>auth_invalid</code></td><td>authentication_failed, oauth_org_not_allowed, expired login</td></tr>
+        <tr><td><code>rate_limited</code></td><td>rate_limit, overloaded, billing_error — including the 5-hour rolling window and weekly cap</td></tr>
+        <tr><td><code>budget_exhausted</code></td><td><code>error_max_turns</code></td></tr>
+        <tr><td><code>protocol_error</code></td><td>non-zero exit with unparseable stdout, or <code>error_during_execution</code>/<code>error_interrupted</code>/<code>error_initialization</code></td></tr>
+      </tbody>
+    </table>
+    <p>Binary discovery and version pinning become part of the evidence record (<code>claude --version</code> captured per run); a missing/unexecutable binary yields <code>not_run(runtime_unavailable)</code>, never a failed check. Rate-limit and budget exhaustion are Proofbench's problem to schedule around — the harness backs off and retries the next window rather than marking a proof round failed.</p>
+
+    <h2>Agent-neutral contract</h2>
+    <p>The same adapter shape — discover binary → inherit customer auth → one-shot exec with a prompt → parse a terminal JSON record — fits <code>codex exec --json</code> (ChatGPT-plan CI auth is explicitly blessed by OpenAI's own docs), <code>gemini -p</code> (cached Google OAuth or <code>GEMINI_API_KEY</code>), and <code>openhands --headless</code> (BYO key via <code>LLM_API_KEY</code>; must run inside Proofbench's own sandbox since its headless mode is always-approve with no permission gating of its own). Adding a second engine is one more shell-out adapter sharing the same discover/auth-inherit/exec/parse contract and failure taxonomy, not a redesign.</p>
+
+    <h2>What counts as proof</h2>
+    <p>Nothing the agent merely <em>observed</em> in an exploratory round counts as proof. The only lasting output is <strong>durable automation</strong> — committed <code>checks[]</code> entries and Playwright specs — replayed deterministically by the harness thereafter. An exploratory round earns a rung on the <a href="./proof-ladder.html">proof ladder</a> only once it lands as a check the harness itself can re-run.</p>
+  </article>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="./quickstart.html">Docs</a>
+        <a href="./spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="./evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+</body>
+</html>

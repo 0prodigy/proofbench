@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec · Proofbench docs</title>
+<meta name="description" content="Proofbench spec/v0: the two versioned JSON Schema documents that are the interoperability contract — ready.yaml and the evidence bundle manifest.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="./quickstart.html">Docs</a>
+      <a href="./spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-layout">
+  <aside class="toc">
+    <p class="toc-title">Docs</p>
+    <ul>
+      <li><a href="./quickstart.html">Quickstart</a></li>
+      <li><a href="./manifest.html">Readiness manifest</a></li>
+      <li><a href="./evidence.html">Evidence bundle</a></li>
+      <li><a href="./proof-ladder.html">Proof ladder</a></li>
+      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
+      <li><a href="./headless-agents.html">Headless agents</a></li>
+    </ul>
+  </aside>
+
+  <article class="prose">
+    <h1>Spec — spec/v0</h1>
+    <p>The versioned JSON Schema (draft 2020-12) definitions for the two core Proofbench documents live at <a href="https://github.com/launchwings/proofbench/tree/main/spec/v0"><code>spec/v0</code></a> in the repo. The schemas are the <strong>interoperability contract</strong>: any tool that produces or consumes these documents — the <code>pb</code> CLI, the hub renderer, third-party runners — must conform to them.</p>
+
+    <h2>Documents</h2>
+    <h3><a href="./manifest.html"><code>ready.schema.json</code> — Readiness Manifest</a></h3>
+    <p>Governs <code>ready.yaml</code>, the per-repo declarative spec of how a service becomes runnable and testable on any substrate. A manifest answers: what are this service's dependencies, how do you start it, how do you know it's healthy, how do you exercise it, and what must be true for the run to be valid?</p>
+    <p>Key design principle: <strong>derive, don't restate.</strong> A manifest points into existing truth (compose files, <code>devcontainer.json</code>, <code>AGENTS.md</code>) via <code>sources</code> rather than duplicating it.</p>
+    <p>Required top-level fields: <code>service</code>, <code>run</code> (specifically <code>run.modes</code>). See the full <a href="./manifest.html">field-by-field reference</a>.</p>
+
+    <h3><a href="./evidence.html"><code>evidence-v2.schema.json</code> — Evidence Bundle Manifest</a></h3>
+    <p>Governs <code>evidence/&lt;runId&gt;/manifest.json</code>, the machine-checkable record of one verification run. A bundle answers: what was claimed, what was exercised, what was observed, and what is the verdict?</p>
+    <p>Required top-level fields: <code>schema</code> (must be <code>2</code>), <code>runId</code>, <code>claim</code>, <code>phase</code>, <code>startedAt</code>, <code>artifacts</code>, <code>verdict</code>. See the full <a href="./evidence.html">evidence bundle reference</a>.</p>
+
+    <h2>Versioning policy</h2>
+    <p><code>spec/v0</code> is <strong>frozen once the <code>v0</code> tag is pushed to the repository.</strong> After that point:</p>
+    <ul>
+      <li>Additive changes only within a version: new optional fields may be added; no existing field may be removed, renamed, or have its type narrowed; no new required fields may be added to an already-released schema.</li>
+      <li>Breaking changes require a new version directory (<code>spec/v1</code>, etc.) with a new <code>$id</code> URI and a migration note.</li>
+      <li>The Go types in <code>internal/evidence/types.go</code> and <code>internal/manifest/types.go</code> are the source of truth. Any discrepancy between those types and these schemas is a bug in the schemas, not the types.</li>
+    </ul>
+
+    <h2>Proof ladder</h2>
+    <p>Every evidence bundle names the highest rung it reached — see the full <a href="./proof-ladder.html">proof ladder reference</a>. A bundle that does not reach its declared check's level must record the blocking check as <code>not-run</code> with a <code>reason</code>, and set <code>verdict</code> to <code>inconclusive</code>.</p>
+  </article>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="./quickstart.html">Docs</a>
+        <a href="./spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="./evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+</body>
+</html>

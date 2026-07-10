@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>k8s-attach (BYOC) · Proofbench docs</title>
+<meta name="description" content="The fourth substrate: attach-only against your own cluster. Never creates or deletes cluster objects — only port-forwards and reads.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="./quickstart.html">Docs</a>
+      <a href="./spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-layout">
+  <aside class="toc">
+    <p class="toc-title">Docs</p>
+    <ul>
+      <li><a href="./quickstart.html">Quickstart</a></li>
+      <li><a href="./manifest.html">Readiness manifest</a></li>
+      <li><a href="./evidence.html">Evidence bundle</a></li>
+      <li><a href="./proof-ladder.html">Proof ladder</a></li>
+      <li><a href="./k8s-attach.html" class="active" aria-current="page">k8s-attach (BYOC)</a></li>
+      <li><a href="./headless-agents.html">Headless agents</a></li>
+    </ul>
+  </aside>
+
+  <article class="prose">
+    <h1>k8s-attach (BYOC)</h1>
+    <p><code>k8s-attach</code> is the fourth substrate: it never creates or deletes anything in a cluster (Shape-A, ADR-0011). <code>pb up --substrate k8s-attach</code> only asserts that the target pods are live and opens <code>kubectl port-forward</code> tunnels; <code>pb down</code> only kills the forwards it opened.</p>
+
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb up --substrate k8s-attach --manifest ready.yaml</div>
+          <div class="term-line t-out">forward svc/appservice:8000 -&gt; 127.0.0.1:54217</div>
+        </div>
+      </div>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb ready --manifest ready.yaml</div>
+          <div class="term-line t-pass">ready tcp 127.0.0.1:54217 -&gt; ok</div>
+        </div>
+      </div>
+    <p>One <code>forward ...</code> line per tunnel opened (one per unique locator — a resource and <code>sources.k8s</code> naming the same locator share a single tunnel), and one <code>ready ...</code> line naming the resolved probe and its outcome.</p>
+
+    <h2>Naming the cluster context</h2>
+    <p>Put a <code>workspace.yaml</code> next to your manifest naming the kubectl context and the granted namespace to forward into:</p>
+    <pre><code>contexts:
+  k8s-attach: "redcat@redcat"   # &lt;kube-context&gt;@&lt;namespace&gt;</code></pre>
+    <p>Override at run time without editing the file:</p>
+    <pre><code>export PB_K8S_CONTEXT=redcat
+export PB_K8S_NAMESPACE=redcat</code></pre>
+    <p><code>PB_K8S_CONTEXT</code> / <code>PB_K8S_NAMESPACE</code> always win over <code>workspace.yaml</code>. From the real fixture (<code>fixtures/k8s-attach/workspace.yaml</code>): no cluster credentials live in this file (ADR-0008) — only a context name resolved from the local kubeconfig, plus a namespace.</p>
+    <pre><code>services:
+  appservice: /Users/prodigy/lyric/appservice
+  metadata-service: /Users/prodigy/lyric/metadata-service
+
+contexts:
+  k8s-attach: "redcat@redcat"</code></pre>
+
+    <h2>Resource placeholders</h2>
+    <p><code>resources.&lt;name&gt;.via.k8s</code> names what to forward (e.g. <code>svc/appservice:8000</code>). <code>pb up</code> binds each to an ephemeral local port; reference the live forward anywhere in the manifest — probes, drive verbs, checks — with:</p>
+    <pre><code>${resources.&lt;name&gt;.host}
+${resources.&lt;name&gt;.port}</code></pre>
+    <p>Env can also be <strong>derived</strong> from a live pod instead of a checked-in file:</p>
+    <pre><code>run:
+  local:
+    env:
+      derive:
+        from: k8s-pod
+        pod: "deploy/appservice"</code></pre>
+
+    <h2>Attach-only guarantee</h2>
+    <p><code>k8s-attach</code> is read/observe only: port-forward, read (<code>kubectl get</code>), and <code>exec</code>-based env derivation. It never applies, creates, deletes, or scales a cluster object.</p>
+
+    <h2>requires-gating</h2>
+    <p>Destructive actions a drive verb performs (firing an execution, writing a scenario doc) are the drive verb's own doing and must carry a <code>gates[]</code> entry — the substrate itself only opens tunnels. Checks that need an ID the harness can't fabricate (an execution ID, a scenario ID) declare it in <code>requires</code>; unset at verify time, the check records honest <code>not-run</code> rather than a hard fail or a fake pass. From the real ENG-17397 fixture (<code>fixtures/k8s-attach/eng-17397-actions-controls.ready.yaml</code>):</p>
+    <pre><code>checks:
+  - name: action-resolution
+    level: L4
+    exercise: "drive.read-execution"
+    expect:
+      - "jsonpath(execution.json,selectedAction)==$PB_EXPECTED_ACTION"
+    requires: [PB_EXECUTION_ID, PB_EXPECTED_ACTION]
+
+gates:
+  - on: fire-execution
+    reason: >-
+      firing a note execution consumes cluster compute and mutates the
+      executions/scenarios collections on a shared BYOC cluster — a human
+      confirms the target scenario/sequence IDs before the run.
+  - on: configure-action
+    reason: >-
+      writes scenarios.selectedNotesActions on a live scenario doc; confirm
+      the scenario is a throwaway proof scenario, not a shared fixture.</code></pre>
+    <p>In a real run, two <code>L4</code> checks and the <code>L5</code> Playwright check recorded honest <code>not-run</code> because <code>PB_EXECUTION_ID</code> was unset and a spec file hadn't landed yet — see the <a href="./evidence.html">evidence bundle reference</a> for the actual bundle. The proof level was reported at <code>L3</code>, not inflated.</p>
+
+    <h2>Redeploy caveat</h2>
+    <p>A port-forward pins to the pod(s) live when <code>pb up</code> ran. If the target rolls out (a new deploy, a pod restart) while forwards are open, the tunnel goes stale — the local port stays bound but the far end is gone. <code>pb ready</code> / <code>pb verify</code> will fail against a dead forward. Recover with:</p>
+    <pre><code>pb down --manifest ready.yaml
+pb up --substrate k8s-attach --manifest ready.yaml</code></pre>
+    <p>There is no live re-attach yet; always cycle <code>down</code>/<code>up</code> after a rollout of anything you're attached to.</p>
+  </article>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="./quickstart.html">Docs</a>
+        <a href="./spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="./evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+</body>
+</html>

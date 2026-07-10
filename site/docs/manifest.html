@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Readiness manifest · Proofbench docs</title>
+<meta name="description" content="Field-by-field reference for ready.yaml, generated from spec/v0/ready.schema.json: service, run, resources, seed, drive, checks, gates, known_walls.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="./quickstart.html">Docs</a>
+      <a href="./spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-layout">
+  <aside class="toc">
+    <p class="toc-title">Docs</p>
+    <ul>
+      <li><a href="./quickstart.html">Quickstart</a></li>
+      <li><a href="./manifest.html" class="active" aria-current="page">Readiness manifest</a></li>
+      <li><a href="./evidence.html">Evidence bundle</a></li>
+      <li><a href="./proof-ladder.html">Proof ladder</a></li>
+      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
+      <li><a href="./headless-agents.html">Headless agents</a></li>
+    </ul>
+  </aside>
+
+  <article class="prose">
+    <h1>Readiness manifest</h1>
+    <p><code>ready.yaml</code> is the per-repo declarative spec of how a service becomes runnable and testable on any substrate. This page is generated from <a href="https://github.com/launchwings/proofbench/blob/main/spec/v0/ready.schema.json"><code>spec/v0/ready.schema.json</code></a> — every field description below is the schema's own.</p>
+    <blockquote>Derive, don't restate — a manifest points into existing truth (compose files, <code>devcontainer.json</code>, Makefile, <code>AGENTS.md</code>) instead of duplicating it.</blockquote>
+
+    <h2>Top level</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>service</code></td><td>string</td><td>yes</td><td>Short identifier for this service (e.g. 'orders-api'). Used as a key in workspace.yaml and as a human-readable label.</td></tr>
+        <tr><td><code>role</code></td><td>string</td><td>no</td><td>One-sentence description of what this service does (e.g. 'REST API for order lifecycle'). Aids auto-generated documentation.</td></tr>
+        <tr><td><code>sources</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>Map of source-type name to file path for existing project files the harness should read instead of duplicating. Common keys: compose, devcontainer, agentsmd. The harness derives deps, healthchecks, and env from these files.</td></tr>
+        <tr><td><code>run</code></td><td>RunSpec</td><td>yes</td><td>Declares the supported run modes and how to start and probe the service.</td></tr>
+        <tr><td><code>resources</code></td><td>object (map&lt;string,Resource&gt;)</td><td>no</td><td>Map of resource name to Score-style typed dependency. Resources are resolved per substrate via their 'via' map. Use '${resources.&lt;name&gt;.host}' placeholders in env overrides.</td></tr>
+        <tr><td><code>seed</code></td><td>SeedStep[]</td><td>no</td><td>Ordered list of seed steps (schema migrations, fixture loading) that prepare the service's data layer. Steps are run in order, after their 'after' dependencies are satisfied.</td></tr>
+        <tr><td><code>drive</code></td><td>object (map&lt;string,DriveVerb&gt;)</td><td>no</td><td>Map of verb name to real product entrypoints the harness may exercise. Drive verbs run actual product paths, not test look-alikes.</td></tr>
+        <tr><td><code>checks</code></td><td>CheckSpec[]</td><td>no</td><td>Ordered list of declared validation surfaces. Each check names the proof-ladder level it proves and the predicates that must hold.</td></tr>
+        <tr><td><code>gates</code></td><td>Gate[]</td><td>no</td><td>Human gates on destructive or irreversible steps (e.g. cluster deploys, prod writes). A gate blocks the step until approved; an unapproved gate yields 'inconclusive', never a fake pass.</td></tr>
+        <tr><td><code>known_walls</code></td><td>Wall[]</td><td>no</td><td>Known failure traps for this service: symptom, root cause, and recovery recipe. Agents and humans consult these before debugging.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>run (RunSpec)</h2>
+    <p>Supported run modes and the start/probe recipe for each. <code>modes</code> lists the substrates this service can run on; <code>local</code> provides the bare-process recipe; <code>ready</code> is the readiness probe.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>modes</code></td><td>string[] (enum)</td><td>yes</td><td>Substrates this service supports. At least one required. Values: local (bare process), compose (Docker Compose), k8s-attach (BYOC port-forward), remote (delegate to provider).</td></tr>
+        <tr><td><code>local</code></td><td>LocalRun</td><td>when <code>local</code> in modes</td><td>Bare-process (local substrate) start recipe.</td></tr>
+        <tr><td><code>ready</code></td><td>Probe</td><td>no</td><td>Readiness probe using k8s probe vocabulary. The harness polls this until the service reports healthy or the timeout expires.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>run.local (LocalRun)</h3>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>start</code></td><td>string</td><td>no</td><td>Shell command to start the service (e.g. 'npm run dev', 'go run ./cmd/server'). Runs in the repo root.</td></tr>
+        <tr><td><code>env</code></td><td>EnvSpec</td><td>no</td><td>Environment configuration for the process.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>run.local.env (EnvSpec)</h3>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>file</code></td><td>string</td><td>no</td><td>Relative path to a .env-style file whose variables are loaded into the process environment (e.g. '.env.local').</td></tr>
+        <tr><td><code>overrides</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>Key-value overrides applied after the file is loaded. Values may reference Score-style resource placeholders (e.g. '${resources.db.host}').</td></tr>
+        <tr><td><code>derive</code></td><td>DeriveSpec</td><td>no</td><td>Derive environment from a live source (e.g. a running pod) instead of a checked-in file, so config tracks the cluster. Optional.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>run.local.env.derive (DeriveSpec)</h3>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>from</code></td><td>string (enum)</td><td>yes</td><td>Source kind to derive environment from. Supported: 'k8s-pod' (a running pod's environment).</td></tr>
+        <tr><td><code>pod</code></td><td>string</td><td>no</td><td>For 'k8s-pod': the pod name, a 'deploy/&lt;name&gt;' / 'svc/&lt;name&gt;' selector, or an 'app=&lt;label&gt;' selector to read env from. Defaults to the service's own workload when omitted.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>run.ready (Probe)</h3>
+    <p>Specify exactly one of <code>http</code>, <code>tcp</code>, or <code>exec</code>.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>http</code></td><td>string</td><td>no</td><td>HTTP GET target in ':port/path' or 'host:port/path' form (e.g. ':8080/healthz'). The harness polls until it gets a 2xx response.</td></tr>
+        <tr><td><code>tcp</code></td><td>string</td><td>no</td><td>TCP dial target in ':port' or 'host:port' form. The harness polls until the connection succeeds.</td></tr>
+        <tr><td><code>exec</code></td><td>string</td><td>no</td><td>Shell command whose exit code 0 signals readiness (e.g. 'pg_isready -h localhost').</td></tr>
+        <tr><td><code>timeout</code></td><td>string (Go duration)</td><td>no</td><td>Maximum time to wait for readiness in Go duration syntax (e.g. '60s', '2m'). Defaults to 60s if omitted.</td></tr>
+        <tr><td><code>interval</code></td><td>string (Go duration)</td><td>no</td><td>How often to poll the probe in Go duration syntax (e.g. '2s'). Defaults to 2s if omitted.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>resources (Resource)</h2>
+    <p>A Score-style typed dependency (database, queue, service). The <code>via</code> map resolves the locator per substrate name. Placeholder <code>${resources.&lt;name&gt;.host}</code> is available in env overrides.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>type</code></td><td>string</td><td>yes</td><td>Semantic resource type (e.g. 'postgres', 'kafka', 'redis', 'service'). The harness uses this to apply substrate-specific defaults.</td></tr>
+        <tr><td><code>via</code></td><td>object (map&lt;string,string&gt;)</td><td>no</td><td>Map of substrate name to locator string for this resource on that substrate (e.g. {'compose': 'postgres', 'k8s': 'svc/orders-db'}).</td></tr>
+        <tr><td><code>optional</code></td><td>boolean</td><td>no</td><td>If true, the harness skips this resource when unavailable instead of failing the run. Defaults to false.</td></tr>
+        <tr><td><code>repo</code></td><td>string</td><td>no</td><td>For type 'service': relative or absolute path to the dependency's repo root, used when the harness needs to bring up the dependency locally.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>seed[] (SeedStep)</h2>
+    <p>One seed task (schema migration, fixture load, data initialisation) with an explicit dependency ordering.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code></td><td>string</td><td>yes</td><td>Unique name for this seed step within the manifest, used as a dependency reference in other steps' 'after' lists.</td></tr>
+        <tr><td><code>run</code></td><td>string</td><td>yes</td><td>Shell command to execute (e.g. 'npm run db:migrate'). Runs in the repo root.</td></tr>
+        <tr><td><code>after</code></td><td>string[]</td><td>no</td><td>Names of seed steps or resource names that must complete successfully before this step runs.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>drive (DriveVerb)</h2>
+    <p>A real product entrypoint the harness may invoke. Drive verbs exercise actual product paths (not test look-alikes) and may inject identity credentials.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>run</code></td><td>string</td><td>yes</td><td>Shell command to invoke the entrypoint (e.g. './scripts/create-order.sh'). Runs in the repo root.</td></tr>
+        <tr><td><code>identity</code></td><td>string</td><td>no</td><td>Identity injection recipe. 'env:VAR_NAME' reads from an environment variable; other forms TBD.</td></tr>
+        <tr><td><code>output</code></td><td>string (enum: json, text)</td><td>no</td><td>Expected output format of the command for structured parsing (e.g. 'json', 'text').</td></tr>
+      </tbody>
+    </table>
+
+    <h2>checks[] (CheckSpec)</h2>
+    <p>A declared validation surface: what to exercise, the proof-ladder level it proves, and the predicates that must hold. Results are captured in the evidence bundle's <code>checks[]</code> array.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code></td><td>string</td><td>yes</td><td>Unique name for this check within the manifest. Must match the corresponding Check.name in the evidence bundle.</td></tr>
+        <tr><td><code>level</code></td><td>string (enum L0–L5)</td><td>yes</td><td>Proof-ladder rung this check proves when it passes. L0=static-valid, L1=builds/loads, L2=unit-green, L3=up+healthy, L4=effect-verified, L5=end-to-end observed.</td></tr>
+        <tr><td><code>driver</code></td><td>string (enum: exec, playwright)</td><td>no</td><td>CheckDriver that exercises this check (driver-interfaces §3). Optional, default 'exec' (bash -lc, teed). 'playwright' shells the Playwright CLI and captures trace/screenshots as tool-provenance artifacts.</td></tr>
+        <tr><td><code>exercise</code></td><td>string</td><td>no</td><td>What to run for this check: a drive verb reference (e.g. 'drive.create-order') or a shell command (e.g. 'playwright tests/e2e/order.spec.ts').</td></tr>
+        <tr><td><code>expect</code></td><td>string[]</td><td>no</td><td>List of predicate expressions that must all hold for the check to pass — see the grammar below.</td></tr>
+        <tr><td><code>artifacts</code></td><td>string[] (enum)</td><td>no</td><td>Artifact types the harness should capture for this check (e.g. 'screenshot', 'trace'). Values: command, snapshot, screenshot, log, recording, link.</td></tr>
+        <tr><td><code>requires</code></td><td>string[]</td><td>no</td><td>environment inputs this check needs; unset at verify time =&gt; the check records not-run</td></tr>
+      </tbody>
+    </table>
+
+    <h3>expect grammar</h3>
+    <p>Implemented in <code>internal/evidence/assert.go</code>, one predicate per string:</p>
+    <ul>
+      <li><code>exitCode(&lt;artifactName&gt;)==&lt;int&gt;</code> — exit code recorded in a command artifact's meta</li>
+      <li><code>nonempty(&lt;path&gt;)</code> — file exists and has size &gt; 0</li>
+      <li><code>rows(&lt;path&gt;)&gt;&lt;int&gt;</code> — JSON-array length, else non-empty line count, exceeds int</li>
+      <li><code>http(&lt;url&gt;)==&lt;int&gt;</code> — GET &lt;url&gt; returns status &lt;int&gt;</li>
+      <li><code>equal(&lt;pathA&gt;,&lt;pathB&gt;)</code> — two files are byte-identical</li>
+      <li><code>jsonpath(&lt;artifact&gt;,&lt;path&gt;)==&lt;value&gt;</code> or <code>~=&lt;regex&gt;</code> — dotted-key path into a captured JSON artifact; bare numeric segments index arrays</li>
+      <li><code>contains(&lt;artifact&gt;,&lt;path&gt;,&lt;value&gt;)</code> — one-level scan of the resolved array/object for &lt;value&gt;</li>
+    </ul>
+    <p>Examples: <code>exitCode(order-roundtrip)==0</code>, <code>http(http://localhost:8391/healthz)==200</code>, <code>rows(orders.json)&gt;0</code>, <code>jsonpath(execution.json,selectedAction)==quick_run</code>.</p>
+
+    <h2>gates[] (Gate)</h2>
+    <p>A human gate on a destructive or irreversible step. An ungated destructive step must never execute autonomously.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>on</code></td><td>string</td><td>yes</td><td>The trigger event or action that requires human approval (e.g. 'deploy', 'drop-table', 'prod-write').</td></tr>
+        <tr><td><code>reason</code></td><td>string</td><td>yes</td><td>Human-readable explanation of why this gate exists (e.g. 'cluster release is irreversible').</td></tr>
+      </tbody>
+    </table>
+
+    <h2>known_walls[] (Wall)</h2>
+    <p>A known failure trap: observed symptom, root cause, and recovery recipe. Agents consult <code>known_walls</code> before spending time debugging.</p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>symptom</code></td><td>string</td><td>yes</td><td>Observable symptom string (error message, log line, or behavior) that signals this trap (e.g. '401 from artifact registry').</td></tr>
+        <tr><td><code>cause</code></td><td>string</td><td>yes</td><td>Root cause of the symptom in plain language (e.g. 'token expiry').</td></tr>
+        <tr><td><code>recover</code></td><td>string</td><td>yes</td><td>Shell command or step sequence to recover from this trap (e.g. 'gcloud auth print-access-token | docker login ...').</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Example — local substrate</h2>
+    <p>From <code>examples/basic/ready.yaml</code>:</p>
+    <pre><code>service: basic-orders
+role: Minimal HTTP order-capture service (Proofbench example)
+
+run:
+  modes: [local]
+  local:
+    start: go run .
+  ready:
+    http: ":8391/healthz"
+    timeout: 30s
+    interval: 1s
+
+drive:
+  create-order:
+    run: "curl -sf -X POST http://localhost:8391/orders -H 'Content-Type: application/json' -d '{\"item\":\"widget\",\"qty\":1}'"
+    output: json
+
+checks:
+  - name: up
+    level: L3
+    exercise: "curl -sf http://localhost:8391/healthz"
+    expect:
+      - "http(http://localhost:8391/healthz)==200"
+
+  - name: order-roundtrip
+    level: L4
+    exercise: drive.create-order
+    expect:
+      - "exitCode(order-roundtrip)==0"
+      - "rows(orders.json)>0"</code></pre>
+
+    <h2>Example — k8s-attach substrate</h2>
+    <p>Trimmed from <code>fixtures/k8s-attach/eng-17397-actions-controls.ready.yaml</code> — a full BYOC proof against a live cluster (see <a href="./k8s-attach.html">k8s-attach</a> for the full walkthrough):</p>
+    <pre><code>service: appservice
+role: >-
+  Lyric note-execution + Actions &amp; Controls (ENG-17397). Proves per-scenario
+  action resolution, run-override precedence, ... against a live BYOC appservice.
+
+sources:
+  k8s: "svc/appservice:8000"
+  repo: /Users/prodigy/lyric/appservice
+
+run:
+  modes: [k8s-attach]
+  local:
+    env:
+      derive:
+        from: k8s-pod
+        pod: "deploy/appservice"
+  ready:
+    tcp: "${resources.appservice.host}:${resources.appservice.port}"
+    timeout: 60s
+    interval: 2s
+
+resources:
+  appservice:
+    type: service
+    via:
+      k8s: "svc/appservice:8000"
+    repo: /Users/prodigy/lyric/appservice
+  mongo:
+    type: mongodb
+    via:
+      k8s: "svc/mongodb-svc:27017"
+  kafka:
+    type: kafka
+    via:
+      k8s: "svc/kafka-cluster-kafka-brokers:9092"
+
+drive:
+  configure-action:
+    run: >-
+      ~/.claude/skills/lyric-qa/scripts/lyric-mongo.sh --env "$PB_K8S_NAMESPACE"
+      --context "$PB_K8S_CONTEXT" --db lyric --eval "..."
+    output: json
+  fire-execution:
+    run: >-
+      ~/.claude/skills/lyric-qa/scripts/lyric-fire-execution.sh
+      --env "$PB_K8S_NAMESPACE" --context "$PB_K8S_CONTEXT"
+      --scenario-id "$PB_SCENARIO_A" --sequence-id "$PB_SEQUENCE_ID"
+      --sequence-note-id "$PB_SEQ_NOTE_ID"
+    output: json
+
+checks:
+  - name: appservice-up
+    level: L3
+    exercise: >-
+      curl -sf -o /dev/null "http://${resources.appservice.host}:${resources.appservice.port}/health"
+    expect:
+      - "exitCode(appservice-up)==0"
+
+  - name: action-resolution
+    level: L4
+    exercise: "drive.read-execution"
+    expect:
+      - "jsonpath(execution.json,selectedAction)==$PB_EXPECTED_ACTION"
+    requires: [PB_EXECUTION_ID, PB_EXPECTED_ACTION]
+
+gates:
+  - on: fire-execution
+    reason: >-
+      firing a note execution consumes cluster compute and mutates the
+      executions/scenarios collections on a shared BYOC cluster — a human
+      confirms the target scenario/sequence IDs before the run.
+
+known_walls:
+  - symptom: "execution.selectedAction is null / falls back to defaultAction"
+    cause: >-
+      selectedNotesActions must be keyed by SEQUENCE-NOTE-ID, not noteId —
+      the wrong key is a silent no-op.
+    recover: >-
+      key configure-action / --selected-notes-actions by the sequenceNote
+      _id (PB_SEQ_NOTE_ID), not the noteId.</code></pre>
+  </article>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="./quickstart.html">Docs</a>
+        <a href="./spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="./evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+</body>
+</html>

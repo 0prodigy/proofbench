@@ -3,3 +3,4 @@ bin/
 fixtures/local/
 node_modules/
 __pycache__/
+site/.preview/

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quickstart · Proofbench docs</title>
+<meta name="description" content="Bring up examples/basic, run pb up / ready / seed / verify, and read the evidence bundle it produces — a full Proofbench walkthrough in about 60 seconds.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="../index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="./quickstart.html">Docs</a>
+      <a href="./spec.html">Spec</a>
+      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-primary" href="./quickstart.html">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-layout">
+  <aside class="toc">
+    <p class="toc-title">Docs</p>
+    <ul>
+      <li><a href="./quickstart.html" class="active" aria-current="page">Quickstart</a></li>
+      <li><a href="./manifest.html">Readiness manifest</a></li>
+      <li><a href="./evidence.html">Evidence bundle</a></li>
+      <li><a href="./proof-ladder.html">Proof ladder</a></li>
+      <li><a href="./k8s-attach.html">k8s-attach (BYOC)</a></li>
+      <li><a href="./headless-agents.html">Headless agents</a></li>
+    </ul>
+  </aside>
+
+  <article class="prose">
+    <h1>Quickstart</h1>
+    <p>This guide walks through a full Proofbench verification in about 60 seconds using the <code>examples/basic</code> service — a minimal HTTP server with a <code>/healthz</code> endpoint and a <code>POST /orders</code> endpoint that appends to a JSON file. No Docker required.</p>
+
+    <h2>Prerequisites</h2>
+    <ul>
+      <li>Go 1.23 or later</li>
+      <li><code>curl</code> (for the drive verb in the example)</li>
+    </ul>
+    <p>Build the CLI:</p>
+    <pre><code>git clone https://github.com/launchwings/proofbench
+cd proofbench
+go build -o bin/pb ./cmd/pb
+export PATH="$PWD/bin:$PATH"</code></pre>
+
+    <h2>Step 1 — Explore the example</h2>
+    <pre><code>ls examples/basic/</code></pre>
+    <pre><code>main.go     ready.yaml     README.md</code></pre>
+    <p><code>main.go</code> is an HTTP server on port 8391. <code>ready.yaml</code> declares how to bring it up, how to exercise it, and what to verify.</p>
+
+    <h2>Step 2 — Generate your own manifest (optional)</h2>
+    <p>For your own repo, run:</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb init</div>
+          <div class="term-line t-out">ready.yaml</div>
+        </div>
+      </div>
+    <p>Proofbench auto-detects your project (Procfile, compose file, <code>package.json</code> scripts, <code>AGENTS.md</code>) and writes a <code>ready.yaml</code> draft. For this walkthrough we use the one already in <code>examples/basic/</code>.</p>
+
+    <h2>Step 3 — Bring the service up</h2>
+    <p>This runs the <code>start</code> command from <code>run.local.start</code> in the manifest (<code>go run .</code>).</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">cd examples/basic &amp;&amp; pb up --substrate local --manifest ready.yaml</div>
+          <div class="term-line t-out">starting basic-orders (local)</div>
+        </div>
+      </div>
+
+    <h2>Step 4 — Wait for readiness</h2>
+    <p>Polls the probe declared in <code>run.ready</code> (<code>http :8391/healthz</code>) until it returns 200 or times out.</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb ready --manifest ready.yaml</div>
+          <div class="term-line t-pass">ready: http :8391/healthz -&gt; 200 OK</div>
+        </div>
+      </div>
+
+    <h2>Step 5 — Seed data (if applicable)</h2>
+    <p>Runs each step in <code>seed[]</code> in dependency order. The basic example has no seed steps, so this is a no-op:</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb seed --manifest ready.yaml</div>
+          <div class="term-line t-notrun">seed: no steps declared</div>
+        </div>
+      </div>
+
+    <h2>Step 6 — Run a verification</h2>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb verify \</div>
+          <div class="term-line t-cmd">&nbsp;&nbsp;--manifest ready.yaml \</div>
+          <div class="term-line t-cmd">&nbsp;&nbsp;--ticket ENG-001 \</div>
+          <div class="term-line t-cmd">&nbsp;&nbsp;--claim "orders endpoint appends to orders.json"</div>
+          <div class="term-line t-out">bundle:  evidence/20260704-101500-verify</div>
+          <div class="term-line t-out">proof:   L4</div>
+          <div class="term-line t-out">verdict: pass</div>
+          <div class="term-line t-pass">&nbsp;&nbsp;[pass] up</div>
+          <div class="term-line t-pass">&nbsp;&nbsp;[pass] order-roundtrip</div>
+        </div>
+      </div>
+    <p>Proofbench:</p>
+    <ol>
+      <li>Creates an evidence bundle directory under <code>evidence/</code>.</li>
+      <li>Executes each check declared in <code>checks[]</code>.</li>
+      <li>Wraps every command in the capture harness (tee + exit code recorded).</li>
+      <li>Evaluates the <code>expect</code> predicates.</li>
+      <li>Writes the bundle manifest (<code>manifest.json</code>) and seals it.</li>
+    </ol>
+    <blockquote>A non-zero exit code means at least one check failed or the verdict is not <code>pass</code>. The bundle is written regardless — an honest fail is still evidence.</blockquote>
+
+    <h2>Step 7 — Read the report</h2>
+    <pre><code>pb report evidence/20260704-101500-verify</code></pre>
+    <p>Prints a Markdown report you can paste into a PR comment or Jira ticket:</p>
+    <pre><code># Evidence bundle: 20260704-101500-verify
+
+**Claim:** orders endpoint appends to orders.json
+**Ticket:** ENG-001
+**Proof level:** L4
+**Verdict:** pass
+
+## Checks
+
+| Name | State | Expect | Observed |
+|------|-------|--------|----------|
+| up | pass | http(http://localhost:8391/healthz)==200 | 200 |
+| order-roundtrip | pass | exitCode(order-roundtrip)==0, rows(orders.json)&gt;0 | exit 0, 1 row |
+
+## Artifacts
+
+- `01-up.log` (command, harness)
+- `02-order-roundtrip.log` (command, harness)</code></pre>
+
+    <h2>Step 8 — Build a hub index</h2>
+    <p>Writes an HTML index over every bundle under <code>evidence/</code>. Open <code>.pb/hub/index.html</code> in a browser to browse all runs for this repo.</p>
+    <div class="term">
+        <div class="term-chrome">
+          <span class="term-dot f"></span>
+          <span class="term-dot n"></span>
+          <span class="term-dot p"></span>
+        </div>
+        <div class="term-body">
+          <div class="term-line t-cmd">pb hub --root evidence --out .pb/hub/index.html</div>
+          <div class="term-line t-out">.pb/hub/index.html</div>
+        </div>
+      </div>
+
+    <h2>Bring the service down</h2>
+    <pre><code>pb down --manifest ready.yaml</code></pre>
+    <p>Stops the process started by <code>pb up</code>.</p>
+
+    <h2>What's in an evidence bundle?</h2>
+    <pre><code>evidence/20260704-101500-verify/
+  manifest.json          # schema v2: checks, artifacts, verdict, proof level
+  01-up.log              # captured stdout+stderr from the health check drive
+  02-order-roundtrip.log # captured stdout+stderr from the order drive verb</code></pre>
+    <p><code>manifest.json</code> is the source of truth. It records the claim and ticket, the proof-ladder level reached (<code>L0</code>–<code>L5</code>), each check's name/state/expect/observed, each artifact's type/path/SHA-256/provenance, and the verdict, set last from the check results. The format is open — see the <a href="./evidence.html">evidence bundle reference</a>.</p>
+
+    <h2>Next steps</h2>
+    <ul>
+      <li>Add your own <code>ready.yaml</code> to a real service — see the <a href="./manifest.html">readiness manifest reference</a>.</li>
+      <li>Add drive verbs that exercise real product entrypoints.</li>
+      <li>Add L4 checks that assert observable effects (rows in a database, API responses, file contents) — see the <a href="./proof-ladder.html">proof ladder</a>.</li>
+      <li>Use <code>pb evidence run</code> and <code>pb evidence assert</code> in shell scripts to build checks outside the manifest.</li>
+      <li>Use <code>--substrate compose</code> to run against Docker Compose, or attach to a live cluster with <a href="./k8s-attach.html"><code>--substrate k8s-attach</code></a>.</li>
+    </ul>
+
+    <h2>GitHub Action</h2>
+    <p><code>action.yml</code> at the repo root wraps <code>pb verify</code> for CI — raise a PR, get end-to-end proof as a workflow artifact.</p>
+    <pre><code>- uses: launchwings/proofbench@main
+  with:
+    manifest: ready.yaml
+    substrate: local
+    working-directory: .
+    evidence-dir: .proofbench/evidence</code></pre>
+    <p><code>@v0</code> will be the pinned ref once the first tagged release lands; until then, use <code>@main</code>.</p>
+    <p>The step's own exit code follows the bundle's <code>verdict</code> (from <code>manifest.json</code>), not <code>pb</code>'s raw exit status: <code>pass</code> succeeds, <code>fail</code> always fails the job, and <code>inconclusive</code> fails the job too unless you set <code>allow-inconclusive: 'true'</code> — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (<code>if: always()</code>), and the step exposes <code>verdict</code> and <code>bundle-path</code> outputs for later steps (e.g. a PR comment).</p>
+  </article>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="./quickstart.html">Docs</a>
+        <a href="./spec.html">Spec</a>
+        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="./evidence-format.html">Evidence format</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>Proofbench is not affiliated with any CI provider.</span>
+  </div>
+</footer>
+</body>
+</html>
