@@ -45,8 +45,9 @@ runs:
       shell: bash
       working-directory: ${{ github.action_path }}
       run: |
-        # TODO: no `pb` release exists yet. Once v0 is tagged, replace this
-        # build-from-source step with a pinned release binary download.
+        # Build pb from the action's own checked-out source so the binary
+        # always matches the pinned action ref (uses: 0prodigy/proofbench@vX) -
+        # no separate release download to keep in sync, no version drift.
         go build -o "${{ github.action_path }}/pb" ./cmd/pb
 
     - name: Run pb verify

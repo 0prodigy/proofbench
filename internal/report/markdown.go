@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/evidence"
 )
 
 // verdictEmoji returns the emoji for a verdict string.
@@ -45,14 +45,20 @@ func sortedKV(m map[string]string) []string {
 // Markdown renders b as a Markdown report suitable for PR/Jira comments:
 //
 //   - header: verdict emoji + verdict + claim
+//   - UNVERIFIED banner when the verdict seal was not checked/pinned
 //   - meta line: proof level, phase, kind, surface key=value pairs
 //   - checks table: name | state | expect | observed
 //   - artifacts list: command artifacts rendered as name, exit N, Ns
 //   - footer: bundle dir + runId
 //
+// sealVerified/sealDetail come from evidence.SealStatus: when the seal was not
+// verified against a pinned signer identity, the verdict and proof level are
+// stamped UNVERIFIED rather than presented as a clean trusted result — a human
+// must never read a bare trusted "L5" off a bundle whose seal was not checked.
+//
 // Output ordering is deterministic (surface keys sorted, checks/artifacts
 // in manifest order).
-func Markdown(b *evidence.Bundle) (string, error) {
+func Markdown(b *evidence.Bundle, sealVerified bool, sealDetail string) (string, error) {
 	if b == nil || b.M == nil {
 		return "", fmt.Errorf("report: nil bundle or manifest")
 	}
@@ -63,11 +69,22 @@ func Markdown(b *evidence.Bundle) (string, error) {
 	emoji := verdictEmoji(m.Verdict)
 	fmt.Fprintf(&sb, "%s **%s** — %s\n\n", emoji, strings.ToUpper(m.Verdict), m.Claim)
 
+	// ---- UNVERIFIED banner ----
+	// A verdict whose seal was not verified against a pinned signer identity is
+	// stamped, unmissably, so it is never read as a trusted result.
+	if !sealVerified {
+		fmt.Fprintf(&sb, "> ⚠️ **UNVERIFIED** — %s\n\n", sealDetail)
+	}
+
 	// ---- meta line ----
 	// proof level, phase, kind, then surface key=value pairs (sorted keys)
 	var meta []string
 	if m.ProofLevel != "" {
-		meta = append(meta, "proof level "+m.ProofLevel)
+		pl := "proof level " + m.ProofLevel
+		if !sealVerified {
+			pl += " — UNVERIFIED: " + sealDetail
+		}
+		meta = append(meta, pl)
 	}
 	if m.Phase != "" {
 		meta = append(meta, "phase "+m.Phase)

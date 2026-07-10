@@ -11,31 +11,40 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/checkdriver"
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
-	"github.com/launchwings/proofbench/internal/substrate"
+	"github.com/0prodigy/proofbench/internal/checkdriver"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/honesty"
+	"github.com/0prodigy/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/substrate"
 )
 
 // Opts configures a verification run.
 type Opts struct {
-	EvidenceRoot string   // root directory for evidence bundles
-	Ticket       string   // optional ticket key recorded in the bundle
-	Claim        string   // the claim under verification
-	Substrate    string   // substrate kind (local|compose|k8s-attach)
-	Dir          string   // repo dir containing the manifest; "" = "."
-	Only         []string // restrict to these check names; empty = all
-	PairsWith    string   // runId of the paired bundle; plumbed into the bundle's manifest.pairsWith
-	Kind         string   // before|after; plumbed into the bundle's manifest.kind
+	EvidenceRoot string         // root directory for evidence bundles
+	Ticket       string         // optional ticket key recorded in the bundle
+	Claim        string         // the claim under verification
+	Substrate    string         // substrate kind (local|compose|k8s-attach)
+	Dir          string         // repo dir containing the manifest; "" = "."
+	Only         []string       // restrict to these check names; empty = all
+	PairsWith    string         // runId of the paired bundle; plumbed into the bundle's manifest.pairsWith
+	Kind         string         // before|after; plumbed into the bundle's manifest.kind
+	Provenance   ProvenanceOpts // ADR-0016 R4: verify the deployed image's build attestation
 }
 
 // Summary is the machine-readable result of a verification run.
 type Summary struct {
-	ProofLevel string           // highest proof-ladder rung reached (L0–L5)
-	Checks     []evidence.Check // tri-state result per declared check
-	Verdict    string           // pass|fail|inconclusive
-	Note       string           // verdict counts, or the empty-checks explanation (see verdict)
-	Lines      []string         // one legible summary line per check: "[state] name" (fail/not-run also carry " — <reason>", trimmed)
+	ProofLevel   string           // highest proof-ladder rung reached (L0–L5)
+	Checks       []evidence.Check // tri-state result per declared check
+	Verdict      string           // pass|fail|inconclusive
+	Note         string           // verdict counts, or the empty-checks explanation (see verdict)
+	Lines        []string         // one legible summary line per check: "[state] name" (fail/not-run also carry " — <reason>", trimmed)
+	SelfAttested bool             // ADR-0015: no externally-anchored signer, so proof is capped at honesty.SelfAttestedCap (L3)
+	AnchorReason string           // ADR-0015: why the run was/was not externally anchored (identity pinned, or why still self-attested)
+	// ProvenanceRung is the ADR-0016 rung the deployed image's build attestation
+	// earned (R4/R3/R0), or "" when no provenance claim was in scope. Only R4 is
+	// green; a lesser rung caps L4/L5.
+	ProvenanceRung   string
+	ProvenanceReason string // why that rung was earned (verified signer, or how it degraded)
 }
 
 // maxReasonLen bounds a checkLine's reason so the per-check summary line
@@ -112,10 +121,71 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	checks := runChecks(r, o, b, endpoints, unattached(r, s, endpoints))
 	b.M.Checks = append(b.M.Checks, checks...)
 	level := proofLevel(checks)
+	// ADR-0015 honest degradation: a run with no externally-anchored signer is
+	// SELF-ATTESTED — a self-generated/local key (or no lock at all) cannot
+	// vouch for an identity the agent could not assume, so cap the proof at L3
+	// and label the bundle. On by default and not bypassable: deleting the lock
+	// does not lift the cap. Only the Sigstore anchored-verify slice clears it.
+	pins := loadPinState(dir, r)
+	selfAttested := pins.selfAttested()
+	if selfAttested {
+		level = capToSelfAttested(level)
+		b.M.SelfAttested = true
+	}
+	if pins.anchorReason != "" {
+		b.M.Surface = withSurface(b.M.Surface, "anchor", pins.anchorReason)
+	}
+	// ADR-0016 R4: when a provenance claim is in scope, verify the deployed
+	// image's build attestation. Only a verified R4 is green; a lesser rung caps
+	// L4/L5 (effect/end-to-end must not stand on an unverified runtime→source
+	// binding). Not in scope ⇒ untouched.
+	provRung, provReason := verifyProvenance(o.Provenance, b.M.Pins)
+	if provRung != "" {
+		b.M.ProvenanceRung = provRung
+		b.M.Surface = withSurface(b.M.Surface, "provenance", provReason)
+	}
+	// ADR-0016 FIX 2: L4/L5 REQUIRE a verified R4 binding whenever the substrate
+	// exposes a deployed image — the anchor unlock and the R4 gate are COUPLED, so
+	// clearing the self-attested cap never by itself grants L4/L5 on an unverified
+	// runtime→source binding. A sub-R4 rung (including provenance never put in
+	// scope) caps the ladder to L3, with the recorded recovery.
+	if exposesDeployedImage(o.Provenance, b.M.Pins) && provRung != RungR4 {
+		if capped := requireR4(level); capped != level {
+			level = capped
+			b.M.Surface = withSurface(b.M.Surface, "provenanceCap",
+				"L4/L5 requires verified R4 provenance; pass --owner/--signer-workflow")
+		}
+	}
+	// ADR-0015 FIX 4: --insecure-ignore-tlog is REDUCED ASSURANCE (offline
+	// Fulcio-cert identity binding only, no Rekor inclusion proof) and cannot
+	// ground the top rung — cap below L5 (max L4), recording why.
+	if honesty.AnchorReducedAssurance() {
+		if capped := capBelowL5(level); capped != level {
+			level = capped
+			b.M.Surface = withSurface(b.M.Surface, "reducedAssurance",
+				"capped ≤L4: --insecure-ignore-tlog is reduced assurance (no Rekor inclusion proof), cannot ground L5")
+		}
+	}
 	b.M.ProofLevel = level
 	v, note := verdict(checks)
 	if err := b.SetVerdict(v, note); err != nil {
 		return nil, nil, err
+	}
+	// ADR-0015: anchor the VERDICT ARTIFACT itself. When the run is externally
+	// anchored, seal manifest.sig KEYLESS under the run's identity (same anchor as
+	// the lock) — never the self-held key — so editing the sealed level/verdict/
+	// sha-set breaks a signature the agent cannot re-forge. Best-effort: an
+	// unavailable cosign leaves the seal absent (a later `evidence validate
+	// --expected-identity` then rejects the unsealed verdict), never failing an
+	// otherwise-good run. A self-attested run keeps the self-held ed25519 seal.
+	if !selfAttested {
+		if bs, ok := honesty.AnchorBlobSigner(); ok {
+			_ = b.SignManifestKeyless(bs)
+		}
+	} else if signer, serr := honesty.LoadSigner(dir, false); serr == nil {
+		if err := b.SignManifest(signer); err != nil {
+			return nil, nil, err
+		}
 	}
 	// The bundle manifest's proofLevel stays "" (omitted; spec/v0's enum has
 	// no "none" value) when nothing passed, but the CLI-facing Summary must
@@ -128,7 +198,28 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	for i, c := range checks {
 		lines[i] = checkLine(c)
 	}
-	return b, &Summary{ProofLevel: summaryLevel, Checks: checks, Verdict: v, Note: note, Lines: lines}, nil
+	return b, &Summary{
+		ProofLevel:       summaryLevel,
+		Checks:           checks,
+		Verdict:          v,
+		Note:             note,
+		Lines:            lines,
+		SelfAttested:     selfAttested,
+		AnchorReason:     pins.anchorReason,
+		ProvenanceRung:   provRung,
+		ProvenanceReason: provReason,
+	}, nil
+}
+
+// withSurface returns m with key=val recorded (allocating the map when nil), so
+// the runner can stamp the anchor/provenance decision into the bundle's surface
+// after it is computed.
+func withSurface(m map[string]string, key, val string) map[string]string {
+	if m == nil {
+		m = map[string]string{}
+	}
+	m[key] = val
+	return m
 }
 
 // validateOnly fails fast, before any substrate bring-up, when --only names a
@@ -202,6 +293,14 @@ func repoPin(dir string) (string, bool) {
 // — the operator-supplied ids these checks need (e.g. an execution ID) are
 // documented on the check itself, not just in a fixture comment.
 func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]string, notAttached bool) []evidence.Check {
+	dir := o.Dir
+	if dir == "" {
+		dir = "."
+	}
+	// ADR-0015 R1: refuse any check whose definition is not pinned, signed,
+	// and hash-current before it can run — a drifted/unsigned oracle can never
+	// reach green. Disengaged (and behavior unchanged) for un-pinned repos.
+	pins := loadPinState(dir, r)
 	out := make([]evidence.Check, 0, len(r.Checks))
 	for _, spec := range r.Checks {
 		c := evidence.Check{
@@ -212,6 +311,12 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 		if len(o.Only) > 0 && !slices.Contains(o.Only, spec.Name) {
 			c.State = evidence.CheckNotRun
 			c.Reason = "filtered"
+			out = append(out, c)
+			continue
+		}
+		if reason, refused := pins.refuses(spec.Name); refused {
+			c.State = evidence.CheckNotRun
+			c.Reason = reason
 			out = append(out, c)
 			continue
 		}
@@ -264,16 +369,7 @@ func missingRequires(requires []string) (name string, missing bool) {
 // written before this feature — always report no match, so behavior is
 // unchanged for them.
 func gateFor(r *manifest.Ready, spec manifest.CheckSpec) (manifest.Gate, bool) {
-	if len(r.Gates) == 0 {
-		return manifest.Gate{}, false
-	}
-	verb, _ := strings.CutPrefix(spec.Exercise, "drive.")
-	for _, g := range r.Gates {
-		if g.On == spec.Name || (verb != "" && g.On == verb) {
-			return g, true
-		}
-	}
-	return manifest.Gate{}, false
+	return honesty.MatchGate(r, spec)
 }
 
 // resolveExercise turns a CheckSpec exercise into a shell command:
@@ -282,7 +378,7 @@ func gateFor(r *manifest.Ready, spec manifest.CheckSpec) (manifest.Gate, bool) {
 // ${resources.<n>.port}, ${endpoints.<n>}) are substituted last so drivers
 // dial localhost regardless of substrate.
 func resolveExercise(r *manifest.Ready, exercise string, endpoints map[string]string) (string, error) {
-	name, isDrive := strings.CutPrefix(exercise, "drive.")
+	name, isDrive := honesty.DriveRef(exercise)
 	if !isDrive {
 		return checkdriver.SubstituteEndpoints(exercise, endpoints), nil
 	}
@@ -434,7 +530,7 @@ func runCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps,
 	// A missing exercise input (the driver would shell out against a file
 	// that isn't there) is a preflight-class problem (ADR-0012), not a
 	// verdict-poisoning failure: not-run with a reason naming the path.
-	if path, ok := exerciseFilePath(spec.Driver, exercise); ok {
+	if path, ok := honesty.ExerciseFilePath(spec.Driver, exercise); ok {
 		full := path
 		if !filepath.IsAbs(full) {
 			full = filepath.Join(dir, full)
@@ -455,52 +551,23 @@ func runCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps,
 	return evaluateExpects(ops, spec.Expect, c)
 }
 
-// exerciseFilePath reports whether exercise (already endpoint-resolved) is
-// unambiguously a bare file reference, and if so, the path — a
-// preflight-class check (ADR-0012), never a heuristic that risks running an
-// ordinary shell command. The playwright driver's exercise IS a spec file
-// path by construction, so it always qualifies. The exec driver's exercise
-// only qualifies when it is a single whitespace-free token free of shell
-// metacharacters that also looks like a path (a "/" or a recognized
-// script/spec extension) — an ambiguous shell string ("npm test", "curl ...")
-// is left alone and still runs, matching or failing on its own merits.
-func exerciseFilePath(driver, exercise string) (string, bool) {
-	trimmed := strings.TrimSpace(exercise)
-	if trimmed == "" {
-		return "", false
-	}
-	if driver == checkdriver.KindPlaywright {
-		return trimmed, true
-	}
-	if driver != "" && driver != checkdriver.KindExec {
-		return "", false
-	}
-	if strings.ContainsAny(trimmed, " \t\n|&;()<>$`\\*?[]{}'\"#~") {
-		return "", false
-	}
-	if strings.Contains(trimmed, "/") || hasScriptExt(trimmed) {
-		return trimmed, true
-	}
-	return "", false
-}
-
-// hasScriptExt reports whether s ends in a common test/script extension —
-// part of exerciseFilePath's "clear file reference" heuristic.
-func hasScriptExt(s string) bool {
-	for _, ext := range []string{".spec.ts", ".spec.js", ".test.ts", ".test.js", ".sh", ".py", ".js", ".ts"} {
-		if strings.HasSuffix(s, ext) {
-			return true
-		}
-	}
-	return false
-}
-
 // evaluateExpects runs each expect predicate via ops.Assert, recording every
 // observed value and downgrading c to fail on the first failing/erroring
 // predicate (without stopping early) — a nonzero exit is only a failure if an
-// expect says so (exitCode(...)==0); a check with zero expects passes
-// vacuously. Shared by every CheckDriver dispatch in runCheck.
+// expect says so (exitCode(...)==0). Shared by every CheckDriver dispatch in
+// runCheck.
+//
+// ADR-0015 R1 closes E1's vacuous-pass hole: a check with no expect predicates
+// asserts nothing, so it records not-run (vacuous) rather than passing. R3
+// makes agent-/tool-provenance evidence non-promoting: a check that would pass
+// only on such evidence is recorded but demoted to not-run so it can neither
+// set green nor raise the proof ladder.
 func evaluateExpects(ops bundleOps, exprs []string, c evidence.Check) evidence.Check {
+	if len(exprs) == 0 {
+		c.State = evidence.CheckNotRun
+		c.Reason = "vacuous: check declares no expect predicates (ADR-0015 R1)"
+		return c
+	}
 	c.State = evidence.CheckPass
 	observed := make([]string, 0, len(exprs))
 	for _, expr := range exprs {
@@ -522,6 +589,12 @@ func evaluateExpects(ops bundleOps, exprs []string, c evidence.Check) evidence.C
 		}
 	}
 	c.Observed = strings.Join(observed, "; ")
+	if c.State == evidence.CheckPass {
+		if prov, demote := nonPromoting(ops, exprs); demote {
+			c.State = evidence.CheckNotRun
+			c.Reason = "non-promoting: satisfied only by " + prov + "-provenance evidence (ADR-0015 R3)"
+		}
+	}
 	return c
 }
 

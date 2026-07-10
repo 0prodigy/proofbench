@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // k8sAttach is the Shape-A attach-only substrate (ADR-0011, k8s-mode.md §7):

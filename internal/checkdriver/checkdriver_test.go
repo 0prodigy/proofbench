@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // fakeCapture records Exec calls and File claims, standing in for *Bundle.

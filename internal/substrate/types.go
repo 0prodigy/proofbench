@@ -6,7 +6,7 @@ package substrate
 import (
 	"fmt"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // Substrate kinds.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/launchwings/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/evidence"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ func newBundle() *evidence.Bundle {
 
 func TestMarkdown_Header(t *testing.T) {
 	b := newBundle()
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestMarkdown_Header(t *testing.T) {
 
 func TestMarkdown_MetaLine(t *testing.T) {
 	b := newBundle()
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestMarkdown_MetaLine(t *testing.T) {
 
 func TestMarkdown_ChecksTable(t *testing.T) {
 	b := newBundle()
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestMarkdown_ChecksTable(t *testing.T) {
 
 func TestMarkdown_ArtifactsList(t *testing.T) {
 	b := newBundle()
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestMarkdown_ArtifactsList(t *testing.T) {
 
 func TestMarkdown_Footer(t *testing.T) {
 	b := newBundle()
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -177,11 +177,11 @@ func TestMarkdown_Footer(t *testing.T) {
 
 func TestMarkdown_Deterministic(t *testing.T) {
 	b := newBundle()
-	md1, err := Markdown(b)
+	md1, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("first Markdown: %v", err)
 	}
-	md2, err := Markdown(b)
+	md2, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("second Markdown: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestMarkdown_Deterministic(t *testing.T) {
 }
 
 func TestMarkdown_NilBundle(t *testing.T) {
-	_, err := Markdown(nil)
+	_, err := Markdown(nil, true, "")
 	if err == nil {
 		t.Error("expected error for nil bundle")
 	}
@@ -207,7 +207,7 @@ func TestMarkdown_PipeEscaping(t *testing.T) {
 			Observed: "x|y",
 		},
 	}
-	md, err := Markdown(b)
+	md, err := Markdown(b, true, "")
 	if err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestWriteHub_OneV2OneMalformed(t *testing.T) {
 
 	// write hub
 	outFile := filepath.Join(t.TempDir(), "index.html")
-	if err := WriteHub(root, outFile); err != nil {
+	if err := WriteHub(root, outFile, evidence.ValidateOpts{}); err != nil {
 		t.Fatalf("WriteHub: %v", err)
 	}
 
@@ -334,7 +334,7 @@ func TestWriteHub_OneV2OneMalformed(t *testing.T) {
 func TestWriteHub_EmptyRoot(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(t.TempDir(), "sub", "index.html")
-	if err := WriteHub(root, out); err != nil {
+	if err := WriteHub(root, out, evidence.ValidateOpts{}); err != nil {
 		t.Fatalf("WriteHub with empty root: %v", err)
 	}
 	if _, err := os.Stat(out); err != nil {
@@ -345,7 +345,7 @@ func TestWriteHub_EmptyRoot(t *testing.T) {
 func TestWriteHub_MissingRoot(t *testing.T) {
 	// A root that does not exist should not crash — treat as empty.
 	out := filepath.Join(t.TempDir(), "index.html")
-	if err := WriteHub("/nonexistent/path/xyz", out); err != nil {
+	if err := WriteHub("/nonexistent/path/xyz", out, evidence.ValidateOpts{}); err != nil {
 		t.Fatalf("WriteHub with missing root should not error: %v", err)
 	}
 }
@@ -373,7 +373,7 @@ func TestWriteHub_NewestFirst(t *testing.T) {
 	}
 
 	out := filepath.Join(t.TempDir(), "index.html")
-	if err := WriteHub(root, out); err != nil {
+	if err := WriteHub(root, out, evidence.ValidateOpts{}); err != nil {
 		t.Fatalf("WriteHub: %v", err)
 	}
 	html, _ := os.ReadFile(out)

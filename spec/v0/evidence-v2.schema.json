@@ -65,6 +65,15 @@
       "type": "string",
       "enum": ["L0", "L1", "L2", "L3", "L4", "L5"]
     },
+    "selfAttested": {
+      "description": "True when the run has no externally-anchored signer (ADR-0015): a self-generated/local signing key — or no lock at all — cannot vouch for an identity the agent could not assume, so proofLevel is capped at L3 until an externally-anchored lock (Sigstore keyless, CI OIDC -> Fulcio + Rekor) accepts it. Omitted when false.",
+      "type": "boolean"
+    },
+    "provenanceRung": {
+      "description": "ADR-0016 provenance rung the deployed image's build attestation earned for the runtime->source binding (Hop B): R4=verified signed attestation (TRUSTED/green, cosign or gh attestation verify against a pinned signer), R3=build-provenance present but not verified (CLAIMED-UNVERIFIED), R0=no verifiable attestation in scope (UNPROVEN). Only R4 is green; a lesser rung caps proofLevel below L4. Omitted when no provenance claim was in scope.",
+      "type": "string",
+      "enum": ["R0", "R3", "R4"]
+    },
     "startedAt": {
       "description": "RFC 3339 timestamp when the run started.",
       "type": "string",

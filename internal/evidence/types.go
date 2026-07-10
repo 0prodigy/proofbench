@@ -77,12 +77,23 @@ type Manifest struct {
 	Surface    map[string]string `json:"surface,omitempty"`
 	Pins       map[string]string `json:"pins,omitempty"`
 	ProofLevel string            `json:"proofLevel,omitempty"`
-	StartedAt  string            `json:"startedAt"`
-	FinishedAt string            `json:"finishedAt,omitempty"`
-	Checks     []Check           `json:"checks,omitempty"`
-	Artifacts  []Artifact        `json:"artifacts"`
-	Verdict    string            `json:"verdict"`
-	Note       string            `json:"note,omitempty"`
+	// SelfAttested marks a run with no externally-anchored signer (ADR-0015): a
+	// self-generated/local key — or no lock at all — cannot vouch for an
+	// identity the agent could not assume, so proofLevel is capped at
+	// honesty.SelfAttestedCap (L3) until an externally-anchored lock (the
+	// Sigstore slice) accepts it.
+	SelfAttested bool `json:"selfAttested,omitempty"`
+	// ProvenanceRung is the ADR-0016 rung the deployed image's build-provenance
+	// attestation earned (R4 verified/TRUSTED, R3 CLAIMED-UNVERIFIED, R0
+	// UNPROVEN). Only R4 is green; a lesser rung caps proofLevel below L4. Omitted
+	// when no provenance claim was in scope for the run.
+	ProvenanceRung string     `json:"provenanceRung,omitempty"`
+	StartedAt      string     `json:"startedAt"`
+	FinishedAt     string     `json:"finishedAt,omitempty"`
+	Checks         []Check    `json:"checks,omitempty"`
+	Artifacts      []Artifact `json:"artifacts"`
+	Verdict        string     `json:"verdict"`
+	Note           string     `json:"note,omitempty"`
 }
 
 // Check is a machine-evaluated predicate result. State is tri-state

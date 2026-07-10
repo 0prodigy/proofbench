@@ -1,4 +1,4 @@
-module github.com/launchwings/proofbench
+module github.com/0prodigy/proofbench
 
 go 1.23.3
 

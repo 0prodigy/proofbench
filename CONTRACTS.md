@@ -1,6 +1,6 @@
 # CONTRACTS — Proofbench scaffold
 
-Module: `github.com/launchwings/proofbench` · Go 1.23 · dep: `gopkg.in/yaml.v3`.
+Module: `github.com/0prodigy/proofbench` · Go 1.23 · dep: `gopkg.in/yaml.v3`.
 Builders fill in stub bodies (`errors.New("not implemented")`) **without changing any signature, type, tag, or enum**.
 
 ## Package map

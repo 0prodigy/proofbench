@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // runSeed executes r.Seed steps in topological order of their After

@@ -9,8 +9,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/0prodigy/proofbench/internal/honesty"
 )
 
 // validPhases is the set of allowed phase enum values.
@@ -340,7 +343,7 @@ func (b *Bundle) Seal() error {
 		if rerr != nil {
 			return fmt.Errorf("evidence.Seal: rel %s: %w", path, rerr)
 		}
-		if rel == "manifest.json" || rel == ".manifest.tmp" {
+		if rel == "manifest.json" || rel == ".manifest.tmp" || rel == manifestSigFile {
 			return nil
 		}
 		if registered[path] {
@@ -392,12 +395,39 @@ func (b *Bundle) SetVerdict(verdict, note string) error {
 	return b.Save()
 }
 
+// ValidateOpts carries the verifier-supplied expectations for an anchored
+// manifest seal (ADR-0015). When ExpectedIdentity is set, the sealed verdict
+// artifact (manifest.sig) MUST be a Sigstore keyless signature verifying against
+// this Fulcio cert identity (exact, or regexp when IdentityRegexp); an absent
+// seal is then INVALID and a self-held-key seal is rejected as the wrong signer.
+type ValidateOpts struct {
+	ExpectedIdentity string
+	IdentityRegexp   bool
+	OIDCIssuer       string
+	// Cosign injects the cosign runner for keyless-seal verification (tests); nil
+	// uses the real cosign binary, mirroring honesty.CosignAnchor.Run.
+	Cosign func(args ...string) error
+}
+
+// anchorExpected reports whether the verifier pinned an expected Sigstore
+// identity the manifest seal must verify against.
+func (o ValidateOpts) anchorExpected() bool { return o.ExpectedIdentity != "" }
+
 // Validate checks a bundle on disk: the manifest parses (schema 1 or 2),
 // all enum fields (phase, kind, verdict, check states, artifact types, provenance)
 // hold valid values, every artifact path exists in the bundle directory
 // (link artifacts excepted), and each recorded sha256 matches the file's
-// current content.
+// current content. It verifies a present manifest seal but expects no anchor;
+// use ValidateWithAnchor to require a verifier-supplied Sigstore identity.
 func Validate(dir string) error {
+	return ValidateWithAnchor(dir, ValidateOpts{})
+}
+
+// ValidateWithAnchor is Validate with anchored-seal expectations (ADR-0015): when
+// o.ExpectedIdentity is set, the manifest seal is re-verified against the
+// verifier-supplied Sigstore identity, and an absent or self-held-key seal is
+// treated as INVALID.
+func ValidateWithAnchor(dir string, o ValidateOpts) error {
 	b, err := Open(dir)
 	if err != nil {
 		return fmt.Errorf("evidence.Validate: open: %w", err)
@@ -464,7 +494,204 @@ func Validate(dir string) error {
 		}
 	}
 
+	// ADR-0015 R6: if the manifest was signed, verify the detached signature
+	// over its verdict + sha-set. Editing a recorded sha to re-anchor the
+	// ledger to a swapped artifact (E1 R3b) changes the signed digest and is
+	// caught here, even though the per-artifact sha check above would pass.
+	if err := validateManifestSig(b, o); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// manifestSigFile is the detached manifest signature written next to
+// manifest.json (excluded from Seal so it never sweeps itself in).
+const manifestSigFile = "manifest.sig"
+
+// manifestDigest is the canonical digest the manifest signature covers: EVERY
+// trust-bearing manifest field, so a persisted bundle cannot be edited to
+// mislead while the seal still verifies. It folds in the claim; the earned proof
+// level (with its self-attested flag and provenance rung); the verdict; the
+// run's surface (substrate/cluster/env/anchor/... ) and pins (repo SHA, image
+// digests) — the source/image identity a re-pointing attack would swap; each
+// check's name+state+level+observed; and every artifact's path+sha256+provenance
+// +type+name. Field groups are sorted canonically so ordering does not affect
+// the digest, yet ANY edit to a claim, a pin, a surface value, a level, a check's
+// state/observed, an artifact's sha/provenance, or the verdict breaks the seal.
+func (b *Bundle) manifestDigest() []byte {
+	h := sha256.New()
+	fmt.Fprintf(h, "claim=%s\n", b.M.Claim)
+	fmt.Fprintf(h, "verdict=%s\n", b.M.Verdict)
+	fmt.Fprintf(h, "proofLevel=%s\n", b.M.ProofLevel)
+	fmt.Fprintf(h, "selfAttested=%t\n", b.M.SelfAttested)
+	fmt.Fprintf(h, "provenanceRung=%s\n", b.M.ProvenanceRung)
+
+	// Surface (substrate/cluster/env/anchor/provenance/...) — sorted by key so
+	// ordering is canonical; re-pointing the run to a different substrate/env
+	// breaks the seal.
+	for _, k := range sortedKeys(b.M.Surface) {
+		fmt.Fprintf(h, "surface=%s:%s\n", k, b.M.Surface[k])
+	}
+
+	// Pins (repo commit, image.<name> digests, cluster context/namespace, ...) —
+	// sorted by key; swapping the pinned source/image after signing breaks the seal.
+	for _, k := range sortedKeys(b.M.Pins) {
+		fmt.Fprintf(h, "pin=%s:%s\n", k, b.M.Pins[k])
+	}
+
+	// Checks — name+state+level+observed, sorted canonically so check ordering
+	// does not affect the digest.
+	checkLines := make([]string, 0, len(b.M.Checks))
+	for _, c := range b.M.Checks {
+		checkLines = append(checkLines, fmt.Sprintf("check=%s:%s:%s:%s", c.Name, c.State, c.Level, c.Observed))
+	}
+	sort.Strings(checkLines)
+	for _, l := range checkLines {
+		fmt.Fprintln(h, l)
+	}
+
+	// Artifacts — path+sha256+provenance+type+name, sorted canonically.
+	artLines := make([]string, 0, len(b.M.Artifacts))
+	for _, a := range b.M.Artifacts {
+		artLines = append(artLines, fmt.Sprintf("artifact=%s:%s:%s:%s:%s", a.Path, a.SHA256, a.Provenance, a.Type, a.Name))
+	}
+	sort.Strings(artLines)
+	for _, l := range artLines {
+		fmt.Fprintln(h, l)
+	}
+	return h.Sum(nil)
+}
+
+// sortedKeys returns m's keys in sorted order so a map contributes to the
+// manifest digest canonically (ordering does not affect the seal).
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// manifestSeal is the parsed manifest.sig. Exactly one arm is populated: the
+// embedded honesty.Sig (self-held ed25519 detached signature — the self-attested
+// path, whose signer/publicKey/signature fields sit at the JSON top level,
+// on-disk shape unchanged) OR Anchor (a Sigstore KEYLESS cosign bundle over the
+// manifest digest — the anchored path). Anchor != nil selects the keyless arm.
+type manifestSeal struct {
+	honesty.Sig
+	Anchor *honesty.AnchorSig `json:"anchor,omitempty"`
+}
+
+// SignManifest signs the sealed manifest's digest with the principal's SELF-HELD
+// key and writes a detached <bundle>/manifest.sig (ADR-0015 R6). Used only on the
+// self-attested path (capped L3); an anchored run seals keyless via
+// SignManifestKeyless instead. Call it after SetVerdict, once the sha-set is
+// final.
+func (b *Bundle) SignManifest(s honesty.Signer) error {
+	seal := manifestSeal{Sig: honesty.SignMessage(s, b.manifestDigest())}
+	return b.writeSeal(seal)
+}
+
+// SignManifestKeyless seals the manifest's digest with a Sigstore KEYLESS
+// signature via bs (the run's installed anchor), writing the cosign bundle to
+// <bundle>/manifest.sig (ADR-0015). This anchors the VERDICT ARTIFACT under the
+// run's identity — the identity the agent cannot assume — so editing the sealed
+// level/verdict/sha-set breaks a signature the agent cannot re-forge. Call it
+// after SetVerdict, once the sha-set is final.
+func (b *Bundle) SignManifestKeyless(bs honesty.BlobKeylessSigner) error {
+	anchor, err := bs.SignBlobKeyless(b.manifestDigest())
+	if err != nil {
+		return err
+	}
+	return b.writeSeal(manifestSeal{Anchor: anchor})
+}
+
+func (b *Bundle) writeSeal(seal manifestSeal) error {
+	data, err := json.MarshalIndent(seal, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(b.Dir, manifestSigFile), data, 0o644)
+}
+
+// validateManifestSig verifies <bundle>/manifest.sig against the current manifest
+// digest (ADR-0015 R6). An anchored (keyless) seal is re-verified via cosign; a
+// self-held ed25519 seal is verified with the key it carries.
+//
+// When an anchor is EXPECTED (o.anchorExpected — the verifier supplied
+// --expected-identity), the seal MUST be a Sigstore keyless signature that
+// verifies against the verifier-supplied identity: an ABSENT manifest.sig is
+// INVALID (an unsealed verdict cannot be trusted under an expected anchor), and a
+// self-held-key seal is REJECTED as the wrong signer (not the pinned Sigstore
+// identity). When no anchor is expected, an absent seal is not an error (un-pinned
+// bundles stay valid) and a keyless seal is checked for authenticity only (the
+// signature covers the current digest) since no identity was supplied to pin.
+func validateManifestSig(b *Bundle, o ValidateOpts) error {
+	data, err := os.ReadFile(filepath.Join(b.Dir, manifestSigFile))
+	if os.IsNotExist(err) {
+		if o.anchorExpected() {
+			return fmt.Errorf("evidence.Validate: %s absent but an anchor was expected (--expected-identity) — an unsealed verdict is INVALID", manifestSigFile)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("evidence.Validate: read %s: %w", manifestSigFile, err)
+	}
+	var seal manifestSeal
+	if uerr := json.Unmarshal(data, &seal); uerr != nil {
+		return fmt.Errorf("evidence.Validate: parse %s: %w", manifestSigFile, uerr)
+	}
+
+	if seal.Anchor != nil {
+		ca := &honesty.CosignAnchor{
+			ExpectedIdentity: o.ExpectedIdentity,
+			IdentityRegexp:   o.IdentityRegexp,
+			OIDCIssuer:       o.OIDCIssuer,
+			Run:              o.Cosign,
+		}
+		if !o.anchorExpected() {
+			// No verifier-supplied identity to pin against: confirm the keyless
+			// signature is genuine over the current digest (any identity), which
+			// still catches a tampered level/verdict/sha-set.
+			ca.ExpectedIdentity, ca.IdentityRegexp = ".*", true
+		}
+		if verr := ca.VerifyBlobBundle(seal.Anchor.Bundle, b.manifestDigest()); verr != nil {
+			return fmt.Errorf("evidence.Validate: keyless manifest seal rejected against identity %q — wrong signer or a sealed level/sha was edited after signing: %w", ca.ExpectedIdentity, verr)
+		}
+		return nil
+	}
+
+	// Self-held ed25519 seal.
+	if o.anchorExpected() {
+		return fmt.Errorf("evidence.Validate: manifest seal is a self-held-key signature, not the pinned Sigstore identity %q (--expected-identity) — wrong signer", o.ExpectedIdentity)
+	}
+	if verr := seal.Sig.Verify(b.manifestDigest()); verr != nil {
+		return fmt.Errorf("evidence.Validate: manifest signature invalid — a recorded sha, level, or verdict was edited after signing: %w", verr)
+	}
+	return nil
+}
+
+// SealStatus reports whether a bundle's verdict may be rendered as TRUSTED
+// (ADR-0015): true only when the caller PINNED a signer identity
+// (o.ExpectedIdentity) and the bundle's manifest.sig is a Sigstore keyless seal
+// that validates against it (and the on-disk artifacts still match). An absent
+// seal, a self-held-key seal, an identity mismatch, or NO pinned identity all
+// return false with a human-legible reason — so a report/hub renderer never
+// presents an unverified verdict as clean/green. It never errors: an unverifiable
+// bundle is simply UNVERIFIED.
+func SealStatus(dir string, o ValidateOpts) (verified bool, detail string) {
+	if !o.anchorExpected() {
+		if _, err := os.Stat(filepath.Join(dir, manifestSigFile)); os.IsNotExist(err) {
+			return false, "no verdict seal (manifest.sig absent)"
+		}
+		return false, "no signer identity pinned (pass --expected-identity to verify the seal)"
+	}
+	if err := ValidateWithAnchor(dir, o); err != nil {
+		return false, err.Error()
+	}
+	return true, "sealed, verified against " + o.ExpectedIdentity
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

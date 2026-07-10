@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // TestLocalUpDeadOnArrivalStart proves BUG A is fixed: a start command that

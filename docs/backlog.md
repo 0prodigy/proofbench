@@ -4,6 +4,56 @@ Scope: Stage 1 of [product-shape-ruling](research/product-shape-ruling.md) = PLA
 launch surface. Method: [adr-method](research/adr-method.md) §5 (to-issues) — every issue below is an
 independently-grabbable slice, demoable on its own; no blocked-by chains. Sizes: S ≤1d · M ≤3d · L ≤1wk.
 
+## Proven build sequence (2026-07-10 kill-tests)
+
+The 2026-07-10 kill-tests (E1–E4) turned four decisions from theory into locked ADRs and, unlike the
+rest of this backlog, impose a **real ordering** — the honesty spine is existential and must land first.
+This section reorders the work below; it does not replace it. Items marked **proven-safe-now** already
+hold empirically; items marked **blocked-until-fixed** ship a false green today and are gated on the
+named ADR.
+
+1. **FIRST — honesty spine R1/R2 (existential).** [ADR-0015](adr/0015-honesty-spine-oracle-outside-write-surface.md).
+   **blocked-until-fixed:** E1 manufactured a green live by editing the oracle in the agent's write
+   surface (gut-exercise, weaken-predicate, empty-`expect`, self-heal, delete-check) and re-anchoring
+   the unsigned sha ledger. Content-hash-pin + sign check definitions by a non-agent principal (R1);
+   split generation ≠ execution and cap self-judged runs below L5 (R2); agent evidence non-promoting
+   (R3); externally anchor the seal (R6-hardening). Acceptance gate: all five E1 attacks flip
+   FAIL→caught. Touches the seal/`manifest.json` path used across issues #16, #24; nothing else on the
+   list is trustworthy until this lands.
+   - **DONE (2026-07-10 slice):** R1 (`pb pin` → signed `ready.lock`; verify refuses drifted/unsigned/
+     vacuous checks), R2 (`selfJudged` flag + proof capped below L5 when signer == executor), R3
+     (agent/tool-provenance evidence is non-promoting), and R6 as a **detached** `manifest.sig` that
+     `pb evidence validate` verifies (catches an edited/re-anchored sha). Gate met by
+     `internal/verify/honesty_test.go::TestHonestySpineE1Acceptance` (all six cases caught).
+   - **DEFERRED — R6 external anchor:** the detached signature is self-anchored, so a principal that
+     holds the signing key can still re-sign after tampering (and re-pin, which R2 caps as self-judged).
+     Closing this needs an **external transparency-log entry** (e.g. Rekor/sigstore) for the lock and
+     `manifest.sig`, so a re-sign is publicly detectable. Not built in this slice (see the `ponytail`
+     note in `internal/evidence/core.go` `SignManifest`).
+2. **Provenance ladder R4 + generate.** [ADR-0016](adr/0016-provenance-ladder-discover-generate.md).
+   **blocked-until-fixed:** E2 forged unsigned provenance (label flip; 8-line hand-typed SLSA;
+   indistinguishable under `imagetools inspect`). Green only at verified signed attestation (R4);
+   ship the build-time **generate** stamp (GitHub `attest-build-provenance` / cosign) for the long tail;
+   two-scope attach (cluster-read + registry-read). Extends issue **#16** (proofLevel/provenance in the
+   ENG-20190 replay) and issue **#5** (k8s-attach scopes).
+3. **Attach: in-cluster SA + authz-preflight.** [ADR-0017](adr/0017-surface-discovery-attach-boundary.md).
+   **blocked-until-fixed:** E3 showed a static short-lived token yields a dead watcher and `/livez`
+   passed while `get pods` 403'd; `--token`-with-kubeconfig silently masked RBAC via the admin
+   client-cert. Attach runs in-cluster (or scheduled re-auth) with an `kubectl auth can-i` preflight,
+   reusing the `mic` resolve→switch→liveness spine. Directly reshapes issue **#5** (`k8s-attach`
+   substrate) and issue **#21** (re-attach after rollout); relates to **#25** (single-pod scope).
+4. **Discovery: k8s-objects + dep-map.** [ADR-0017](adr/0017-surface-discovery-attach-boundary.md).
+   **proven-safe-now** for k8s-object surfaces (E3: workloads/Service/EndpointSlice/Ingress/headless
+   auto-discovered deploy-agnostically); **blocked-until-fixed** for dependency edges (E3: only env/
+   Secret-heuristic edges, code/IP/external invisible) — require a declare-once dep-map or traffic
+   capture (eBPF/mesh/OTel), never inference. New surface feeding issues **#15/#16**.
+5. **Test-selection route-verify guard.** [ADR-0018](adr/0018-test-selection-safety.md).
+   **proven-safe-now:** ∅-selection / unmapped-path / data-only ⇒ AMBER coverage-gap, never green (E4).
+   **blocked-until-fixed:** tag-only positive selection shipped a false green (ran `/users`, reported
+   `/inventory`) — each selected spec must be route-verified (issued HTTP path == changed route) with a
+   live route-table drift check; generation stays gated per ADR-0015/ADR-0010. Guards the selection that
+   feeds issues **#4** (drivers) and **#16** (replay).
+
 ## Harness hardening
 
 ### 1. `pb lint` — manifest validation verb · S
@@ -160,7 +210,7 @@ Action, App, and MCP issues, and the first entry of the community manifest regis
 PLAN §10 + §14: clear the name (trademark/domain/npm/PyPI/GitHub), README with one-liner + proof
 ladder + 60-second demo GIF (PR comment with an evidence bundle), post with the benchmark headline.
 - [ ] Name cleared per §10 avoid-list; repo public under the final name, Apache-2.0 (ADR-0003)
-- [ ] Flip repo public at `github.com/launchwings/proofbench` after availability checks (PLAN §10)
+- [ ] Flip repo public at `github.com/0prodigy/proofbench` after availability checks (PLAN §10)
 - [ ] README + demo GIF done; HN post drafted with the SetupBench numbers from issue 18
 
 ## Field feedback (2026-07-10 e2e)

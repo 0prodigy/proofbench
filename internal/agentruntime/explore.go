@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // proposalSchema is the JSON Schema written to OutDir/ProposalSchemaFile and

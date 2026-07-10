@@ -1,4 +1,4 @@
-# PLAN — Agent Proof Harness (**Proofbench**, home: launchwings — see §10)
+# PLAN — Agent Proof Harness (**Proofbench**, home: 0prodigy — see §10)
 
 **Status (2026-07-06):** The v0 harness is **built and validated against ENG-20190**. Product shape is **decided** (accepted ruling: `docs/research/product-shape-ruling.md`): a sequenced combo — **OSS harness wedge → paid verification agent → control plane on pull** — with identity fixed on day one as the **system of record for agent proof**. Locked founder decisions live as ADRs in `docs/adr/` (identity/scope ADR-0001, pricing meter ADR-0004, driver architecture ADR-0005, and others); the Stage-1 spec is `docs/prd-stage1.md`, working context is `CONTEXT.md`, and the execution queue is `docs/backlog.md`. §7 and §9 below are reconciled to the ruling; the research content elsewhere is preserved as written.
 
@@ -204,7 +204,7 @@ Pricing (ADR-0004): free forever local/OSS. The PAYG meter is the **verdict-bear
 ## 10. Naming
 
 Avoid entirely: crustaceans (crabbox/Crabfleet/clawbench — reads as an OpenClaw satellite, and Anthropic already forced one rename there), "Harness" (Harness.io), "Evidence" (Evidence.dev), "Momentic-style 'agentic verification'" phrasing (their marketing), "Dashcam" (TestDriver).
-**Decided (2026-07-06):** the project keeps the name **Proofbench**. Home is the founder's **launchwings** brand/org (owned domain): repo `github.com/launchwings/proofbench`. The repo stays private until the Show HN launch (Stage-1 launch checklist, docs/backlog.md #20), which is when the GitHub org/npm/pkg availability checks finalize.
+**Decided (2026-07-06):** the project keeps the name **Proofbench**. Home is the founder's **0prodigy** brand/org (owned domain): repo `github.com/0prodigy/proofbench`. The repo stays private until the Show HN launch (Stage-1 launch checklist, docs/backlog.md #20), which is when the GitHub org/npm/pkg availability checks finalize.
 Positioning language to claim early (currently academic-only): **"evidence bundle"** and **"merge-readiness"**.
 
 ## 11. Risks & mitigations
@@ -255,7 +255,7 @@ Each item fixes an observed gap AND prototypes a framework feature:
 
 ## 14. Day-1 bootstrap checklist
 
-*Status 2026-07-06: steps 2–4 are done (spec/v0, Go port, hub) and step 6's README is written minus the demo GIF; step 1 is decided (Proofbench @ github.com/launchwings — §10, availability checks at publish); step 5 (Lyric ready.yaml + public sample repo) remains — see docs/backlog.md #15, #19, #20.*
+*Status 2026-07-06: steps 2–4 are done (spec/v0, Go port, hub) and step 6's README is written minus the demo GIF; step 1 is decided (Proofbench @ github.com/0prodigy — §10, availability checks at publish); step 5 (Lyric ready.yaml + public sample repo) remains — see docs/backlog.md #15, #19, #20.*
 
 1. Pick name (checks per §10) → create GitHub org/repo, Apache-2.0.
 2. `spec/v0`: JSON Schemas for `ready.yaml` + evidence manifest v2 (start from §4/§5).

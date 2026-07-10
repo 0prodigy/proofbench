@@ -15,15 +15,16 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/agentruntime"
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
-	"github.com/launchwings/proofbench/internal/report"
-	"github.com/launchwings/proofbench/internal/substrate"
-	"github.com/launchwings/proofbench/internal/verify"
+	"github.com/0prodigy/proofbench/internal/agentruntime"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/honesty"
+	"github.com/0prodigy/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/report"
+	"github.com/0prodigy/proofbench/internal/substrate"
+	"github.com/0prodigy/proofbench/internal/verify"
 )
 
-const version = "0.1.0-dev"
+var version = "0.1.0-dev"
 
 const rootUsage = `pb — prove agent changes work, end-to-end, on any setup
 
@@ -39,6 +40,7 @@ Usage:
   pb evidence show     BUNDLE_DIR
   pb init   [--out FILE|-] [--force] [DIR]
   pb lint   [--manifest ready.yaml]
+  pb pin    [--manifest ready.yaml]
   pb up     [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
   pb ready  [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
   pb seed   [--substrate local|compose|k8s-attach] [--manifest ready.yaml]
@@ -78,6 +80,8 @@ func run(args []string) int {
 		return cmdInit(args[1:])
 	case "lint":
 		return cmdLint(args[1:])
+	case "pin":
+		return cmdPin(args[1:])
 	case "up", "ready", "seed", "down":
 		return cmdSubstrate(args[0], args[1:])
 	case "verify":
@@ -189,6 +193,10 @@ var cmdHelpTable = map[string]cmdHelp{
 		desc:    "Parses and validates a ready.yaml manifest without bringing anything up.",
 		example: "pb lint --manifest ready.yaml",
 	},
+	"pin": {
+		desc:    "Content-hash-pins and signs the manifest's check set into ready.lock (ADR-0015 R1), so verify refuses any check whose definition drifts or is unsigned. Under CI OIDC (GitHub Actions, id-token: write) it signs KEYLESS via cosign — the workflow identity the agent cannot assume, which lets `pb verify --expected-identity` clear the self-attested L3 cap. Locally it uses the self-held ed25519 key (PB_SIGNING_KEY, default .pb/signing.key; principal PB_SIGNER), an honest self-attested lock.",
+		example: "PB_SIGNER=ci-oracle pb pin --manifest ready.yaml",
+	},
 	"up": {
 		desc:    "Brings the service up on the chosen substrate (local process, docker compose, or an attached k8s workload).",
 		example: "pb up --manifest ready.yaml",
@@ -206,7 +214,7 @@ var cmdHelpTable = map[string]cmdHelp{
 		example: "pb down --manifest ready.yaml",
 	},
 	"verify": {
-		desc:    "Brings up the substrate, runs the manifest's checks, and produces an evidence bundle with a tri-state verdict (pass/fail/inconclusive).",
+		desc:    "Brings up the substrate, runs the manifest's checks, and produces an evidence bundle with a tri-state verdict (pass/fail/inconclusive). Pass --expected-identity to verify the lock's Sigstore keyless anchor (ADR-0015, unlocks L4/L5); pass --owner/--signer-workflow to verify the deployed image's build attestation (ADR-0016 R4). Absent tooling or a mismatch degrades honestly — never a fake pass.",
 		example: `pb verify --manifest ready.yaml --claim "orders endpoint returns totals" --ticket ENG-123`,
 	},
 	"explore": {
@@ -475,13 +483,20 @@ func evidenceVerdict(args []string) int {
 
 func evidenceValidate(args []string) int {
 	fs := flag.NewFlagSet("pb evidence validate", flag.ContinueOnError)
+	// ADR-0015: require the verdict seal (manifest.sig) to be a Sigstore keyless
+	// signature verifying against a VERIFIER-SUPPLIED expected Fulcio identity
+	// (never one read from the bundle). When set, an absent seal — or a self-held-
+	// key seal — is INVALID.
+	expIdentity := fs.String("expected-identity", "", "require the manifest seal to be a Sigstore keyless signature verifying against this Fulcio cert identity (an absent or self-held-key seal is then INVALID)")
+	oidcIssuer := fs.String("oidc-issuer", honesty.DefaultOIDCIssuer, "expected OIDC issuer on the Fulcio cert (with --expected-identity)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
 		return failf("evidence validate: exactly one BUNDLE_DIR is required")
 	}
-	if err := evidence.Validate(fs.Arg(0)); err != nil {
+	opts := evidence.ValidateOpts{ExpectedIdentity: *expIdentity, OIDCIssuer: *oidcIssuer}
+	if err := evidence.ValidateWithAnchor(fs.Arg(0), opts); err != nil {
 		return fail(err)
 	}
 	fmt.Println("ok")
@@ -578,6 +593,68 @@ func cmdLint(args []string) int {
 	return 0
 }
 
+// --------------------------------------------------------------------- pin
+
+// cmdPin content-hash-pins and signs the manifest's check set into ready.lock
+// (ADR-0015 R1): the generation phase distinct from execution. The signing
+// key is loaded from PB_SIGNING_KEY (default .pb/signing.key next to the
+// manifest), generated on first use; the signing principal id is PB_SIGNER
+// (default: the OS user). verify then refuses any check whose assertion-hash
+// drifted or whose lock is missing/unsigned/invalid.
+func cmdPin(args []string) int {
+	fs := flag.NewFlagSet("pb pin", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	if wantsHelp(args) {
+		return printCmdHelp("pin", fs)
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		return failf("pin: unexpected argument %q (use --manifest to specify the manifest path)", fs.Arg(0))
+	}
+	r, err := manifest.Load(*manifestPath)
+	if err != nil {
+		return manifestErr(err)
+	}
+	if len(r.Checks) == 0 {
+		return failf("pin: %s declares no checks to pin (add a checks: block)", *manifestPath)
+	}
+	dir := filepath.Dir(*manifestPath)
+	// Under CI OIDC (GitHub Actions with id-token: write) sign the lock KEYLESS
+	// via cosign (ADR-0015 R2): the workflow identity, which the agent's own
+	// runtime cannot assume, is what lets `pb verify --expected-identity` clear
+	// the self-attested L3 cap. Local (no OIDC) keeps the self-held-key path,
+	// unchanged — an honest self-attested lock.
+	if honesty.InCIOIDC() {
+		lock, err := honesty.SignLockKeyless(r, dir, nil)
+		if err != nil {
+			return fail(err)
+		}
+		if err := honesty.WriteLock(dir, lock); err != nil {
+			return fail(err)
+		}
+		fmt.Printf("pinned %d check(s), Sigstore keyless (identity %q)\n", len(lock.CheckHashes), lock.Anchor.Identity)
+		fmt.Printf("lock:  %s\n", filepath.Join(dir, honesty.LockFile))
+		return 0
+	}
+	signer, err := honesty.LoadSigner(dir, true)
+	if err != nil {
+		return fail(err)
+	}
+	lock, err := honesty.SignLock(r, dir, signer)
+	if err != nil {
+		return fail(err)
+	}
+	if err := honesty.WriteLock(dir, lock); err != nil {
+		return fail(err)
+	}
+	fmt.Printf("pinned %d check(s) as signer %q\n", len(lock.CheckHashes), signer.ID)
+	fmt.Printf("lock:  %s\n", filepath.Join(dir, honesty.LockFile))
+	fmt.Printf("key:   %s\n", honesty.KeyPath(dir))
+	return 0
+}
+
 // -------------------------------------------------- up / ready / seed / down
 
 func cmdSubstrate(verb string, args []string) int {
@@ -657,6 +734,18 @@ func cmdVerify(args []string) int {
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
 	pairsWith := fs.String("pairs-with", "", "runId of the paired bundle (before/after pairing)")
 	bundleKind := fs.String("kind", "", "before|after (this bundle's role in a paired run)")
+	// ADR-0015 R1 external anchor: verify the lock's Sigstore keyless signature
+	// against a VERIFIER-SUPPLIED expected Fulcio identity (never one read from
+	// the lock). Supplying either identity flag installs the cosign anchor; a
+	// match clears the self-attested L3 cap and unlocks L4/L5.
+	expIdentity := fs.String("expected-identity", "", "exact Fulcio cert SAN the lock signer must match (unlocks L4/L5)")
+	expIdentityRe := fs.String("expected-identity-regexp", "", "regexp alternative to --expected-identity")
+	oidcIssuer := fs.String("oidc-issuer", honesty.DefaultOIDCIssuer, "expected OIDC issuer on the Fulcio cert")
+	insecureIgnoreTlog := fs.Bool("insecure-ignore-tlog", false, "verify the offline Fulcio-cert identity binding only, skipping the Rekor tlog inclusion proof (reduced assurance, stamped into the bundle)")
+	// ADR-0016 R4: verify the deployed image's build-provenance attestation.
+	owner := fs.String("owner", "", "GitHub owner of the signing identity (gh attestation verify --owner)")
+	signerWorkflow := fs.String("signer-workflow", "", "expected build workflow ref the attestation must be signed by (unlocks R4)")
+	image := fs.String("image", "", "OCI image ref to verify (default: the run's resolved image digest pin)")
 	if wantsHelp(args) {
 		return printCmdHelp("verify", fs)
 	}
@@ -665,6 +754,16 @@ func cmdVerify(args []string) int {
 	}
 	if *bundleKind != "" && *bundleKind != "before" && *bundleKind != "after" {
 		return failf("verify: --kind: %q is not a valid pairing kind (allowed: before|after)", *bundleKind)
+	}
+	if *expIdentity != "" || *expIdentityRe != "" {
+		ca := &honesty.CosignAnchor{OIDCIssuer: *oidcIssuer, IgnoreTlog: *insecureIgnoreTlog}
+		if *expIdentityRe != "" {
+			ca.ExpectedIdentity, ca.IdentityRegexp = *expIdentityRe, true
+		} else {
+			ca.ExpectedIdentity = *expIdentity
+		}
+		honesty.SetAnchorVerifier(ca)
+		defer honesty.SetAnchorVerifier(nil)
 	}
 	r, err := manifest.Load(*manifestPath)
 	if err != nil {
@@ -678,6 +777,7 @@ func cmdVerify(args []string) int {
 		Dir:          filepath.Dir(*manifestPath),
 		PairsWith:    *pairsWith,
 		Kind:         *bundleKind,
+		Provenance:   verify.ProvenanceOpts{Owner: *owner, SignerWorkflow: *signerWorkflow, Image: *image},
 	}
 	if *only != "" {
 		opts.Only = strings.Split(*only, ",")
@@ -688,6 +788,15 @@ func cmdVerify(args []string) int {
 	}
 	fmt.Printf("bundle:  %s\n", b.Dir)
 	fmt.Printf("proof:   %s\n", sum.ProofLevel)
+	if sum.SelfAttested {
+		fmt.Println("proof:   self-attested (no externally-anchored signer) — capped at L3 until an anchored lock accepts it (ADR-0015)")
+	}
+	if sum.AnchorReason != "" {
+		fmt.Printf("anchor:  %s\n", sum.AnchorReason)
+	}
+	if sum.ProvenanceRung != "" {
+		fmt.Printf("provenance: %s\n", sum.ProvenanceReason)
+	}
 	fmt.Printf("verdict: %s\n", sum.Verdict)
 	if sum.Note != "" {
 		fmt.Printf("note:    %s\n", sum.Note)
@@ -752,6 +861,11 @@ func cmdExplore(args []string) int {
 
 func cmdReport(args []string) int {
 	fs := flag.NewFlagSet("pb report", flag.ContinueOnError)
+	// ADR-0015: mirror `evidence validate` — a verdict is only rendered TRUSTED
+	// when its seal verifies against a VERIFIER-SUPPLIED Sigstore identity; absent
+	// that pin, the report stamps the verdict/proof level UNVERIFIED.
+	expIdentity := fs.String("expected-identity", "", "require the bundle's manifest seal to verify against this Fulcio cert identity; unset renders the verdict UNVERIFIED")
+	oidcIssuer := fs.String("oidc-issuer", honesty.DefaultOIDCIssuer, "expected OIDC issuer on the Fulcio cert (with --expected-identity)")
 	if wantsHelp(args) {
 		return printCmdHelp("report", fs)
 	}
@@ -765,7 +879,9 @@ func cmdReport(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	md, err := report.Markdown(b)
+	opts := evidence.ValidateOpts{ExpectedIdentity: *expIdentity, OIDCIssuer: *oidcIssuer}
+	sealVerified, sealDetail := evidence.SealStatus(fs.Arg(0), opts)
+	md, err := report.Markdown(b, sealVerified, sealDetail)
 	if err != nil {
 		return fail(err)
 	}
@@ -777,13 +893,19 @@ func cmdHub(args []string) int {
 	fs := flag.NewFlagSet("pb hub", flag.ContinueOnError)
 	root := fs.String("root", "evidence", "root directory to scan for bundles")
 	out := fs.String("out", filepath.Join(".pb", "hub", "index.html"), "output file for the hub index")
+	workspace := fs.String("workspace", "", "optional workspace.yaml: its service list distinguishes projects from shared infra in the Projects section")
+	// ADR-0015: as with `pb report`, a verdict is stamped UNVERIFIED unless its
+	// seal verifies against the verifier-supplied Sigstore identity.
+	expIdentity := fs.String("expected-identity", "", "require each bundle's manifest seal to verify against this Fulcio cert identity; unset stamps verdicts UNVERIFIED")
+	oidcIssuer := fs.String("oidc-issuer", honesty.DefaultOIDCIssuer, "expected OIDC issuer on the Fulcio cert (with --expected-identity)")
 	if wantsHelp(args) {
 		return printCmdHelp("hub", fs)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if err := report.WriteHub(*root, *out); err != nil {
+	opts := evidence.ValidateOpts{ExpectedIdentity: *expIdentity, OIDCIssuer: *oidcIssuer}
+	if err := report.WriteHubWithWorkspace(*root, *out, *workspace, opts); err != nil {
 		return fail(err)
 	}
 	fmt.Println(*out)

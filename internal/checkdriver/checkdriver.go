@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // CheckDriver kinds.

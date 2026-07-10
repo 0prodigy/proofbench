@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // playwrightDriver shells `npx playwright test <spec>` and attaches the trace

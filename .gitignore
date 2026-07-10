@@ -4,3 +4,5 @@ fixtures/local/
 node_modules/
 __pycache__/
 site/.preview/
+dist/
+.playwright-mcp/

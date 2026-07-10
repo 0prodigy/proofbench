@@ -29,10 +29,26 @@ Every `pb verify` run names the rung reached. A report that doesn't name a rung 
 
 ## Install
 
-Requires Go 1.23+. Proofbench isn't public yet — the clone step below works today from a checkout you already have access to; public availability is coming.
+No clone required — pick one of the first two.
+
+**Go users** (needs Go 1.23+):
 
 ```
-git clone https://github.com/launchwings/proofbench
+go install github.com/0prodigy/proofbench/cmd/pb@latest
+```
+
+**Everyone else** — one-line installer (downloads the right prebuilt binary from the latest GitHub release):
+
+```
+curl -sSL https://raw.githubusercontent.com/0prodigy/proofbench/main/install.sh | sh
+```
+
+**Prebuilt binaries** are on the [releases page](https://github.com/0prodigy/proofbench/releases) if you'd rather grab one by hand.
+
+**Build from source** (fallback):
+
+```
+git clone https://github.com/0prodigy/proofbench
 cd proofbench
 go build -o bin/pb ./cmd/pb
 ```
@@ -89,10 +105,10 @@ For your own repo instead of the example, run `pb init` — it auto-detects your
 
 ## GitHub Action
 
-`action.yml` at the repo root wraps `pb verify` for CI — raise a PR, get end-to-end proof as a workflow artifact. This reference will work as written **once `launchwings/proofbench` is public**; until then, point `uses:` at a private checkout of this repo.
+`action.yml` at the repo root wraps `pb verify` for CI — raise a PR, get end-to-end proof as a workflow artifact. The repo is public, so this reference works as written:
 
 ```yaml
-- uses: launchwings/proofbench@main
+- uses: 0prodigy/proofbench@v0
   with:
     manifest: ready.yaml
     substrate: local
@@ -100,9 +116,9 @@ For your own repo instead of the example, run `pb init` — it auto-detects your
     evidence-dir: .proofbench/evidence
 ```
 
-`@v0` will be the pinned ref once the first tagged release lands; until then, use `@main`.
+`@v0` tracks the current v0 release line; `@main` works before the first tag lands.
 
-The step's own exit code follows the bundle's `verdict` (from `manifest.json`), not `pb`'s raw exit status: `pass` succeeds, `fail` always fails the job, and `inconclusive` fails the job too unless you set `allow-inconclusive: 'true'` — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (`if: always()`), and the step exposes `verdict` and `bundle-path` outputs for later steps (e.g. a PR comment). Full reference: [site/docs/ci.html](site/docs/ci.html) (docs site publishing soon).
+The step's own exit code follows the bundle's `verdict` (from `manifest.json`), not `pb`'s raw exit status: `pass` succeeds, `fail` always fails the job, and `inconclusive` fails the job too unless you set `allow-inconclusive: 'true'` — an unproven change must not read as green. The evidence bundle is uploaded as a workflow artifact on every run (`if: always()`), and the step exposes `verdict` and `bundle-path` outputs for later steps (e.g. a PR comment). Full reference: [the CI docs](https://0prodigy.github.io/proofbench/docs/ci.html).
 
 ---
 
@@ -119,11 +135,12 @@ Proofbench is **not**:
 
 ## Docs
 
-Start here:
+The docs site is live at **https://0prodigy.github.io/proofbench/**. Start here:
 
 - [docs/quickstart.md](docs/quickstart.md) — the full walkthrough this README's 60-second version is drawn from, including seeding and the hub index
 - [examples/basic/](examples/basic/) — the runnable example service + `ready.yaml` used above
-- [site/docs/manifest.html](site/docs/manifest.html) — full field-by-field `ready.yaml` reference, generated from the schema (site publishing soon; open the file directly for now)
+- [manifest reference](https://0prodigy.github.io/proofbench/docs/manifest.html) — full field-by-field `ready.yaml` reference, generated from the schema
+- [CI reference](https://0prodigy.github.io/proofbench/docs/ci.html) — the GitHub Action end to end
 - [spec/](spec/) — the versioned `ready.yaml` / evidence bundle JSON Schemas (v0), the interoperability contract
 - [CONTRIBUTING.md](CONTRIBUTING.md) — build/test commands and the package map
 

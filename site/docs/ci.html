@@ -30,7 +30,7 @@
     <nav class="nav-links">
       <a href="quickstart.html">Docs</a>
       <a href="spec.html">Spec</a>
-      <a href="https://github.com/launchwings/proofbench">GitHub</a>
+      <a href="https://github.com/0prodigy/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
       <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
@@ -68,7 +68,7 @@
   <main id="content" class="prose">
     <h1>CI &amp; GitHub Action</h1>
     <p><code>action.yml</code> at the repo root wraps <code>pb verify</code> for CI: it builds <code>pb</code>, runs a verification against your manifest, gates the job on the bundle's own <code>verdict</code>, and uploads the evidence bundle as a workflow artifact on every run — pass or fail.</p>
-    <blockquote>The action references <code>launchwings/proofbench</code>, which isn't public yet. The workflow below is the real, complete interface — drop it in once the repo is public, or point <code>uses:</code> at a private fork/checkout meanwhile.</blockquote>
+    <blockquote>The action references <code>0prodigy/proofbench</code>, which isn't public yet. The workflow below is the real, complete interface — drop it in once the repo is public, or point <code>uses:</code> at a private fork/checkout meanwhile.</blockquote>
 
     <h2>Inputs</h2>
     <table>
@@ -131,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: launchwings/proofbench@main
+      - uses: 0prodigy/proofbench@main
         id: verify
         with:
           manifest: ready.yaml
@@ -167,20 +167,20 @@ jobs:
         </svg>
         proofbench
       </a>
-      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+      <p>The system of record for agent proof. Apache-2.0, built by 0prodigy.</p>
     </div>
     <div class="footer-links">
       <div class="footer-links-col">
         <h4>Project</h4>
         <a href="quickstart.html">Docs</a>
         <a href="spec.html">Spec</a>
-        <a href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a href="https://github.com/0prodigy/proofbench">GitHub</a>
         <a href="evidence-format.html">Evidence format</a>
       </div>
     </div>
   </div>
   <div class="footer-bottom">
-    <span>&copy; 2026 launchwings. Apache-2.0 licensed.</span>
+    <span>&copy; 2026 0prodigy. Apache-2.0 licensed.</span>
     <span>Proofbench is not affiliated with any CI provider.</span>
   </div>
 </footer>

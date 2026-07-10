@@ -171,6 +171,81 @@ func (b *Bundle) Assert(expr string) (observed string, ok bool, err error) {
 	}
 }
 
+// Provenance reports the weakest artifact provenance the predicate expr relies
+// on — "agent" < "tool" < "harness" — or "" when expr references no recorded
+// artifact (a live http probe, or a bare path that is not a tracked artifact).
+// It powers ADR-0015 R3: verify demotes a check that would pass only on
+// agent-/tool-provenance evidence, so only harness-collected evidence promotes.
+func (b *Bundle) Provenance(expr string) (string, error) {
+	expr = strings.TrimSpace(expr)
+	open := strings.Index(expr, "(")
+	closeIdx := strings.LastIndex(expr, ")")
+	if open < 0 || closeIdx < open {
+		return "", fmt.Errorf("malformed expression %q", expr)
+	}
+	fn := strings.TrimSpace(expr[:open])
+	arg := strings.TrimSpace(expr[open+1 : closeIdx])
+	switch fn {
+	case "exitCode", "nonempty", "rows", "jsonpath", "contains":
+		// The artifact reference is the first comma-separated token.
+		ref := arg
+		if i := strings.Index(arg, ","); i >= 0 {
+			ref = strings.TrimSpace(arg[:i])
+		}
+		return b.refProvenance(ref), nil
+	case "equal":
+		parts := strings.SplitN(arg, ",", 2)
+		p := b.refProvenance(strings.TrimSpace(parts[0]))
+		if len(parts) == 2 {
+			p = weakerProvenance(p, b.refProvenance(strings.TrimSpace(parts[1])))
+		}
+		return p, nil
+	default:
+		// http and any predicate without an artifact dependency: nothing to demote.
+		return "", nil
+	}
+}
+
+// refProvenance resolves a predicate's artifact reference (by artifact name,
+// then by recorded path) to its provenance, or "" when no tracked artifact
+// matches.
+func (b *Bundle) refProvenance(ref string) string {
+	for _, a := range b.M.Artifacts {
+		if a.Name == ref || a.Path == ref {
+			return a.Provenance
+		}
+	}
+	// A bundle-relative path reference may match an artifact's recorded path.
+	for _, a := range b.M.Artifacts {
+		if a.Path != "" && filepath.Join(b.Dir, a.Path) == b.resolve(ref) {
+			return a.Provenance
+		}
+	}
+	return ""
+}
+
+// weakerProvenance returns the more agent-supplied (weaker) of two provenances;
+// "" (no artifact dependency) is treated as strongest so it never demotes.
+func weakerProvenance(a, c string) string {
+	if provenanceRank(a) <= provenanceRank(c) {
+		return a
+	}
+	return c
+}
+
+func provenanceRank(p string) int {
+	switch p {
+	case ProvenanceAgent:
+		return 0
+	case ProvenanceTool:
+		return 1
+	case ProvenanceHarness:
+		return 2
+	default:
+		return 3
+	}
+}
+
 // parseRHS checks that rest is op followed by an integer and returns it.
 func parseRHS(expr, rest, op string) (int, error) {
 	if !strings.HasPrefix(rest, op) {

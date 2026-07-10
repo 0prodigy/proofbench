@@ -14,7 +14,7 @@ Every command and output block below is pasted verbatim from a real run of `bin/
 Build the CLI:
 
 ```
-git clone https://github.com/launchwings/proofbench
+git clone https://github.com/0prodigy/proofbench
 cd proofbench
 go build -o bin/pb ./cmd/pb
 export PATH="$PWD/bin:$PATH"

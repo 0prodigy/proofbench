@@ -6,8 +6,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/launchwings/proofbench/internal/checkdriver"
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/checkdriver"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // TestCheckDriverKindsAcceptedByManifest proves every checkdriver.Kinds()

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // ------------------------------------------------------------- env parsing

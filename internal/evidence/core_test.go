@@ -1,14 +1,328 @@
 package evidence
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/0prodigy/proofbench/internal/honesty"
 )
+
+// edSigner builds a self-held ed25519 signing principal for the seal tests.
+func edSigner(t *testing.T, id string) honesty.Signer {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return honesty.Signer{ID: id, Priv: priv}
+}
+
+// fakeCosign is a deterministic cosign stand-in modeling a keyless signature
+// whose "Fulcio cert" is san: `sign-blob` writes san into the --bundle file, and
+// `verify-blob` reads it back and accepts iff it matches the verifier-supplied
+// --certificate-identity[-regexp]. It proves the WIRING (a verifier-supplied
+// identity, never one read from the bundle, decides validity), minus the crypto.
+func fakeCosign(san string) func(args ...string) error {
+	return func(args ...string) error {
+		if len(args) > 0 && args[0] == "sign-blob" {
+			for i := range args {
+				if args[i] == "--bundle" {
+					return os.WriteFile(args[i+1], []byte(san), 0o600)
+				}
+			}
+			return fmt.Errorf("fake sign-blob: no --bundle in %v", args)
+		}
+		var bundlePath, expID string
+		var isRegexp bool
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "--bundle":
+				bundlePath = args[i+1]
+			case "--certificate-identity":
+				expID = args[i+1]
+			case "--certificate-identity-regexp":
+				expID, isRegexp = args[i+1], true
+			}
+		}
+		data, err := os.ReadFile(bundlePath)
+		if err != nil {
+			return err
+		}
+		certID := strings.TrimSpace(string(data))
+		if isRegexp {
+			if ok, _ := regexp.MatchString(expID, certID); ok {
+				return nil
+			}
+			return fmt.Errorf("cosign: cert identity %q does not match regexp %q", certID, expID)
+		}
+		if certID == expID {
+			return nil
+		}
+		return fmt.Errorf("cosign: cert identity %q != expected %q", certID, expID)
+	}
+}
+
+// sealedKeyless builds a sealed, keyless-anchored bundle whose manifest.sig is a
+// Sigstore keyless signature over the manifest digest with "Fulcio cert" san.
+func sealedKeyless(t *testing.T, san string) *Bundle {
+	t.Helper()
+	b, err := New(t.TempDir(), NewOpts{Claim: "keyless seal", Phase: PhaseVerify})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.M.ProofLevel = "L4"
+	if _, err := b.Run("probe", []string{"echo ok"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetVerdict(VerdictPass, ""); err != nil {
+		t.Fatal(err)
+	}
+	anchor := &honesty.CosignAnchor{Run: fakeCosign(san)}
+	if err := b.SignManifestKeyless(anchor); err != nil {
+		t.Fatalf("SignManifestKeyless: %v", err)
+	}
+	return b
+}
+
+const (
+	sealMainSAN   = "https://github.com/0prodigy/pb/.github/workflows/build.yml@refs/heads/main"
+	sealBranchSAN = "https://github.com/0prodigy/pb/.github/workflows/build.yml@refs/heads/ENG-1"
+)
+
+// TestManifestSealAnchoredAcceptance reproduces the reviewer's verdict-seal
+// attacks and asserts each is caught: (1a) editing the sealed proofLevel L3→L5
+// breaks the self-held seal; (1b) an anchored bundle with manifest.sig removed is
+// INVALID when an anchor is expected (absent-when-expected ≠ valid); (1c) a
+// self-held-key seal is rejected against an expected Sigstore identity.
+func TestManifestSealAnchoredAcceptance(t *testing.T) {
+	// (1a) level is covered by the digest: editing proofLevel L3→L5 on a sealed
+	// bundle breaks the signature — a persisted L3 bundle cannot be promoted to L5.
+	t.Run("1a: edited proofLevel L3->L5 is rejected", func(t *testing.T) {
+		b, err := New(t.TempDir(), NewOpts{Claim: "level covered", Phase: PhaseVerify})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.M.ProofLevel = "L3"
+		b.M.SelfAttested = true
+		if _, err := b.Run("probe", []string{"echo ok"}, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetVerdict(VerdictPass, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SignManifest(edSigner(t, "oracle")); err != nil {
+			t.Fatal(err)
+		}
+		if err := Validate(b.Dir); err != nil {
+			t.Fatalf("clean sealed bundle should validate: %v", err)
+		}
+		reopened, err := Open(b.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reopened.M.ProofLevel = "L5"
+		if err := reopened.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := Validate(b.Dir); err == nil {
+			t.Fatal("edited proofLevel L3->L5 validated clean — level not covered by the seal")
+		}
+	})
+
+	// (1b) an anchored keyless bundle with manifest.sig REMOVED is INVALID when an
+	// anchor is expected — absent-when-expected must not read as valid.
+	t.Run("1b: absent manifest.sig when an anchor is expected is INVALID", func(t *testing.T) {
+		b := sealedKeyless(t, sealMainSAN)
+		opts := ValidateOpts{ExpectedIdentity: sealMainSAN, Cosign: fakeCosign(sealMainSAN)}
+		if err := ValidateWithAnchor(b.Dir, opts); err != nil {
+			t.Fatalf("clean anchored bundle should validate against its identity: %v", err)
+		}
+		if err := os.Remove(filepath.Join(b.Dir, manifestSigFile)); err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateWithAnchor(b.Dir, opts); err == nil {
+			t.Fatal("absent manifest.sig validated clean when an anchor was expected")
+		}
+	})
+
+	// (1c) a self-held-key seal (or a keyless seal under a non-pinned identity)
+	// is rejected when the verifier expects a specific Sigstore identity.
+	t.Run("1c: self-held-key seal rejected against expected identity", func(t *testing.T) {
+		b, err := New(t.TempDir(), NewOpts{Claim: "wrong signer", Phase: PhaseVerify})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.M.ProofLevel = "L4"
+		if _, err := b.Run("probe", []string{"echo ok"}, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetVerdict(VerdictPass, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SignManifest(edSigner(t, "self")); err != nil {
+			t.Fatal(err)
+		}
+		opts := ValidateOpts{ExpectedIdentity: sealMainSAN, Cosign: fakeCosign(sealMainSAN)}
+		if err := ValidateWithAnchor(b.Dir, opts); err == nil {
+			t.Fatal("self-held-key seal accepted against an expected Sigstore identity")
+		}
+		// A keyless seal under a DIFFERENT (branch) identity is likewise rejected
+		// when main is pinned.
+		bb := sealedKeyless(t, sealBranchSAN)
+		if err := ValidateWithAnchor(bb.Dir, opts); err == nil {
+			t.Fatal("branch-identity keyless seal accepted when main was pinned")
+		}
+	})
+}
+
+// sealedRich builds a genuinely-sealed bundle carrying every trust-bearing
+// field (claim, surface, pins, a check with an observed value, artifacts) and a
+// self-held ed25519 manifest seal (real crypto over manifestDigest — the same
+// digest the keyless arm signs, so field coverage proven here holds for both).
+// It asserts the clean bundle validates before the edit tests re-point it.
+func sealedRich(t *testing.T) *Bundle {
+	t.Helper()
+	b, err := New(t.TempDir(), NewOpts{
+		Claim:   "orders endpoint returns totals",
+		Phase:   PhaseVerify,
+		Surface: map[string]string{"substrate": "k8s-attach", "cluster": "prod-eu", "env": "staging"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.M.ProofLevel = "L4"
+	b.M.Pins = map[string]string{
+		"repo":      "9f8e7d6c",
+		"image.svc": "ghcr.io/org/svc@sha256:aaaabbbb",
+	}
+	b.M.Checks = []Check{{Name: "orders", State: CheckPass, Level: "L4", Observed: "exit 0"}}
+	if _, err := b.Run("probe", []string{"echo ok"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetVerdict(VerdictPass, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SignManifest(edSigner(t, "oracle")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(b.Dir); err != nil {
+		t.Fatalf("clean sealed bundle should validate: %v", err)
+	}
+	return b
+}
+
+// TestManifestSealCoversTrustFields reproduces the reviewer's re-pointing
+// attacks and asserts each is caught: editing a pin (source/image), the claim,
+// the surface, a check's observed value, or an artifact's provenance on a
+// genuinely-sealed bundle breaks the seal so Validate REJECTS. Fix 1 folds every
+// such field into manifestDigest, closing the "genuinely-anchored bundle
+// re-pointed to a malicious source/image/claim" hole.
+func TestManifestSealCoversTrustFields(t *testing.T) {
+	edit := func(t *testing.T, mutate func(m *Manifest)) {
+		t.Helper()
+		b := sealedRich(t)
+		reopened, err := Open(b.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(reopened.M)
+		if err := reopened.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := Validate(b.Dir); err == nil {
+			t.Fatal("edited field validated clean — not covered by the seal")
+		}
+	}
+
+	t.Run("edited pins.repo is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Pins["repo"] = "deadbeef" })
+	})
+	t.Run("edited pins.image.svc is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Pins["image.svc"] = "ghcr.io/evil/svc@sha256:cccc" })
+	})
+	t.Run("edited claim is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Claim = "a different, bigger claim" })
+	})
+	t.Run("edited surface is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Surface["cluster"] = "prod-us" })
+	})
+	t.Run("edited check observed is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Checks[0].Observed = "exit 1 (but we lie)" })
+	})
+	t.Run("edited check level is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Checks[0].Level = "L5" })
+	})
+	t.Run("edited artifact provenance is rejected", func(t *testing.T) {
+		edit(t, func(m *Manifest) { m.Artifacts[0].Provenance = ProvenanceAgent })
+	})
+}
+
+// TestManifestDigestFieldCoverage proves directly (no crypto) that every
+// trust-bearing field is folded into manifestDigest: mutating any of them in
+// memory changes the digest. This is the field-level complement to the
+// seal-rejection acceptance above.
+func TestManifestDigestFieldCoverage(t *testing.T) {
+	base := func() *Bundle {
+		return &Bundle{M: &Manifest{
+			Schema:         2,
+			Claim:          "c",
+			Verdict:        VerdictPass,
+			ProofLevel:     "L4",
+			ProvenanceRung: "R4",
+			Surface:        map[string]string{"substrate": "local", "env": "dev"},
+			Pins:           map[string]string{"repo": "abc", "image.svc": "img@sha256:1"},
+			Checks:         []Check{{Name: "orders", State: CheckPass, Level: "L4", Observed: "exit 0"}},
+			Artifacts:      []Artifact{{Type: ArtifactLog, Name: "run", Path: "01-run.log", SHA256: "sha1", Provenance: ProvenanceHarness}},
+		}}
+	}
+	ref := string(base().manifestDigest())
+
+	cases := map[string]func(m *Manifest){
+		"claim":               func(m *Manifest) { m.Claim = "c2" },
+		"verdict":             func(m *Manifest) { m.Verdict = VerdictFail },
+		"proofLevel":          func(m *Manifest) { m.ProofLevel = "L5" },
+		"provenanceRung":      func(m *Manifest) { m.ProvenanceRung = "R3" },
+		"surface value":       func(m *Manifest) { m.Surface["env"] = "prod" },
+		"surface key added":   func(m *Manifest) { m.Surface["cluster"] = "x" },
+		"pin repo":            func(m *Manifest) { m.Pins["repo"] = "def" },
+		"pin image":           func(m *Manifest) { m.Pins["image.svc"] = "img@sha256:2" },
+		"check state":         func(m *Manifest) { m.Checks[0].State = CheckFail },
+		"check level":         func(m *Manifest) { m.Checks[0].Level = "L5" },
+		"check observed":      func(m *Manifest) { m.Checks[0].Observed = "exit 1" },
+		"artifact sha":        func(m *Manifest) { m.Artifacts[0].SHA256 = "sha2" },
+		"artifact provenance": func(m *Manifest) { m.Artifacts[0].Provenance = ProvenanceAgent },
+		"artifact type":       func(m *Manifest) { m.Artifacts[0].Type = ArtifactSnapshot },
+		"artifact name":       func(m *Manifest) { m.Artifacts[0].Name = "run2" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := base()
+			mutate(b.M)
+			if string(b.manifestDigest()) == ref {
+				t.Errorf("mutating %q did not change the manifest digest — field not covered by the seal", name)
+			}
+		})
+	}
+
+	// Ordering of map/slice fields must NOT affect the digest (canonical/sorted).
+	reordered := base()
+	reordered.M.Checks = append([]Check{{Name: "zzz", State: CheckNotRun, Level: "L0"}}, reordered.M.Checks...)
+	withExtra := string(reordered.manifestDigest())
+	reordered2 := base()
+	reordered2.M.Checks = append(reordered2.M.Checks, Check{Name: "zzz", State: CheckNotRun, Level: "L0"})
+	if withExtra != string(reordered2.manifestDigest()) {
+		t.Error("check ordering changed the digest — not canonical/sorted")
+	}
+}
 
 // helper: compute sha256 of raw bytes.
 func hexSHA(b []byte) string {

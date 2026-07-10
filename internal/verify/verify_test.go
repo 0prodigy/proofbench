@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/launchwings/proofbench/internal/evidence"
-	"github.com/launchwings/proofbench/internal/manifest"
+	"github.com/0prodigy/proofbench/internal/evidence"
+	"github.com/0prodigy/proofbench/internal/manifest"
 )
 
 // fakeOps executes exercises for real (bash -lc, echo-based) and supports the
@@ -209,11 +209,18 @@ func TestRunChecksExpectError(t *testing.T) {
 	}
 }
 
-func TestRunChecksNoExpectsPassesVacuously(t *testing.T) {
+// TestRunChecksNoExpectsIsNotRunVacuous proves a check declaring no expect
+// predicates records not-run (vacuous), never a pass — ADR-0015 R1 closes
+// E1's vacuous-pass hole (an empty expect: block asserts nothing, so it can
+// prove nothing).
+func TestRunChecksNoExpectsIsNotRunVacuous(t *testing.T) {
 	r := ready(manifest.CheckSpec{Name: "x", Level: "L1", Exercise: "exit 7"})
 	checks := runChecks(r, Opts{}, newFakeOps(), nil, false)
-	if checks[0].State != evidence.CheckPass {
-		t.Errorf("x: state %q, want pass (no expects, exercise spawned)", checks[0].State)
+	if checks[0].State != evidence.CheckNotRun {
+		t.Errorf("x: state %q, want not-run (no expects is vacuous, never green)", checks[0].State)
+	}
+	if !strings.Contains(checks[0].Reason, "vacuous") {
+		t.Errorf("x: reason %q should explain the vacuous not-run", checks[0].Reason)
 	}
 }
 
