@@ -5,18 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Proofbench — Your agents say it works. Proofbench proves it.</title>
 <meta name="description" content="Proofbench is an open-source harness AI coding agents use to prove their changes work — functionally, end-to-end — on your real infrastructure." />
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%235B8CFF' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%233FDE8C' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="assets/site.css" />
-<script>document.documentElement.classList.add("js");</script>
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 
 <header class="nav">
   <div class="container">
     <a class="nav-logo" href="index.html" aria-label="Proofbench home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
       proofbench
     </a>
@@ -26,247 +33,305 @@
       <a href="https://github.com/launchwings/proofbench">GitHub</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="docs/quickstart.html">Get started</a>
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="docs/quickstart.html">Run the quickstart</a>
     </div>
   </div>
 </header>
 
-<main>
+<main id="main">
 
-  <!-- ============ HERO ============ -->
+  <!-- ============ HERO — the verification record filling itself in ============ -->
   <section class="hero">
     <div class="container">
-      <p class="eyebrow">open-source · Apache-2.0</p>
-      <h1>Your agents say it works. <span class="accent">Proofbench proves it.</span></h1>
-      <p class="hero-sub">AI coding agents prove changes work — functionally, end-to-end — on your real infrastructure.</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="docs/quickstart.html">Get started</a>
-        <a class="btn btn-ghost" href="https://github.com/launchwings/proofbench">
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-          GitHub
-        </a>
+      <div class="hero-copy">
+        <p class="eyebrow">open-source · Apache-2.0</p>
+        <h1>Your agents say it works. <span class="accent">Proofbench proves it.</span></h1>
+        <p class="hero-sub">AI coding agents prove changes work — functionally, end-to-end — on your real infrastructure. The harness runs your product and writes the bundle; the agent never grades its own homework.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="docs/quickstart.html">Run the quickstart</a>
+          <a class="btn btn-ghost" href="https://github.com/launchwings/proofbench">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <div class="hero-install code-frame">
+          <code>git clone https://github.com/launchwings/proofbench &amp;&amp; cd proofbench &amp;&amp; go build -o bin/pb ./cmd/pb</code>
+          <button class="copy-btn" type="button" data-copy-target aria-label="Copy install command">Copy</button>
+        </div>
       </div>
 
-      <div class="hero-visual reveal">
-        <svg class="pipeline" viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A pull request flows through the Proofbench harness across the local, compose, and k8s-attach substrates into a signed evidence bundle and a pass verdict.">
-          <!-- connectors: PR -> harness -->
-          <path id="seg-pr" class="pl-path pl-accent" style="--pl-delay:0s" d="M118 150 C 160 150, 170 150, 210 150" />
-          <!-- harness -> substrates (fan out) -->
-          <path id="seg-local" class="pl-path" style="--pl-delay:.15s" d="M330 150 C 380 150, 380 78, 430 78" />
-          <path id="seg-compose" class="pl-path" style="--pl-delay:.2s" d="M330 150 C 380 150, 380 150, 430 150" />
-          <path id="seg-k8s" class="pl-path pl-accent" style="--pl-delay:.25s" d="M330 150 C 380 150, 380 222, 430 222" />
-          <!-- substrates -> evidence bundle (converge) -->
-          <path id="seg-local-ev" class="pl-path" style="--pl-delay:.4s" d="M550 78 C 600 78, 600 150, 650 150" />
-          <path id="seg-compose-ev" class="pl-path" style="--pl-delay:.45s" d="M550 150 C 600 150, 600 150, 650 150" />
-          <path id="seg-k8s-ev" class="pl-path pl-accent" style="--pl-delay:.5s" d="M550 222 C 600 222, 600 150, 650 150" />
-          <!-- evidence -> verdict -->
-          <path id="seg-verdict" class="pl-path pl-accent" style="--pl-delay:.65s" d="M770 150 C 810 150, 820 150, 858 150" />
-
-          <!-- traveling pulse dots, one continuous path through the accent route -->
-          <circle class="pl-pulse" r="3" style="--pl-delay:0s; offset-path: path('M118 150 C 160 150, 170 150, 210 150')" />
-          <circle class="pl-pulse" r="3" style="--pl-delay:.9s; offset-path: path('M330 150 C 380 150, 380 222, 430 222')" />
-          <circle class="pl-pulse" r="3" style="--pl-delay:1.8s; offset-path: path('M550 222 C 600 222, 600 150, 650 150')" />
-          <circle class="pl-pulse" r="3" style="--pl-delay:2.7s; offset-path: path('M770 150 C 810 150, 820 150, 858 150')" />
-
-          <g class="pl-node">
-            <rect x="20" y="126" width="98" height="48" rx="10" />
-            <text x="69" y="154" text-anchor="middle">PR</text>
-          </g>
-
-          <g class="pl-node is-accent">
-            <rect x="210" y="120" width="120" height="60" rx="10" />
-            <text x="270" y="146" text-anchor="middle">pb harness</text>
-            <text class="pl-sub" x="270" y="164" text-anchor="middle">verify</text>
-          </g>
-
-          <g class="pl-node">
-            <rect x="430" y="54" width="120" height="48" rx="10" />
-            <text x="490" y="82" text-anchor="middle" font-size="11">local</text>
-          </g>
-          <g class="pl-node">
-            <rect x="430" y="126" width="120" height="48" rx="10" />
-            <text x="490" y="154" text-anchor="middle" font-size="11">compose</text>
-          </g>
-          <g class="pl-node is-accent">
-            <rect x="430" y="198" width="120" height="48" rx="10" />
-            <text x="490" y="226" text-anchor="middle" font-size="11">k8s-attach</text>
-          </g>
-
-          <g class="pl-node">
-            <rect x="650" y="120" width="120" height="60" rx="10" />
-            <text x="710" y="146" text-anchor="middle">evidence</text>
-            <text class="pl-sub" x="710" y="164" text-anchor="middle">bundle</text>
-          </g>
-
-          <g class="pl-badge">
-            <rect x="858" y="132" width="122" height="36" rx="18" />
-            <circle cx="878" cy="150" r="4" />
-            <text x="895" y="154">verdict: pass</text>
-          </g>
-        </svg>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ TERMINAL DEMO ============ -->
-  <section id="demo">
-    <div class="container">
-      <div class="section-head reveal" style="margin-left:auto;margin-right:auto;text-align:center;">
-        <p class="eyebrow" style="justify-content:center;">real run, real cluster</p>
-        <h2>No narration. Just exit codes.</h2>
+      <!-- Certificate: filled state is the accessible, no-JS, reduced-motion default. -->
+      <div class="cert" id="cert">
+        <div class="cert-head">
+          <h3 class="cert-title">Verification Record</h3>
+          <span class="cert-serial">Serial PB-2026-0710-010422</span>
+        </div>
+        <dl class="cert-fields">
+          <div class="cert-field"><dt>Repo</dt><dd data-field="repo" data-value="appservice">appservice</dd></div>
+          <div class="cert-field"><dt>Substrate</dt><dd data-field="substrate" data-value="k8s-attach">k8s-attach</dd></div>
+          <div class="cert-field"><dt>Rung</dt><dd data-field="rung" data-value="L3">L3</dd></div>
+          <div class="cert-field"><dt>Verdict</dt><dd data-field="verdict" data-value="pass">pass</dd></div>
+        </dl>
+        <div class="cert-seal-slot" id="cert-seal" aria-hidden="true">
+          <svg class="seal-svg" viewBox="0 0 100 100" role="img" aria-label="PROOF level 3 seal, verdict pass">
+            <defs><path id="seal-arc" d="M 50,50 m -37,0 a 37,37 0 1,1 74,0 a 37,37 0 1,1 -74,0" /></defs>
+            <circle cx="50" cy="50" r="46" />
+            <circle cx="50" cy="50" r="33" />
+            <text><textPath href="#seal-arc" startOffset="3">PROOF · L3 · PASS ·</textPath></text>
+            <text x="50" y="54" text-anchor="middle" font-size="12" font-weight="600">L3</text>
+          </svg>
+        </div>
       </div>
 
-      <div class="term reveal" id="term-demo">
+      <!-- Terminal slab: replays the real redcat k8s-attach run, verbatim. -->
+      <div class="term" id="term-demo">
         <div class="term-chrome">
-          <span class="term-dot f"></span>
-          <span class="term-dot n"></span>
-          <span class="term-dot p"></span>
+          <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
           <span class="term-title">redcat-cluster · k8s-attach</span>
         </div>
         <div class="term-body" id="term-body"><div class="term-line t-cmd">pb up --substrate k8s-attach</div><div class="term-line t-out">forward svc/appservice:8000 -&gt; 127.0.0.1:56493</div><div class="term-line t-out">up: appservice (k8s-attach)</div><div class="term-line t-cmd">pb ready</div><div class="term-line t-out">ready: appservice ok</div><div class="term-line t-cmd">pb verify</div><div class="term-line t-out">bundle:  evidence/20260710-010422-verify</div><div class="term-line t-out">proof:   L3</div><div class="term-line t-out">verdict: pass</div><div class="term-line t-pass">  [pass] appservice-up</div><div class="term-line t-notrun">  [not-run] action-resolution</div><div class="term-line t-notrun">  [not-run] stage-progress</div><div class="term-line t-notrun">  [not-run] stage-log-observed</div></div>
       </div>
-      <p class="demo-caption">A real run against a real EKS cluster. Gated checks report not-run — never a fake green.</p>
+    </div>
+  </section>
+
+  <!-- ============ LEDGER PIPELINE ============ -->
+  <section id="pipeline">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">the pipeline is the argument</p>
+        <h2>Five entries. One real sequence.</h2>
+        <p>Every run passes through the same ledger — a manifest declares it, the harness runs it, and the bundle records what actually happened.</p>
+      </div>
+      <div class="ledger">
+        <div class="ledger-row">
+          <span class="ledger-num">№1</span>
+          <div class="ledger-body">
+            <h3>Manifest</h3>
+            <p>How a service becomes runnable and testable — deps, seed, health probe, drive verbs, checks — declared once in <code>ready.yaml</code>.</p>
+          </div>
+          <pre class="ledger-artifact"><code>checks:
+  - name: order-roundtrip
+    level: L4
+    exercise: drive.create-order
+    expect:
+      - "exitCode(order-roundtrip)==0"
+      - "rows(orders.json)&gt;0"</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№2</span>
+          <div class="ledger-body">
+            <h3>Bring-up</h3>
+            <p>The harness starts the service the manifest declares — a local process, Docker Compose, or a port-forward into your own cluster.</p>
+          </div>
+          <pre class="ledger-artifact"><code>$ pb up --substrate local --manifest ready.yaml
+starting basic-orders (local)</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№3</span>
+          <div class="ledger-body">
+            <h3>Drive</h3>
+            <p>A drive verb exercises the real product entrypoint — never a look-alike, never a curl one-liner standing in for the app.</p>
+          </div>
+          <pre class="ledger-artifact"><code>drive:
+  create-order:
+    run: ./scripts/create-order.sh
+    identity: env:USER_EMAIL
+    output: json</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№4</span>
+          <div class="ledger-body">
+            <h3>Evidence</h3>
+            <p>Every command is captured — exit code, log, a SHA-256 — and tagged with who produced it: the harness, never the agent.</p>
+          </div>
+          <pre class="ledger-artifact"><code>{
+  "type": "command", "name": "03-fire",
+  "sha256": "a3f1c2...",
+  "provenance": "harness",
+  "meta": { "cmd": "./scripts/create-order.sh", "exitCode": 0 }
+}</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№5</span>
+          <div class="ledger-body">
+            <h3>Verdict</h3>
+            <p>Set last, after every check and artifact is in — never inferred from the agent's own narration.</p>
+          </div>
+          <pre class="ledger-artifact"><code>"verdict": "pass",
+"note": "set last, from artifacts"</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ QUICKSTART TABS ============ -->
+  <section id="quickstart">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">one manifest, any substrate</p>
+        <h2>Pick where it runs. Nothing else changes.</h2>
+      </div>
+      <div class="tabs" id="quickstart-tabs">
+        <div class="tab-list" role="tablist" aria-label="Substrate quickstart">
+          <button class="tab-btn" role="tab" type="button" aria-selected="true" id="tab-local" aria-controls="panel-local">local</button>
+          <button class="tab-btn" role="tab" type="button" aria-selected="false" id="tab-compose" aria-controls="panel-compose" tabindex="-1">compose</button>
+          <button class="tab-btn" role="tab" type="button" aria-selected="false" id="tab-k8s" aria-controls="panel-k8s" tabindex="-1">k8s-attach</button>
+        </div>
+        <div class="tab-panel is-active" id="panel-local" role="tabpanel" aria-labelledby="tab-local">
+          <div class="code-frame"><pre><code>git clone https://github.com/launchwings/proofbench
+cd proofbench
+go build -o bin/pb ./cmd/pb
+export PATH="$PWD/bin:$PATH"
+
+cd examples/basic
+pb up --substrate local --manifest ready.yaml
+pb ready --manifest ready.yaml
+pb verify --manifest ready.yaml --ticket ENG-001 \
+  --claim "orders endpoint appends to orders.json"</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">bundle: evidence/20260704-101500-verify · proof: L4 · verdict: pass</p>
+        </div>
+        <div class="tab-panel" id="panel-compose" role="tabpanel" aria-labelledby="tab-compose">
+          <div class="code-frame"><pre><code>pb up --substrate compose --manifest ready.yaml
+pb ready --substrate compose --manifest ready.yaml
+pb verify --substrate compose --manifest ready.yaml --ticket ENG-001 \
+  --claim "orders endpoint appends to orders.json"</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">Same manifest, same checks — only <code>--substrate</code> changes.</p>
+        </div>
+        <div class="tab-panel" id="panel-k8s" role="tabpanel" aria-labelledby="tab-k8s">
+          <div class="code-frame"><pre><code>export PB_K8S_CONTEXT=redcat
+export PB_K8S_NAMESPACE=redcat
+pb up --substrate k8s-attach --manifest ready.yaml
+pb ready --manifest ready.yaml
+pb verify --substrate k8s-attach --manifest ready.yaml</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">forward svc/appservice:8000 -&gt; 127.0.0.1:54217 · attach-only, never <code>kubectl create</code>.</p>
+        </div>
+      </div>
     </div>
   </section>
 
   <!-- ============ PROOF LADDER ============ -->
   <section id="ladder">
     <div class="container">
-      <div class="section-head reveal">
+      <div class="section-head">
         <p class="eyebrow">the proof ladder</p>
         <h2>Every run names the rung it reached.</h2>
-        <p>A report that doesn't name a level isn't a proof.</p>
+        <p>A report that doesn't name a level isn't a proof. "Schema-valid" isn't "runs." "Exit code 0" isn't "effect verified."</p>
       </div>
-
-      <div class="ladder reveal">
+      <div class="ladder">
         <div class="ladder-track"><div class="ladder-fill"></div></div>
-        <div class="rung"><span class="rung-level">L0</span><span class="rung-name">static-valid</span><span class="rung-def">Manifest parses and passes schema validation.</span></div>
-        <div class="rung"><span class="rung-level">L1</span><span class="rung-name">builds/loads</span><span class="rung-def">Service builds or loads without errors.</span></div>
-        <div class="rung"><span class="rung-level">L2</span><span class="rung-name">unit-green</span><span class="rung-def">Unit tests pass.</span></div>
-        <div class="rung"><span class="rung-level">L3</span><span class="rung-name">up+healthy</span><span class="rung-def">Service starts and health probe returns 200.</span></div>
-        <div class="rung"><span class="rung-level">L4</span><span class="rung-name">effect-verified</span><span class="rung-def">A drive verb produced an observable effect.</span></div>
-        <div class="rung"><span class="rung-level">L5</span><span class="rung-name">end-to-end observed</span><span class="rung-def">Full user-facing flow exercised and confirmed.</span></div>
+        <div class="rung is-earned"><span class="rung-level">L0</span><span class="rung-name">static-valid</span><span class="rung-def">Manifest parses and passes schema validation.</span></div>
+        <div class="rung is-earned"><span class="rung-level">L1</span><span class="rung-name">builds/loads</span><span class="rung-def">Service binary or image builds without errors.</span></div>
+        <div class="rung is-earned"><span class="rung-level">L2</span><span class="rung-name">unit-green</span><span class="rung-def">Unit/integration test suite passed.</span></div>
+        <div class="rung is-earned"><span class="rung-level">L3</span><span class="rung-name">up+healthy</span><span class="rung-def">Service started and readiness probe returned healthy.</span></div>
+        <div class="rung is-open"><span class="rung-level">L4</span><span class="rung-name">effect-verified</span><span class="rung-def">Earns it: a drive verb ran and a data/API/UI effect was observed.</span></div>
+        <div class="rung is-open"><span class="rung-level">L5</span><span class="rung-name">end-to-end observed</span><span class="rung-def">Earns it: the full user journey exercised and confirmed.</span></div>
       </div>
     </div>
   </section>
 
-  <!-- ============ THREE PILLARS ============ -->
-  <section id="pillars">
+  <!-- ============ VERDICTS SET LAST ============ -->
+  <section id="trust" class="contrast">
     <div class="container">
-      <div class="section-head reveal">
-        <p class="eyebrow">how it works</p>
-        <h2>One manifest. Any substrate. A bundle that doesn't lie.</h2>
-      </div>
-
-      <div class="grid-3">
-        <div class="card reveal">
-          <span class="card-label">ready.yaml</span>
-          <h3>Readiness manifest</h3>
-          <p>How a service becomes runnable and testable — deps, seed, health probe, drive verbs — declared once.</p>
-          <pre><code>service: basic-orders
-run:
-  ready:
-    http: ":8391/healthz"
-checks:
-  - name: order-roundtrip
-    level: L4
-    exercise: drive.create-order
-    expect:
-      - "exitCode(order-roundtrip)==0"
-      - "rows(orders.json)>0"</code></pre>
-        </div>
-
-        <div class="card reveal">
-          <span class="card-label">manifest.json</span>
-          <h3>Evidence bundle</h3>
-          <p>Tri-state checks, pinned image digests, and per-artifact provenance — captured by the harness, not the agent.</p>
-          <pre><code>{
-  "pins": {
-    "image.appservice":
-      "...@sha256:c2f0813816b5…",
-    "k8s.context":
-      "arn:aws:eks:…cluster/redcat-cluster"
-  },
-  "checks": [
-    { "name": "appservice-up",
-      "state": "pass", "level": "L3" },
-    { "name": "stage-log-observed",
-      "state": "not-run", "level": "L5" }
-  ],
-  "verdict": "pass"
-}</code></pre>
-        </div>
-
-        <div class="card reveal">
-          <span class="card-label">local · compose · k8s-attach</span>
-          <h3>Substrate-polymorphic</h3>
-          <p>The same manifest runs on your laptop, in Compose, or attached to your own cluster — chosen at runtime, never baked in.</p>
-          <p style="margin-top:var(--space-3);font-family:var(--mono);font-size:0.82rem;color:var(--fg-dimmer);">Attach-only: port-forwards into your cluster. Never <code style="background:none;border:none;padding:0;">kubectl create</code>.</p>
-        </div>
-      </div>
+      <p class="eyebrow">agent proposes, harness proves</p>
+      <h2>Verdicts are set last — by the harness, never the agent.</h2>
+      <p style="margin-top:var(--space-2);max-width:60ch;">The bundle records who produced each artifact. A check the agent merely narrated is never mistaken for one the harness ran and captured.</p>
+      <pre class="ledger-artifact" style="margin-top:var(--space-3);max-width:640px;"><code>"checks": [
+  { "name": "order-roundtrip", "state": "pass",
+    "artifacts": ["03-fire", "sn-post"] },
+  { "name": "e2e-ui", "state": "not-run",
+    "reason": "gate: cluster deploy pending" }
+],
+"artifacts": [
+  { "type": "command", "provenance": "harness",
+    "sha256": "a3f1c2..." }
+]</code></pre>
     </div>
   </section>
 
-  <!-- ============ CONTRAST STRIP ============ -->
-  <section class="contrast">
-    <div class="container reveal">
-      <p class="eyebrow" style="justify-content:center;">agent proposes, harness proves</p>
-      <h2>Verdicts are set last, by the harness — never the agent.</h2>
-      <p class="contrast-line"><span class="strong">LLM code review reads the diff.</span> <span class="weak">Proofbench runs your product.</span></p>
-    </div>
-  </section>
-
-  <!-- ============ BYO AGENT ============ -->
-  <section id="byo">
+  <!-- ============ HEADLESS SUBSCRIPTION ============ -->
+  <section id="headless">
     <div class="container">
-      <div class="section-head reveal">
+      <div class="section-head">
         <p class="eyebrow">bring your own agent, your own subscription</p>
         <h2>Runs headless Claude Code on your own plan.</h2>
-        <p>Proofbench shells out to the genuine CLI your team already has installed — no API key required, and your credentials never touch Proofbench.</p>
+        <p>Proofbench shells out to the customer-installed, genuine <code>claude</code> binary and inherits whatever subscription or API auth is already there. It's the customer's own binary and the customer's own plan — credentials never touch Proofbench (ADR-0014).</p>
       </div>
-
-      <div class="chip-row reveal">
+      <div class="chip-row">
         <span class="chip">claude-code</span>
         <span class="chip">codex</span>
         <span class="chip">gemini</span>
         <span class="chip">any MCP agent</span>
       </div>
-
-      <div class="stat-line reveal">
+      <div class="stat-line">
         one exploratory round: <strong>9 turns</strong> · <strong>8 proposed checks</strong> · <strong>$1.70</strong> on the operator's own plan
       </div>
     </div>
   </section>
 
-  <!-- ============ GITHUB ACTION ============ -->
-  <section id="action">
+  <!-- ============ COMPARISON ============ -->
+  <section id="compare">
     <div class="container">
-      <div class="action-strip">
-        <div class="reveal">
-          <p class="eyebrow">ci integration</p>
-          <h2>Evidence bundle on every PR.</h2>
-          <p>Drop the action in, and every pull request ships with a schema'd evidence bundle as a workflow artifact — gated on the real verdict, not <code style="background:var(--bg-raise);border:1px solid var(--line);border-radius:4px;padding:2px 6px;">pb</code>'s raw exit status.</p>
-        </div>
-        <div class="card reveal">
-          <pre><code>- uses: launchwings/proofbench@main
-  with:
-    manifest: ready.yaml
-    substrate: local
-    working-directory: .
-    evidence-dir: .proofbench/evidence</code></pre>
-        </div>
+      <div class="section-head">
+        <p class="eyebrow">not another reviewer</p>
+        <h2>Reading the diff isn't running the product.</h2>
+      </div>
+      <table class="compare-table">
+        <thead><tr><th scope="col"></th><th scope="col">LLM code review</th><th scope="col">Proofbench</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Method</th><td>Reads the diff</td><td>Runs your product</td></tr>
+          <tr><th scope="row">Output</th><td>Prose findings</td><td>Exit codes + artifacts</td></tr>
+          <tr><th scope="row">Verdict</th><td>Set by the model</td><td>Set last, by the harness</td></tr>
+          <tr><th scope="row">Evidence</th><td>Quoted code</td><td>Sealed, tamper-evident bundle</td></tr>
+          <tr><th scope="row">Substrate</th><td>None</td><td>local · compose · your cluster</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section id="faq">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">before you attach a cluster</p>
+        <h2>Questions worth answering upfront.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Is my cluster safe to attach?</summary>
+          <p><code>k8s-attach</code> is attach-only (Shape-A, ADR-0011): it port-forwards and reads. It never runs <code>kubectl create</code> or <code>kubectl delete</code>, and never applies, creates, deletes, or scales a cluster object.</p>
+        </details>
+        <details>
+          <summary>Do you store my credentials?</summary>
+          <p>Never. Per ADR-0014, the headless-agent adapter inherits whatever auth the customer already has — subscription token, API key, or Bedrock/Vertex credentials — with zero Proofbench involvement. Cluster access works the same way: a kubeconfig context name, never a stored secret (ADR-0008).</p>
+        </details>
+        <details>
+          <summary>What agents work with Proofbench?</summary>
+          <p>Any of them. Bring your own genuine CLI — Claude Code, Codex, Gemini — or speak to <code>pb mcp serve</code> over stdio MCP from any MCP-capable agent.</p>
+        </details>
+        <details>
+          <summary>What happens when a check can't run?</summary>
+          <p>It records honest <code>not-run</code> with a reason — never a silent pass and never a fabricated fail. A bundle that can't reach its declared level sets <code>verdict: inconclusive</code>, not <code>pass</code>.</p>
+        </details>
+        <details>
+          <summary>What's the license?</summary>
+          <p>Apache-2.0. The evidence bundle format is open and portable — export your data any time.</p>
+        </details>
       </div>
     </div>
   </section>
 
   <!-- ============ FINAL CTA ============ -->
   <section class="final-cta">
-    <div class="container reveal">
-      <p class="eyebrow" style="justify-content:center;">get started in 60 seconds</p>
+    <div class="container">
+      <p class="eyebrow">get started in 60 seconds</p>
       <h2>Stop trusting the narration. Start trusting the bundle.</h2>
       <div class="hero-cta">
-        <a class="btn btn-primary" href="docs/quickstart.html">Get started</a>
-        <a class="btn btn-ghost" href="https://github.com/launchwings/proofbench">GitHub</a>
+        <a class="btn btn-primary" href="docs/quickstart.html">Run the quickstart</a>
+        <a class="btn btn-ghost" href="docs/spec.html">Read the spec</a>
       </div>
     </div>
   </section>
@@ -278,12 +343,12 @@ checks:
     <div class="footer-brand">
       <a class="nav-logo" href="index.html">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--accent)" stroke-width="1.4" />
-          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--pass)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         proofbench
       </a>
-      <p>The system of record for agent proof. Apache-2.0, built by launchwings.</p>
+      <p>The system of record for agent proof. Apache-2.0, built by launchwings. v0.1.0-dev.</p>
     </div>
     <div class="footer-links">
       <div class="footer-links-col">
@@ -301,98 +366,6 @@ checks:
   </div>
 </footer>
 
-<script>
-(function () {
-  "use strict";
-  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Scroll reveals + ladder fill
-  var revealTargets = document.querySelectorAll(".reveal, #ladder .ladder");
-  if ("IntersectionObserver" in window && !reduceMotion) {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) {
-          e.target.classList.add("in-view");
-          io.unobserve(e.target);
-        }
-      });
-    }, { threshold: 0.2 });
-    revealTargets.forEach(function (el) { io.observe(el); });
-  } else {
-    revealTargets.forEach(function (el) { el.classList.add("in-view"); });
-  }
-
-  // Terminal typing demo
-  var body = document.getElementById("term-body");
-  var demo = document.getElementById("term-demo");
-  if (!body || !demo) return;
-
-  var lines = [
-    { cls: "t-cmd", text: "pb up --substrate k8s-attach" },
-    { cls: "t-out", text: "forward svc/appservice:8000 -> 127.0.0.1:56493" },
-    { cls: "t-out", text: "up: appservice (k8s-attach)" },
-    { cls: "t-cmd", text: "pb ready" },
-    { cls: "t-out", text: "ready: appservice ok" },
-    { cls: "t-cmd", text: "pb verify" },
-    { cls: "t-out", text: "bundle:  evidence/20260710-010422-verify" },
-    { cls: "t-out", text: "proof:   L3" },
-    { cls: "t-out", text: "verdict: pass" },
-    { cls: "t-pass", text: "  [pass] appservice-up" },
-    { cls: "t-notrun", text: "  [not-run] action-resolution" },
-    { cls: "t-notrun", text: "  [not-run] stage-progress" },
-    { cls: "t-notrun", text: "  [not-run] stage-log-observed" }
-  ];
-
-  function renderInstant() {
-    body.innerHTML = lines.map(function (l) {
-      return '<div class="term-line ' + l.cls + '">' + l.text + "</div>";
-    }).join("");
-  }
-
-  function typeLine(i) {
-    if (i >= lines.length) return;
-    var l = lines[i];
-    var div = document.createElement("div");
-    div.className = "term-line " + l.cls;
-    body.appendChild(div);
-
-    if (l.cls !== "t-cmd") {
-      div.textContent = l.text;
-      setTimeout(function () { typeLine(i + 1); }, 220);
-      return;
-    }
-    var pos = 0;
-    (function tick() {
-      div.textContent = l.text.slice(0, pos);
-      if (pos < l.text.length) {
-        pos++;
-        setTimeout(tick, 22);
-      } else {
-        setTimeout(function () { typeLine(i + 1); }, 160);
-      }
-    })();
-  }
-
-  if (reduceMotion) {
-    renderInstant();
-  } else if ("IntersectionObserver" in window) {
-    // Lines are prerendered for no-JS; clear them so the typing demo starts empty.
-    body.innerHTML = "";
-    var started = false;
-    var termIo = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting && !started) {
-          started = true;
-          typeLine(0);
-          termIo.unobserve(e.target);
-        }
-      });
-    }, { threshold: 0.4 });
-    termIo.observe(demo);
-  } else {
-    renderInstant();
-  }
-})();
-</script>
+<script src="assets/site.js"></script>
 </body>
 </html>
