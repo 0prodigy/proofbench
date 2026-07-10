@@ -1,8 +1,12 @@
 package manifest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -10,9 +14,9 @@ import (
 
 // Detect inspects dir with no ready.yaml present and proposes a generated
 // Ready manifest by deriving from existing truth: docker-compose files,
-// Procfile, package.json scripts, Makefile, and go.mod. Derive, don't
-// restate — the generated manifest points into those sources rather than
-// duplicating them.
+// Procfile, package.json scripts, Makefile, go.mod, a grepped readiness
+// probe, seed/drive scripts, and k8s manifests. Derive, don't restate — the
+// generated manifest points into those sources rather than duplicating them.
 //
 // Detect never fails hard: an empty dir yields a minimal Ready with the
 // service name set to the directory basename, a TODO role, and a TODO start
@@ -45,6 +49,14 @@ func Detect(dir string) (*Ready, error) {
 	detectProcfile(dir, r)
 	detectMakefile(dir, r)
 	detectGoMod(dir, r)
+
+	// Best-effort extras: a readiness probe grepped from source, seed/drive
+	// scripts, and k8s-attach awareness. None of these can make Detect fail —
+	// they only add to what the source-derived detectors above already found.
+	detectReadyProbe(dir, r)
+	detectSeedScripts(dir, r)
+	detectDriveScripts(dir, r)
+	detectK8sManifests(dir, r)
 
 	// Populate Sources map with the files we found.
 	if composeFile != "" {
@@ -149,8 +161,9 @@ func parseComposeInto(data []byte, _ string, r *Ready) {
 	// them in our schema since the compose file is the authoritative source.
 }
 
-// detectPackageJSON reads scripts.dev|start -> run.local.start and
-// scripts.test -> an L2 "unit" check.
+// detectPackageJSON reads scripts.dev|start -> run.local.start,
+// scripts.test -> an L2 "unit" check, and db:seed-style scripts -> a seed
+// step.
 func detectPackageJSON(dir string, r *Ready) {
 	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
@@ -185,30 +198,64 @@ func detectPackageJSON(dir string, r *Ready) {
 			})
 		}
 	}
+
+	// db:seed-style scripts (e.g. "seed", "db:seed", "seed:db") propose a
+	// seed step, sorted for deterministic output.
+	keys := make([]string, 0, len(pkg.Scripts))
+	for k := range pkg.Scripts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !strings.Contains(strings.ToLower(k), "seed") {
+			continue
+		}
+		if hasSeedNamed(r, k) {
+			continue
+		}
+		r.Seed = append(r.Seed, SeedStep{Name: k, Run: "npm run " + k})
+	}
 }
 
-// detectProcfile reads Procfile: web: <cmd> -> run.local.start.
+// detectProcfile reads Procfile process-type entries ("web: <cmd>", "worker:
+// <cmd>", ...) and expands them into run.local.start: a single entry becomes
+// that command verbatim; multiple entries are joined into one runnable shell
+// line ("cmd1 & cmd2 & ... & wait") so pb init never proposes an unrunnable
+// manifest for a Procfile-only repo (a real cold-onboarding finding: falling
+// through to a Makefile "run" target that requires foreman is not
+// runnable). MarshalProposal annotates the multi-entry case with a proposal
+// comment on the start line.
 func detectProcfile(dir string, r *Ready) {
 	data, err := os.ReadFile(filepath.Join(dir, "Procfile"))
 	if err != nil {
 		return
 	}
 	r.Sources["procfile"] = "Procfile"
+
+	var cmds []string
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		proc, cmd, ok := strings.Cut(line, ":")
+		_, cmd, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
-		proc = strings.TrimSpace(proc)
 		cmd = strings.TrimSpace(cmd)
-		if proc == "web" && r.Run.Local.Start == "" && cmd != "" {
-			r.Run.Local.Start = cmd
+		if cmd == "" {
+			continue
 		}
+		cmds = append(cmds, cmd)
 	}
+	if len(cmds) == 0 || r.Run.Local.Start != "" {
+		return
+	}
+	if len(cmds) == 1 {
+		r.Run.Local.Start = cmds[0]
+		return
+	}
+	r.Run.Local.Start = strings.Join(cmds, " & ") + " & wait"
 }
 
 // detectMakefile looks for targets run|dev|start -> local start command and
@@ -311,4 +358,435 @@ func hasCheckNamed(r *Ready, name string) bool {
 		}
 	}
 	return false
+}
+
+// hasSeedNamed returns true if r already has a seed step with the given name.
+func hasSeedNamed(r *Ready, name string) bool {
+	for _, s := range r.Seed {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ------------------------------------------------------------- ready probe
+
+// healthPathTokens are the literal quoted path tokens detectReadyProbe looks
+// for, most specific first: a repo using "/healthz" names it deliberately, so
+// prefer it over a bare "/health" match found elsewhere in the same source.
+var healthPathTokens = []string{"/healthz", "/health"}
+
+// portRe grep-matches a 2-5 digit port near a listen/addr/env-default
+// keyword: Go's `ListenAndServe(":8080"`/`Addr: ":8080"`, Node's
+// `.listen(3000)`/`process.env.PORT || 3000`, Python's
+// `os.environ.get("PORT", 8080)`. Best-effort: a nearby unrelated number can
+// false-positive; that is an acceptable trade for "no probe" today.
+var portRe = regexp.MustCompile(`(?i)(?:listen(?:andserve)?|addr|port)\W{1,15}?(\d{2,5})\b`)
+
+// sourceScanExts bounds detectReadyProbe's grep to common application source
+// files — no lockfiles, binaries, or generated assets.
+var sourceScanExts = map[string]bool{
+	".go": true, ".py": true, ".rb": true, ".java": true,
+	".js": true, ".jsx": true, ".ts": true, ".tsx": true,
+}
+
+// sourceScanSkipDirs are directories detectReadyProbe and detectK8sManifests
+// never descend into: dependency trees, VCS metadata, and pb's own state.
+var sourceScanSkipDirs = map[string]bool{
+	".git": true, "node_modules": true, "vendor": true, ".venv": true,
+	"venv": true, "dist": true, "build": true, "target": true, ".pb": true,
+}
+
+// detectReadyProbe grep-scans source files for a "/healthz" or "/health"
+// handler-registration path plus a listen port (listen address or env
+// default), proposing run.ready.http "<port><path>" only when both are
+// found — best-effort, never a guess from just one signal. When nothing is
+// found run.ready is left unset; MarshalProposal notes the gap with a TODO
+// comment rather than pb init silently proposing no probe at all.
+func detectReadyProbe(dir string, r *Ready) {
+	if r.Run.Ready.HTTP != "" || r.Run.Ready.TCP != "" || r.Run.Ready.Exec != "" {
+		return // a probe is already set
+	}
+
+	var path, port string
+	for _, token := range healthPathTokens {
+		if path != "" {
+			break
+		}
+		walkSourceFiles(dir, func(_ string, lines []string) {
+			if path != "" {
+				return
+			}
+			for _, line := range lines {
+				if matchesQuoted(line, token) {
+					path = token
+					return
+				}
+			}
+		})
+	}
+	walkSourceFiles(dir, func(_ string, lines []string) {
+		if port != "" {
+			return
+		}
+		for _, line := range lines {
+			if m := portRe.FindStringSubmatch(line); m != nil {
+				port = m[1]
+				return
+			}
+		}
+	})
+
+	if path != "" && port != "" {
+		r.Run.Ready.HTTP = ":" + port + path
+	}
+}
+
+// matchesQuoted reports whether line contains token wrapped in matching
+// quote characters ("...", '...', or `...`).
+func matchesQuoted(line, token string) bool {
+	for _, q := range []string{`"`, `'`, "`"} {
+		if strings.Contains(line, q+token+q) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkSourceFiles calls fn(path, lines) for every source file (by
+// sourceScanExts) under dir, in deterministic (lexical) order, skipping
+// sourceScanSkipDirs. Unreadable files are silently skipped — this is a
+// best-effort grep, never a hard failure.
+func walkSourceFiles(dir string, fn func(path string, lines []string)) {
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if sourceScanSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !sourceScanExts[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		fn(path, strings.Split(string(data), "\n"))
+		return nil
+	})
+}
+
+// -------------------------------------------------------------- seed/drive
+
+// detectSeedScripts proposes a seed step for each scripts/seed*.sh file,
+// sorted for deterministic output. db:seed-style package.json scripts are
+// proposed by detectPackageJSON instead.
+func detectSeedScripts(dir string, r *Ready) {
+	names := readDirSorted(filepath.Join(dir, "scripts"))
+	for _, name := range names {
+		if !strings.HasPrefix(name, "seed") || !strings.HasSuffix(name, ".sh") {
+			continue
+		}
+		stepName := strings.TrimSuffix(name, ".sh")
+		if hasSeedNamed(r, stepName) {
+			continue
+		}
+		r.Seed = append(r.Seed, SeedStep{
+			Name: stepName,
+			Run:  "bash scripts/" + name,
+		})
+	}
+}
+
+// detectDriveScripts proposes a drive verb, named after the script, for each
+// executable scripts/*.sh file — excluding scripts/seed*.sh, which
+// detectSeedScripts already proposes as a seed step, not a drive verb.
+func detectDriveScripts(dir string, r *Ready) {
+	scriptsDir := filepath.Join(dir, "scripts")
+	names := readDirSorted(scriptsDir)
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".sh") || strings.HasPrefix(name, "seed") {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(scriptsDir, name))
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue // not executable, or vanished between readdir and stat
+		}
+		verb := strings.TrimSuffix(name, ".sh")
+		if _, ok := r.Drive[verb]; ok {
+			continue
+		}
+		if r.Drive == nil {
+			r.Drive = map[string]DriveVerb{}
+		}
+		r.Drive[verb] = DriveVerb{Run: "bash scripts/" + name}
+	}
+}
+
+// readDirSorted returns the sorted basenames of dir's entries, or nil if dir
+// does not exist or cannot be read.
+func readDirSorted(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ------------------------------------------------------------- k8s-attach
+
+// k8sDoc is the minimal shape detectK8sManifests parses out of a Kubernetes
+// manifest document: enough to recognize a Service and its first port.
+type k8sDoc struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Ports []struct {
+			Port int `yaml:"port"`
+		} `yaml:"ports"`
+	} `yaml:"spec"`
+}
+
+// detectK8sManifests scans deploy/**/*.y?ml, k8s/, and manifests/ for
+// Kubernetes Service documents (multi-document YAML via yaml.v3; unparsable
+// documents stop that file's scan silently rather than failing Detect).
+// When Services are found it adds "k8s-attach" to run.modes, proposes
+// sources.k8s + a resources entry for the Service matching the repo/module
+// name (falling back to the first Service found), a resources entry for
+// every other Service found, and — when no probe is set yet — a TCP
+// readiness probe against the matched service's placeholder. Shape mirrors
+// fixtures/k8s-attach/eng-17397-actions-controls.ready.yaml.
+func detectK8sManifests(dir string, r *Ready) {
+	type service struct {
+		name, port string
+	}
+	var services []service
+	seen := map[string]bool{}
+
+	for _, path := range collectK8sManifestFiles(dir) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		dec := yaml.NewDecoder(strings.NewReader(string(data)))
+		for {
+			var doc k8sDoc
+			if err := dec.Decode(&doc); err != nil {
+				break // EOF, or an unparsable document: stop this file, silently
+			}
+			if doc.Kind != "Service" || doc.Metadata.Name == "" || seen[doc.Metadata.Name] {
+				continue
+			}
+			port := ""
+			if len(doc.Spec.Ports) > 0 {
+				port = strconv.Itoa(doc.Spec.Ports[0].Port)
+			}
+			services = append(services, service{name: doc.Metadata.Name, port: port})
+			seen[doc.Metadata.Name] = true
+		}
+	}
+	if len(services) == 0 {
+		return
+	}
+	sort.Slice(services, func(i, j int) bool { return services[i].name < services[j].name })
+
+	// Prefer the Service matching the repo/module name; else the first found.
+	primary := services[0]
+	for _, s := range services {
+		if s.name == r.Service {
+			primary = s
+			break
+		}
+	}
+
+	if !modeSet(r.Run.Modes)["k8s-attach"] {
+		r.Run.Modes = append(r.Run.Modes, "k8s-attach")
+	}
+
+	locator := func(s service) string {
+		if s.port == "" {
+			return "svc/" + s.name
+		}
+		return fmt.Sprintf("svc/%s:%s", s.name, s.port)
+	}
+	r.Sources["k8s"] = locator(primary)
+
+	if r.Resources == nil {
+		r.Resources = map[string]Resource{}
+	}
+	for _, s := range services {
+		r.Resources[s.name] = Resource{
+			Type: "service",
+			Via:  map[string]string{"k8s": locator(s)},
+		}
+	}
+
+	if r.Run.Ready.HTTP == "" && r.Run.Ready.TCP == "" && r.Run.Ready.Exec == "" {
+		r.Run.Ready.TCP = fmt.Sprintf("${resources.%s.host}:${resources.%s.port}", primary.name, primary.name)
+		r.Run.Ready.Timeout = "60s"
+		r.Run.Ready.Interval = "2s"
+	}
+}
+
+// collectK8sManifestFiles returns the sorted, absolute paths of *.yml/*.yaml
+// files under dir's deploy/, k8s/, and manifests/ directories (recursively;
+// a missing directory is silently skipped).
+func collectK8sManifestFiles(dir string) []string {
+	var files []string
+	for _, root := range []string{"deploy", "k8s", "manifests"} {
+		base := filepath.Join(dir, root)
+		if info, err := os.Stat(base); err != nil || !info.IsDir() {
+			continue
+		}
+		_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if sourceScanSkipDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			switch strings.ToLower(filepath.Ext(path)) {
+			case ".yml", ".yaml":
+				files = append(files, path)
+			}
+			return nil
+		})
+	}
+	sort.Strings(files)
+	return files
+}
+
+// ---------------------------------------------------------- proposal YAML
+
+// MarshalProposal renders r as YAML in the same hand-written house style as
+// examples/basic/ready.yaml: empty placeholder fields (an unset sources map,
+// an unset run.local.env, an unset probe, empty resources/seed/drive/checks/
+// gates/known_walls, an unset check driver or empty artifacts list) are
+// omitted rather than dumped as "http: \"\"" / "artifacts: []" noise. types.go
+// is frozen (no `omitempty` tags to add there), so the cleanup happens here,
+// post-encode, on the yaml.Node tree — plus two proposal comments Detect's
+// callers can't attach to the struct itself: a "joined N Procfile entries"
+// note on a multi-entry run.local.start, and a TODO on a run.ready that
+// Detect could not confidently propose.
+func MarshalProposal(r *Ready) ([]byte, error) {
+	var root yaml.Node
+	if err := root.Encode(r); err != nil {
+		return nil, fmt.Errorf("manifest.MarshalProposal: encode: %w", err)
+	}
+	pruneEmptyNode(&root)
+	annotateProcfileStart(&root, r)
+	annotateReadyTODO(&root, r)
+
+	data, err := yaml.Marshal(&root)
+	if err != nil {
+		return nil, fmt.Errorf("manifest.MarshalProposal: marshal: %w", err)
+	}
+	return data, nil
+}
+
+// pruneEmptyNode recursively drops mapping entries whose value is an empty
+// scalar (""), null, empty mapping, or empty sequence.
+func pruneEmptyNode(n *yaml.Node) {
+	switch n.Kind {
+	case yaml.MappingNode:
+		kept := n.Content[:0]
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, val := n.Content[i], n.Content[i+1]
+			pruneEmptyNode(val)
+			if isEmptyValueNode(val) {
+				continue
+			}
+			kept = append(kept, key, val)
+		}
+		n.Content = kept
+	case yaml.SequenceNode:
+		for _, c := range n.Content {
+			pruneEmptyNode(c)
+		}
+	}
+}
+
+// isEmptyValueNode reports whether a mapping value node carries no
+// information worth showing in a generated-from-scratch proposal.
+func isEmptyValueNode(n *yaml.Node) bool {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Tag == "!!null" || (n.Tag == "!!str" && n.Value == "")
+	case yaml.MappingNode, yaml.SequenceNode:
+		return len(n.Content) == 0
+	}
+	return false
+}
+
+// findMappingPath walks a chain of mapping keys, returning the final value
+// node or nil if any key along path is absent.
+func findMappingPath(n *yaml.Node, path ...string) *yaml.Node {
+	cur := n
+	for _, key := range path {
+		if cur.Kind != yaml.MappingNode {
+			return nil
+		}
+		next := (*yaml.Node)(nil)
+		for i := 0; i+1 < len(cur.Content); i += 2 {
+			if cur.Content[i].Value == key {
+				next = cur.Content[i+1]
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		cur = next
+	}
+	return cur
+}
+
+// annotateProcfileStart adds a proposal comment to run.local.start when
+// detectProcfile joined multiple Procfile entries into one shell line.
+func annotateProcfileStart(root *yaml.Node, r *Ready) {
+	if !strings.HasSuffix(r.Run.Local.Start, " & wait") {
+		return
+	}
+	n := findMappingPath(root, "run", "local", "start")
+	if n == nil {
+		return
+	}
+	entries := strings.Count(r.Run.Local.Start, " & ")
+	n.LineComment = fmt.Sprintf("proposal: %d Procfile process types joined for local dev; consider a process manager", entries)
+}
+
+// annotateReadyTODO leaves a TODO comment on an empty run.ready section:
+// pruneEmptyNode already dropped it (an unset Probe has nothing to show), so
+// this re-adds a bare "ready:" key to hang the comment on.
+func annotateReadyTODO(root *yaml.Node, r *Ready) {
+	if r.Run.Ready != (Probe{}) {
+		return // a probe was proposed; nothing to flag
+	}
+	runNode := findMappingPath(root, "run")
+	if runNode == nil || runNode.Kind != yaml.MappingNode {
+		return
+	}
+	keyNode := &yaml.Node{
+		Kind:        yaml.ScalarNode,
+		Tag:         "!!str",
+		Value:       "ready",
+		HeadComment: "TODO: pb init could not confidently detect a readiness probe; set run.ready.http|tcp|exec",
+	}
+	valNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	runNode.Content = append(runNode.Content, keyNode, valNode)
 }

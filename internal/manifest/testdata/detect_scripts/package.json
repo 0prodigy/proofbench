@@ -1,0 +1,6 @@
+{
+  "name": "detect-scripts-fixture",
+  "scripts": {
+    "db:seed": "node scripts/seed.js"
+  }
+}

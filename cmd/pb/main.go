@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/launchwings/proofbench/internal/agentruntime"
 	"github.com/launchwings/proofbench/internal/evidence"
 	"github.com/launchwings/proofbench/internal/manifest"
@@ -384,7 +382,7 @@ func cmdInit(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	data, err := yaml.Marshal(r)
+	data, err := manifest.MarshalProposal(r)
 	if err != nil {
 		return fail(err)
 	}
@@ -456,7 +454,32 @@ func cmdSubstrate(verb string, args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// Quickstart promises output on success; up/ready used to print nothing,
+	// which two cold-onboarding e2e runs flagged as "did it even work?".
+	// Keep it to one line each — k8s-attach forward details are printed by
+	// the substrate itself, not here.
+	switch verb {
+	case "up":
+		fmt.Printf("up: %s (%s)\n", r.Service, *kind)
+	case "ready":
+		fmt.Printf("ready: %s ok\n", probeSummary(r.Run.Ready))
+	}
 	return 0
+}
+
+// probeSummary renders a manifest's readiness probe as a short one-line
+// description for "pb ready"'s success line.
+func probeSummary(p manifest.Probe) string {
+	switch {
+	case p.HTTP != "":
+		return "http " + p.HTTP
+	case p.TCP != "":
+		return "tcp " + p.TCP
+	case p.Exec != "":
+		return "exec " + p.Exec
+	default:
+		return "no probe declared"
+	}
 }
 
 // ------------------------------------------------------------------ verify

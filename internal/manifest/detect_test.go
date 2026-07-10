@@ -395,3 +395,231 @@ func findCheck(r *Ready, name string) CheckSpec {
 	}
 	return CheckSpec{}
 }
+
+// mustLoadProposal renders r via MarshalProposal, writes it to a temp file,
+// and loads it back through manifest.Load — proving every field Detect
+// proposes is not just structurally present but actually passes Validate.
+func mustLoadProposal(t *testing.T, r *Ready) *Ready {
+	t.Helper()
+	data, err := MarshalProposal(r)
+	if err != nil {
+		t.Fatalf("MarshalProposal: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "ready.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(proposal) = %v; proposal:\n%s", err, data)
+	}
+	return loaded
+}
+
+// TestDetect_ProcfileMultiEntry: a Procfile with more than one process type
+// (web + worker) must expand into run.local.start joined as "cmd1 & cmd2 &
+// ... & wait" — never just the first entry silently dropping the rest, and
+// never falling through to an unrunnable Makefile target.
+func TestDetect_ProcfileMultiEntry(t *testing.T) {
+	dir := fixtureDir(t, "detect_procfile_only")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	if !strings.Contains(r.Run.Local.Start, "gunicorn") {
+		t.Errorf("run.local.start = %q; want the web entry's gunicorn command", r.Run.Local.Start)
+	}
+	if !strings.Contains(r.Run.Local.Start, "celery") {
+		t.Errorf("run.local.start = %q; want the worker entry's celery command too", r.Run.Local.Start)
+	}
+	if !strings.HasSuffix(r.Run.Local.Start, " & wait") {
+		t.Errorf("run.local.start = %q; want a joined multi-entry line ending in ' & wait'", r.Run.Local.Start)
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_ProcfileSingleEntry: a Procfile with exactly one process type
+// becomes run.local.start verbatim — no "& wait" join for a single command.
+func TestDetect_ProcfileSingleEntry(t *testing.T) {
+	dir := fixtureDir(t, "detect_procfile_single")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	want := "python manage.py runserver 0.0.0.0:$PORT"
+	if r.Run.Local.Start != want {
+		t.Errorf("run.local.start = %q; want %q", r.Run.Local.Start, want)
+	}
+	if strings.Contains(r.Run.Local.Start, "& wait") {
+		t.Errorf("run.local.start = %q; a single Procfile entry must not be join-annotated", r.Run.Local.Start)
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_ReadyProbeFromSource: a "/healthz" handler registration plus a
+// ListenAndServe port grepped from source propose run.ready.http.
+func TestDetect_ReadyProbeFromSource(t *testing.T) {
+	dir := fixtureDir(t, "detect_health")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	if want := ":8080/healthz"; r.Run.Ready.HTTP != want {
+		t.Errorf("run.ready.http = %q; want %q", r.Run.Ready.HTTP, want)
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_ReadyProbeTODOWhenUnconfident: a dir with nothing to grep a
+// probe from leaves run.ready unset, and MarshalProposal notes the gap with
+// a TODO comment rather than pb init silently proposing nothing at all.
+func TestDetect_ReadyProbeTODOWhenUnconfident(t *testing.T) {
+	dir := fixtureDir(t, "detect_go_only")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if r.Run.Ready != (Probe{}) {
+		t.Fatalf("run.ready = %+v; want zero-value (this fixture has no grep-able probe)", r.Run.Ready)
+	}
+
+	data, err := MarshalProposal(r)
+	if err != nil {
+		t.Fatalf("MarshalProposal: %v", err)
+	}
+	if !strings.Contains(string(data), "TODO") || !strings.Contains(string(data), "ready:") {
+		t.Errorf("proposal missing a TODO comment on an empty run.ready section:\n%s", data)
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_ScriptsSeedAndDrive: scripts/seed*.sh and db:seed-style
+// package.json scripts propose seed steps; other executable scripts/*.sh
+// files propose drive verbs named after the script; non-executable scripts
+// are not proposed as drive verbs.
+func TestDetect_ScriptsSeedAndDrive(t *testing.T) {
+	dir := fixtureDir(t, "detect_scripts")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	if !hasSeedNamed(r, "seed") {
+		t.Errorf("seed %v missing 'seed' (from scripts/seed.sh)", seedNames(r))
+	}
+	if !hasSeedNamed(r, "db:seed") {
+		t.Errorf("seed %v missing 'db:seed' (from package.json scripts)", seedNames(r))
+	}
+
+	dv, ok := r.Drive["backup"]
+	if !ok {
+		t.Fatalf("drive %v missing 'backup' (from executable scripts/backup.sh)", driveNames(r))
+	}
+	if dv.Run != "bash scripts/backup.sh" {
+		t.Errorf("drive[backup].run = %q; want %q", dv.Run, "bash scripts/backup.sh")
+	}
+
+	if _, ok := r.Drive["not-executable"]; ok {
+		t.Error("drive proposes 'not-executable'; scripts/not-executable.sh is not executable and must be skipped")
+	}
+	if _, ok := r.Drive["seed"]; ok {
+		t.Error("drive proposes 'seed'; scripts/seed.sh must be a seed step, not a drive verb")
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_K8sManifests: deploy/*.yml Service documents (multi-document
+// YAML, including one unparsable document that must be ignored silently)
+// add k8s-attach to run.modes, a sources.k8s + resources entry for the
+// Service matching the repo name, a resources entry for every other Service
+// found, and a TCP readiness probe against the matched service.
+func TestDetect_K8sManifests(t *testing.T) {
+	dir := fixtureDir(t, "detect_k8s")
+	r, err := Detect(dir)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	if !containsMode(r, "k8s-attach") {
+		t.Errorf("modes %v missing 'k8s-attach'", r.Run.Modes)
+	}
+	if want := "svc/detect_k8s:8080"; r.Sources["k8s"] != want {
+		t.Errorf("sources.k8s = %q; want %q", r.Sources["k8s"], want)
+	}
+
+	primary, ok := r.Resources["detect_k8s"]
+	if !ok {
+		t.Fatalf("resources missing the matched service %q", "detect_k8s")
+	}
+	if primary.Via["k8s"] != "svc/detect_k8s:8080" {
+		t.Errorf("resources[detect_k8s].via.k8s = %q; want %q", primary.Via["k8s"], "svc/detect_k8s:8080")
+	}
+	other, ok := r.Resources["mongo"]
+	if !ok {
+		t.Fatalf("resources missing the other service %q", "mongo")
+	}
+	if other.Via["k8s"] != "svc/mongo:27017" {
+		t.Errorf("resources[mongo].via.k8s = %q; want %q", other.Via["k8s"], "svc/mongo:27017")
+	}
+
+	wantTCP := "${resources.detect_k8s.host}:${resources.detect_k8s.port}"
+	if r.Run.Ready.TCP != wantTCP {
+		t.Errorf("run.ready.tcp = %q; want %q", r.Run.Ready.TCP, wantTCP)
+	}
+	if r.Run.Ready.Timeout == "" || r.Run.Ready.Interval == "" {
+		t.Errorf("run.ready timeout/interval unset: %+v", r.Run.Ready)
+	}
+
+	mustLoadProposal(t, r)
+}
+
+// TestDetect_AllFixturesLoadClean proves every testdata/detect_* fixture's
+// proposal both validates in-process (Detect's own err return) and survives
+// a MarshalProposal -> manifest.Load round trip — the concrete requirement
+// that every proposal pb init could write is a proposal pb lint accepts.
+func TestDetect_AllFixturesLoadClean(t *testing.T) {
+	names := []string{
+		"detect_node_compose",
+		"detect_go_only",
+		"detect_procfile_only",
+		"detect_procfile_single",
+		"detect_empty",
+		"detect_health",
+		"detect_scripts",
+		"detect_k8s",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := fixtureDir(t, name)
+			r, err := Detect(dir)
+			if err != nil {
+				t.Fatalf("Detect(%s): %v", name, err)
+			}
+			mustLoadProposal(t, r)
+		})
+	}
+}
+
+func seedNames(r *Ready) []string {
+	names := make([]string, len(r.Seed))
+	for i, s := range r.Seed {
+		names[i] = s.Name
+	}
+	return names
+}
+
+func driveNames(r *Ready) []string {
+	names := make([]string, 0, len(r.Drive))
+	for name := range r.Drive {
+		names = append(names, name)
+	}
+	return names
+}

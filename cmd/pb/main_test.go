@@ -1,10 +1,34 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything fn wrote to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = orig
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	return buf.String()
+}
 
 // TestRunLint exercises "pb lint" through run(args): a valid manifest exits
 // 0, and each internal/manifest/testdata/invalid_*.yaml fixture exits 1 —
@@ -99,5 +123,53 @@ func TestRunVerifyExamplesBasicPass(t *testing.T) {
 	}
 	if got := run([]string{"verify", "--manifest", "ready.yaml", "--evidence-root", t.TempDir()}); got != 0 {
 		t.Fatalf("run(verify) = %d, want 0 (pass)", got)
+	}
+}
+
+// TestRunUpReadyPrintSuccessLines proves "pb up" and "pb ready" each print a
+// one-line success confirmation — two cold-onboarding e2e runs found both
+// commands printed nothing on success even though the quickstart promises
+// output.
+func TestRunUpReadyPrintSuccessLines(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	exampleDir, err := filepath.Abs(filepath.Join(wd, "..", "..", "examples", "basic"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if err := os.Chdir(exampleDir); err != nil {
+		t.Fatalf("chdir %s: %v", exampleDir, err)
+	}
+	t.Cleanup(func() {
+		run([]string{"down", "--manifest", "ready.yaml"})
+		os.RemoveAll(".pb")
+		os.Remove("orders.json")
+		if err := os.Chdir(wd); err != nil {
+			t.Errorf("chdir back to %s: %v", wd, err)
+		}
+	})
+
+	var upOut, readyOut string
+	upOut = captureStdout(t, func() {
+		if got := run([]string{"up", "--manifest", "ready.yaml"}); got != 0 {
+			t.Fatalf("run(up) = %d, want 0", got)
+		}
+	})
+	if want := "up: basic-orders (local)\n"; upOut != want {
+		t.Errorf("run(up) stdout = %q, want %q", upOut, want)
+	}
+
+	readyOut = captureStdout(t, func() {
+		if got := run([]string{"ready", "--manifest", "ready.yaml"}); got != 0 {
+			t.Fatalf("run(ready) = %d, want 0", got)
+		}
+	})
+	if want := "ready: http :8391/healthz ok\n"; readyOut != want {
+		t.Errorf("run(ready) stdout = %q, want %q", readyOut, want)
+	}
+	if !strings.HasSuffix(readyOut, " ok\n") {
+		t.Errorf("run(ready) stdout = %q, want a trailing ' ok' confirmation", readyOut)
 	}
 }
