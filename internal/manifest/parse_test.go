@@ -1,8 +1,10 @@
 package manifest
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -108,6 +110,18 @@ func TestValidate_Modes(t *testing.T) {
 			wantErr: "run.local.start",
 		},
 		{
+			name:    "local start still detect's scaffold placeholder",
+			modes:   []string{"local"},
+			local:   LocalRun{Start: scaffoldStartCmd},
+			wantErr: "generated scaffolding",
+		},
+		{
+			name:    "start mentioning TODO elsewhere is not the scaffold and is valid",
+			modes:   []string{"local"},
+			local:   LocalRun{Start: "echo TODO items were migrated; ./run.sh"},
+			wantErr: "",
+		},
+		{
 			name:  "compose mode no start required",
 			modes: []string{"compose"},
 			// no local.start — valid because local mode not listed
@@ -188,6 +202,19 @@ func TestValidate_Probe(t *testing.T) {
 			name:  "no probe set is valid",
 			probe: Probe{},
 		},
+		{
+			name:    "statically invalid http probe URL",
+			probe:   Probe{HTTP: "not a url"},
+			wantErr: "not a valid URL",
+		},
+		{
+			name:  "http probe shorthand normalizes and parses cleanly",
+			probe: Probe{HTTP: ":8391/healthz"},
+		},
+		{
+			name:  "http probe with explicit host:port parses cleanly",
+			probe: Probe{HTTP: "localhost:8391/healthz"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -207,6 +234,26 @@ func TestValidate_Probe(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestValidate_ProbeBadHTTPURLIncludesParseError ensures a statically
+// invalid run.ready.http value is rejected with the underlying url.Parse
+// error wrapped in, not just a generic message — so `pb ready` never spends
+// its readiness window retrying a URL that could never have parsed.
+func TestValidate_ProbeBadHTTPURLIncludesParseError(t *testing.T) {
+	raw := "not a url"
+	_, parseErr := url.Parse(httpProbeURL(raw))
+	if parseErr == nil {
+		t.Fatalf("setup: url.Parse(%q) unexpectedly succeeded", httpProbeURL(raw))
+	}
+
+	err := validateProbe(Probe{HTTP: raw})
+	if err == nil {
+		t.Fatal("expected error for statically invalid probe URL, got nil")
+	}
+	if !strings.Contains(err.Error(), parseErr.Error()) {
+		t.Errorf("error = %q, want it to include the url.Parse error %q", err.Error(), parseErr.Error())
 	}
 }
 
@@ -368,6 +415,13 @@ func TestValidate_Checks(t *testing.T) {
 			},
 			wantErr: "pb-execution-id",
 		},
+		{
+			name: "check exercise still detect's scaffold placeholder",
+			checks: []CheckSpec{
+				{Name: "ping", Level: "L3", Exercise: scaffoldStartCmd},
+			},
+			wantErr: "generated scaffolding",
+		},
 	}
 
 	for _, tc := range cases {
@@ -380,6 +434,57 @@ func TestValidate_Checks(t *testing.T) {
 				Run:     RunSpec{Modes: []string{"compose"}},
 			}
 			err := validateChecks(r)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
+// TestValidate_Drive covers drive-verb validation paths.
+func TestValidate_Drive(t *testing.T) {
+	cases := []struct {
+		name    string
+		drive   map[string]DriveVerb
+		wantErr string
+	}{
+		{
+			name: "drive verb still detect's scaffold placeholder",
+			drive: map[string]DriveVerb{
+				"create-order": {Run: scaffoldStartCmd},
+			},
+			wantErr: "generated scaffolding",
+		},
+		{
+			name: "drive verb with a real command is valid",
+			drive: map[string]DriveVerb{
+				"create-order": {Run: "./scripts/create-order.sh"},
+			},
+		},
+		{
+			name:  "no drive verbs is valid",
+			drive: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Ready{
+				Service: "svc",
+				Drive:   tc.drive,
+				Run:     RunSpec{Modes: []string{"compose"}},
+			}
+			err := validateDrive(r)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
@@ -479,6 +584,45 @@ run:
 	}
 	if !strings.Contains(err.Error(), "service") {
 		t.Errorf("error = %q, want substring %q", err.Error(), "service")
+	}
+}
+
+// TestLoad_AllRepoFixturesAndExamplesValid walks every ready.yaml checked
+// into examples/ and fixtures/ (real repos' declared manifests, not the raw
+// source trees under testdata/detect_*) and asserts each still passes
+// Validate — the scaffold/probe checks above must never regress a real,
+// hand-written manifest.
+func TestLoad_AllRepoFixturesAndExamplesValid(t *testing.T) {
+	var paths []string
+	for _, root := range []string{"../../examples", "../../fixtures"} {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			name := d.Name()
+			if name == "ready.yaml" || strings.HasSuffix(name, ".ready.yaml") {
+				paths = append(paths, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+	if len(paths) == 0 {
+		t.Fatal("no ready.yaml manifests found under examples/ or fixtures/")
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			if _, err := Load(path); err != nil {
+				t.Errorf("Load(%s) unexpected error: %v", path, err)
+			}
+		})
 	}
 }
 

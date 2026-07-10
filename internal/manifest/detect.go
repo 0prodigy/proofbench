@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// scaffoldStartCmd is the literal placeholder Detect writes into
+// run.local.start when it cannot derive a real start command for a repo that
+// declares (or falls back to) the "local" mode. Validate rejects this exact
+// string (see parse.go's isScaffold) wherever a manifest expects a real
+// runnable command, so an unedited generated manifest fails `pb lint`
+// instead of silently passing. Defined once here and referenced from
+// Validate so the generator and the check can never drift apart.
+const scaffoldStartCmd = "echo TODO: set your start command"
+
 // Detect inspects dir with no ready.yaml present and proposes a generated
 // Ready manifest by deriving from existing truth: docker-compose files,
 // Procfile, package.json scripts, Makefile, go.mod, a grepped readiness
@@ -20,10 +30,14 @@ import (
 //
 // Detect never fails hard: an empty dir yields a minimal Ready with the
 // service name set to the directory basename, a TODO role, and a TODO start
-// command placeholder so the proposed manifest still validates (PLAN §4
-// "zero-config day one" — pb init always writes a file). The returned
-// error is the result of (*Ready).Validate() on the proposed manifest; callers
-// may still use the manifest and surface the validation error as edit hints.
+// command placeholder (PLAN §4 "zero-config day one" — pb init always
+// writes a file). The returned error is the result of (*Ready).Validate() on
+// the proposed manifest; callers may still use the manifest and surface the
+// validation error as edit hints. Validate deliberately rejects that same
+// TODO start placeholder (so an unedited draft fails `pb lint`); Detect
+// recognizes that one expected, self-inflicted condition via errors.Is and
+// does not return it, so `pb init` still succeeds in writing the draft — any
+// other validation failure is still returned.
 //
 // NOTE: detects only what exists on disk; no network, no exec, no shell.
 func Detect(dir string) (*Ready, error) {
@@ -82,10 +96,11 @@ func Detect(dir string) (*Ready, error) {
 	}
 
 	// "local" declared (possibly as the fallback mode) but no start command
-	// detected: emit a TODO placeholder so the generated manifest validates
-	// and pb init always writes a file. The command itself marks the TODO.
+	// detected: emit a TODO placeholder so pb init always writes a file; the
+	// verr handling below keeps Detect from surfacing this as an init
+	// failure even though Validate (pb lint) rejects it.
 	if modeSet(r.Run.Modes)["local"] && strings.TrimSpace(r.Run.Local.Start) == "" {
-		r.Run.Local.Start = "echo TODO: set your start command"
+		r.Run.Local.Start = scaffoldStartCmd
 	}
 
 	// Remove empty Sources map so it marshals cleanly.
@@ -94,6 +109,12 @@ func Detect(dir string) (*Ready, error) {
 	}
 
 	verr := r.Validate()
+	if errors.Is(verr, errScaffoldStart) {
+		// Detect's own TODO placeholder is expected to fail Validate — pb
+		// init must still write the draft; pb lint (Load -> Validate on the
+		// written file) still catches an unedited scaffold.
+		verr = nil
+	}
 	return r, verr
 }
 

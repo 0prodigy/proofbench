@@ -7,10 +7,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/launchwings/proofbench/internal/agentruntime"
@@ -56,6 +58,8 @@ evaluation error; "pb lint" exits 1 with the named validation error; "pb
 explore" exits 2 when PB_EXPERIMENTAL is not set to "1", 3 when the round
 did not run (not-run), 4 when it ran but produced no proposal
 (inconclusive); every other command exits nonzero on failure.
+
+Run "pb help <command>" for details and an example of any command.
 `
 
 func main() {
@@ -84,10 +88,19 @@ func run(args []string) int {
 		return cmdReport(args[1:])
 	case "hub":
 		return cmdHub(args[1:])
-	case "version":
+	case "version", "--version", "-v":
+		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help") {
+			return printCmdHelp("version", nil)
+		}
 		fmt.Println("pb version " + version)
 		return 0
-	case "help", "-h", "--help":
+	case "help":
+		if len(args) > 1 {
+			return run(append([]string{args[1]}, "--help"))
+		}
+		fmt.Print(rootUsage)
+		return 0
+	case "-h", "--help":
 		fmt.Print(rootUsage)
 		return 0
 	default:
@@ -126,12 +139,142 @@ func failf(format string, a ...any) int {
 	return 1
 }
 
+// yamlTypeName matches the "in type manifest.Xxx" / "into type manifest.Xxx"
+// suffix yaml.v3 embeds in strict-decode errors, so it can be stripped
+// without losing the yaml line info that precedes it.
+var yamlTypeName = regexp.MustCompile(` (?:in|into) type \S+`)
+
+// manifestErr turns a manifest.Load failure into a CLI-friendly message: a
+// missing manifest file points at "pb init", and a yaml decode failure drops
+// the Go type name yaml.v3 embeds while keeping the line info. Any other
+// error (e.g. manifest.Validate failures) is already CLI-friendly and passes
+// through to fail unchanged.
+func manifestErr(err error) int {
+	if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "no such file") {
+		fmt.Fprintln(os.Stderr, "pb: no ready.yaml found in this directory — run 'pb init' to generate one, or pass --manifest PATH")
+		return 1
+	}
+	if strings.Contains(err.Error(), "manifest.Load: parse error in") {
+		msg := err.Error()
+		if u := errors.Unwrap(err); u != nil {
+			msg = u.Error()
+		}
+		msg = yamlTypeName.ReplaceAllString(msg, "")
+		fmt.Fprintln(os.Stderr, "pb: ready.yaml is invalid: "+msg)
+		return 1
+	}
+	return fail(err)
+}
+
+// cmdHelp is the per-command help text shown by "pb help <cmd>" and
+// "pb <cmd> --help"/"-h": a one-paragraph description plus one realistic
+// example invocation. Flags are rendered separately from the command's own
+// flag.FlagSet (flags differ per invocation, e.g. up/ready/seed/down share a
+// flag set but not a description).
+type cmdHelp struct {
+	desc    string
+	example string
+}
+
+var cmdHelpTable = map[string]cmdHelp{
+	"evidence": {
+		desc:    "Low-level evidence-bundle primitives (new, run, add, link, assert, seal, verdict, validate, show) for building a bundle by hand. \"pb verify\" drives these automatically for a full run.",
+		example: `pb evidence new --claim "orders endpoint returns totals" --phase verify`,
+	},
+	"init": {
+		desc:    "Detects the project's run/ready/seed shape and writes a starter ready.yaml manifest.",
+		example: "pb init .",
+	},
+	"lint": {
+		desc:    "Parses and validates a ready.yaml manifest without bringing anything up.",
+		example: "pb lint --manifest ready.yaml",
+	},
+	"up": {
+		desc:    "Brings the service up on the chosen substrate (local process, docker compose, or an attached k8s workload).",
+		example: "pb up --manifest ready.yaml",
+	},
+	"ready": {
+		desc:    "Waits for and checks the service's readiness probe (http, tcp, or exec) on the chosen substrate.",
+		example: "pb ready --manifest ready.yaml",
+	},
+	"seed": {
+		desc:    "Runs the manifest's declared seed steps against the running service.",
+		example: "pb seed --manifest ready.yaml",
+	},
+	"down": {
+		desc:    "Tears the service down on the chosen substrate.",
+		example: "pb down --manifest ready.yaml",
+	},
+	"verify": {
+		desc:    "Brings up the substrate, runs the manifest's checks, and produces an evidence bundle with a tri-state verdict (pass/fail/inconclusive).",
+		example: `pb verify --manifest ready.yaml --claim "orders endpoint returns totals" --ticket ENG-123`,
+	},
+	"explore": {
+		desc:    "Experimental: runs one agent-driven exploration round that proposes checks for ready.yaml. Never produces a verdict and never edits the manifest. Requires PB_EXPERIMENTAL=1.",
+		example: "PB_EXPERIMENTAL=1 pb explore --manifest ready.yaml",
+	},
+	"report": {
+		desc:    "Renders a Markdown report for a sealed evidence bundle.",
+		example: "pb report evidence/ENG-123/repro-01",
+	},
+	"hub": {
+		desc:    "Writes a static HTML index over every evidence bundle under a root directory.",
+		example: "pb hub --root evidence --out .pb/hub/index.html",
+	},
+	"version": {
+		desc:    "Prints the pb version.",
+		example: "pb version",
+	},
+}
+
+// wantsHelp reports whether args requests this command's own help via a
+// bare -h/--help flag, stopping at the first "--" (which ends flag parsing —
+// e.g. "evidence run"'s wrapped command line may itself contain "--help").
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// printCmdHelp prints cmd's one-paragraph description, its flag set's
+// defaults (if any), and one example invocation, then returns exit 0. fs may
+// be nil for commands with no flags of their own (e.g. "evidence").
+func printCmdHelp(cmd string, fs *flag.FlagSet) int {
+	h, ok := cmdHelpTable[cmd]
+	if !ok {
+		fmt.Print(rootUsage)
+		return 0
+	}
+	fmt.Println(h.desc)
+	if fs != nil {
+		var any bool
+		fs.VisitAll(func(*flag.Flag) { any = true })
+		if any {
+			fmt.Println("\nFlags:")
+			fs.SetOutput(os.Stdout)
+			fs.PrintDefaults()
+		}
+	}
+	fmt.Println("\nExample:")
+	fmt.Println("  " + h.example)
+	return 0
+}
+
 // ---------------------------------------------------------------- evidence
 
 func cmdEvidence(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, rootUsage)
 		return 2
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		return printCmdHelp("evidence", nil)
 	}
 	switch args[0] {
 	case "new":
@@ -371,6 +514,9 @@ func cmdInit(args []string) int {
 	fs := flag.NewFlagSet("pb init", flag.ContinueOnError)
 	out := fs.String("out", "ready.yaml", "output path for the generated manifest ('-' for stdout)")
 	force := fs.Bool("force", false, "overwrite an existing output file")
+	if wantsHelp(args) {
+		return printCmdHelp("init", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -399,6 +545,11 @@ func cmdInit(args []string) int {
 		return fail(err)
 	}
 	fmt.Println(*out)
+	fmt.Printf(`next steps:
+  1. edit %s — set start:, ready:, and a checks: block
+  2. pb lint          # validate the manifest
+  3. pb verify        # bring up, exercise, produce an evidence bundle
+`, *out)
 	return 0
 }
 
@@ -411,6 +562,9 @@ func cmdInit(args []string) int {
 func cmdLint(args []string) int {
 	fs := flag.NewFlagSet("pb lint", flag.ContinueOnError)
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	if wantsHelp(args) {
+		return printCmdHelp("lint", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -418,7 +572,7 @@ func cmdLint(args []string) int {
 		return failf("lint: unexpected argument %q (use --manifest to specify the manifest path)", fs.Arg(0))
 	}
 	if _, err := manifest.Load(*manifestPath); err != nil {
-		return fail(err)
+		return manifestErr(err)
 	}
 	fmt.Println("ok")
 	return 0
@@ -430,12 +584,15 @@ func cmdSubstrate(verb string, args []string) int {
 	fs := flag.NewFlagSet("pb "+verb, flag.ContinueOnError)
 	kind := fs.String("substrate", substrate.KindLocal, "local|compose|k8s-attach")
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
+	if wantsHelp(args) {
+		return printCmdHelp(verb, fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	r, err := manifest.Load(*manifestPath)
 	if err != nil {
-		return fail(err)
+		return manifestErr(err)
 	}
 	s, err := substrate.New(*kind, filepath.Dir(*manifestPath))
 	if err != nil {
@@ -463,6 +620,12 @@ func cmdSubstrate(verb string, args []string) int {
 		fmt.Printf("up: %s (%s)\n", r.Service, *kind)
 	case "ready":
 		fmt.Printf("ready: %s ok\n", probeSummary(r.Run.Ready))
+	case "seed":
+		if len(r.Seed) == 0 {
+			fmt.Println("seed: no seed steps declared")
+		} else {
+			fmt.Printf("seed: done (%d steps)\n", len(r.Seed))
+		}
 	}
 	return 0
 }
@@ -494,6 +657,9 @@ func cmdVerify(args []string) int {
 	manifestPath := fs.String("manifest", "ready.yaml", "path to ready.yaml")
 	pairsWith := fs.String("pairs-with", "", "runId of the paired bundle (before/after pairing)")
 	bundleKind := fs.String("kind", "", "before|after (this bundle's role in a paired run)")
+	if wantsHelp(args) {
+		return printCmdHelp("verify", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -502,7 +668,7 @@ func cmdVerify(args []string) int {
 	}
 	r, err := manifest.Load(*manifestPath)
 	if err != nil {
-		return fail(err)
+		return manifestErr(err)
 	}
 	opts := verify.Opts{
 		EvidenceRoot: *evidenceRoot,
@@ -523,8 +689,11 @@ func cmdVerify(args []string) int {
 	fmt.Printf("bundle:  %s\n", b.Dir)
 	fmt.Printf("proof:   %s\n", sum.ProofLevel)
 	fmt.Printf("verdict: %s\n", sum.Verdict)
-	for _, c := range sum.Checks {
-		fmt.Printf("  [%s] %s\n", c.State, c.Name)
+	if sum.Note != "" {
+		fmt.Printf("note:    %s\n", sum.Note)
+	}
+	for _, line := range sum.Lines {
+		fmt.Printf("  %s\n", line)
 	}
 	if sum.Verdict != evidence.VerdictPass {
 		return 1
@@ -548,12 +717,15 @@ func cmdExplore(args []string) int {
 	out := fs.String("out", filepath.Join(".proofbench", "explore"), "output directory for round artifacts")
 	runtimeKind := fs.String("runtime", agentruntime.KindClaudeCode, "agent runtime kind")
 	maxTurns := fs.Int("max-turns", 30, "agent turn budget")
+	if wantsHelp(args) {
+		return printCmdHelp("explore", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	r, err := manifest.Load(*manifestPath)
 	if err != nil {
-		return fail(err)
+		return manifestErr(err)
 	}
 	res, err := agentruntime.Explore(r, filepath.Dir(*manifestPath), *out, *runtimeKind, *maxTurns)
 	if err != nil {
@@ -580,6 +752,9 @@ func cmdExplore(args []string) int {
 
 func cmdReport(args []string) int {
 	fs := flag.NewFlagSet("pb report", flag.ContinueOnError)
+	if wantsHelp(args) {
+		return printCmdHelp("report", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -602,6 +777,9 @@ func cmdHub(args []string) int {
 	fs := flag.NewFlagSet("pb hub", flag.ContinueOnError)
 	root := fs.String("root", "evidence", "root directory to scan for bundles")
 	out := fs.String("out", filepath.Join(".pb", "hub", "index.html"), "output file for the hub index")
+	if wantsHelp(args) {
+		return printCmdHelp("hub", fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

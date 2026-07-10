@@ -34,6 +34,36 @@ type Summary struct {
 	ProofLevel string           // highest proof-ladder rung reached (L0–L5)
 	Checks     []evidence.Check // tri-state result per declared check
 	Verdict    string           // pass|fail|inconclusive
+	Note       string           // verdict counts, or the empty-checks explanation (see verdict)
+	Lines      []string         // one legible summary line per check: "[state] name" (fail/not-run also carry " — <reason>", trimmed)
+}
+
+// maxReasonLen bounds a checkLine's reason so the per-check summary line
+// stays one line and scannable — the full, untruncated reason is always in
+// the bundle (the check's Reason field), never lost, just not echoed in
+// full to the terminal.
+const maxReasonLen = 90
+
+// checkLine renders one legible summary line for a check: "[state] name" for
+// a pass, or "[state] name — reason" for fail/not-run states so the cause
+// (e.g. "connection refused") is visible without opening the bundle. The
+// reason is flattened to one line and trimmed to ~maxReasonLen chars.
+func checkLine(c evidence.Check) string {
+	if c.State == evidence.CheckPass || c.Reason == "" {
+		return fmt.Sprintf("[%s] %s", c.State, c.Name)
+	}
+	return fmt.Sprintf("[%s] %s — %s", c.State, c.Name, trimReason(c.Reason))
+}
+
+// trimReason collapses a reason to a single line and truncates it to
+// ~maxReasonLen characters, so a multi-line or long harness error can't blow
+// up the one-line summary contract.
+func trimReason(reason string) string {
+	reason = strings.Join(strings.Fields(reason), " ")
+	if len(reason) <= maxReasonLen {
+		return reason
+	}
+	return strings.TrimSpace(reason[:maxReasonLen-1]) + "…"
 }
 
 // bundleOps is the slice of *evidence.Bundle behavior verify needs; it lets
@@ -52,6 +82,9 @@ type bundleOps interface {
 // bundle's surface — an unknown kind fails the run fast rather than silently
 // degrading to a substrate-blind local exec (see substrate.New).
 func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
+	if err := validateOnly(r, o.Only); err != nil {
+		return nil, nil, err
+	}
 	root := o.EvidenceRoot
 	if root == "" {
 		root = "./evidence"
@@ -91,7 +124,31 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	if summaryLevel == "" {
 		summaryLevel = "none"
 	}
-	return b, &Summary{ProofLevel: summaryLevel, Checks: checks, Verdict: v}, nil
+	lines := make([]string, len(checks))
+	for i, c := range checks {
+		lines[i] = checkLine(c)
+	}
+	return b, &Summary{ProofLevel: summaryLevel, Checks: checks, Verdict: v, Note: note, Lines: lines}, nil
+}
+
+// validateOnly fails fast, before any substrate bring-up, when --only names a
+// check the manifest never declared — otherwise the typo runs silently with
+// everything not-run (no failure, no explanation) rather than surfacing the
+// mistake up front.
+func validateOnly(r *manifest.Ready, only []string) error {
+	if len(only) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(r.Checks))
+	for _, spec := range r.Checks {
+		names = append(names, spec.Name)
+	}
+	for _, o := range only {
+		if !slices.Contains(names, o) {
+			return fmt.Errorf("verify: unknown check %q (declared: %s)", o, strings.Join(names, ", "))
+		}
+	}
+	return nil
 }
 
 // resolvePins collects run-pinning identifiers (PLAN §5: "run pinning — SHAs
@@ -506,11 +563,22 @@ func levelNum(s string) (int, bool) {
 	return int(s[1] - '0'), true
 }
 
+// noChecksDeclaredNote explains an inconclusive verdict driven by an empty
+// checks: block, rather than leaving a bare "0 pass, 0 fail, 0 not-run" with
+// no indication the manifest itself declared nothing to run.
+const noChecksDeclaredNote = "no checks declared in ready.yaml — add a checks: block (see pb lint)"
+
 // verdict derives the bundle verdict plus a counts note from the check
 // results: pass iff no check failed, at least one passed, and no check was
 // skipped for being gated (PLAN §3.7: a gated skip must read as inconclusive,
 // never as a fake pass); fail if any failed (naming them); else inconclusive.
+// A manifest declaring zero checks (checks is empty, not just all not-run)
+// is still honestly inconclusive, but its note names the real cause instead
+// of a content-free "0 pass, 0 fail, 0 not-run".
 func verdict(checks []evidence.Check) (string, string) {
+	if len(checks) == 0 {
+		return evidence.VerdictInconclusive, noChecksDeclaredNote
+	}
 	var pass, fail, notRun int
 	var failedNames []string
 	gated := false

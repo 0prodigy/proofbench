@@ -342,7 +342,9 @@ func TestLocalUpEnvMerge(t *testing.T) {
 		Service: "envcheck",
 		Run: manifest.RunSpec{
 			Local: manifest.LocalRun{
-				Start: `printf '%s,%s,%s' "$FOO" "$BAR" "$PB_TEST_FROM_OS" > out.txt`,
+				// Write the merged env, then stay alive so Up's liveness
+				// grace window passes; Down kills the sleep.
+				Start: `printf '%s,%s,%s' "$FOO" "$BAR" "$PB_TEST_FROM_OS" > out.txt && sleep 30`,
 				Env: manifest.EnvSpec{
 					File:      ".env.local",
 					Overrides: map[string]string{"BAR": "override-bar"},
@@ -369,8 +371,8 @@ func TestLocalUpEnvMerge(t *testing.T) {
 	if want := "file-foo,override-bar,os-val"; string(got) != want {
 		t.Fatalf("env merge: got %q, want %q", got, want)
 	}
-	if err := s.Down(r); err != nil { // process already exited: stale pid is fine
-		t.Fatalf("Down after process exit: %v", err)
+	if err := s.Down(r); err != nil {
+		t.Fatalf("Down: %v", err)
 	}
 }
 

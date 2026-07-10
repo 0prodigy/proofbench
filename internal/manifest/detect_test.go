@@ -416,6 +416,28 @@ func mustLoadProposal(t *testing.T, r *Ready) *Ready {
 	return loaded
 }
 
+// mustLoadProposalRejectsScaffold marshals r, writes it, and asserts Load
+// rejects it as generated scaffolding — the pb lint side of the "unedited
+// proposal must not silently pass" fix.
+func mustLoadProposalRejectsScaffold(t *testing.T, r *Ready) {
+	t.Helper()
+	data, err := MarshalProposal(r)
+	if err != nil {
+		t.Fatalf("MarshalProposal: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "ready.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	_, err = Load(path)
+	if err == nil {
+		t.Fatalf("Load(proposal) succeeded; want a scaffolding rejection error for:\n%s", data)
+	}
+	if !strings.Contains(err.Error(), "generated scaffolding") {
+		t.Errorf("Load(proposal) error = %q, want substring %q", err.Error(), "generated scaffolding")
+	}
+}
+
 // TestDetect_ProcfileMultiEntry: a Procfile with more than one process type
 // (web + worker) must expand into run.local.start joined as "cmd1 & cmd2 &
 // ... & wait" — never just the first entry silently dropping the rest, and
@@ -473,7 +495,11 @@ func TestDetect_ReadyProbeFromSource(t *testing.T) {
 		t.Errorf("run.ready.http = %q; want %q", r.Run.Ready.HTTP, want)
 	}
 
-	mustLoadProposal(t, r)
+	// This fixture has no derivable start command, so Detect proposes the
+	// generated scaffold placeholder — Detect itself must still succeed (pb
+	// init always writes a file), but the written proposal must fail pb
+	// lint until a human replaces the placeholder.
+	mustLoadProposalRejectsScaffold(t, r)
 }
 
 // TestDetect_ReadyProbeTODOWhenUnconfident: a dir with nothing to grep a
@@ -533,7 +559,10 @@ func TestDetect_ScriptsSeedAndDrive(t *testing.T) {
 		t.Error("drive proposes 'seed'; scripts/seed.sh must be a seed step, not a drive verb")
 	}
 
-	mustLoadProposal(t, r)
+	// This fixture has no dev/start package.json script, so Detect proposes
+	// the generated scaffold placeholder for run.local.start — Detect
+	// itself must still succeed, but pb lint must reject it unedited.
+	mustLoadProposalRejectsScaffold(t, r)
 }
 
 // TestDetect_K8sManifests: deploy/*.yml Service documents (multi-document
@@ -581,19 +610,17 @@ func TestDetect_K8sManifests(t *testing.T) {
 	mustLoadProposal(t, r)
 }
 
-// TestDetect_AllFixturesLoadClean proves every testdata/detect_* fixture's
-// proposal both validates in-process (Detect's own err return) and survives
-// a MarshalProposal -> manifest.Load round trip — the concrete requirement
-// that every proposal pb init could write is a proposal pb lint accepts.
+// TestDetect_AllFixturesLoadClean proves every testdata/detect_* fixture that
+// has a real derivable start command both validates in-process (Detect's own
+// err return) and survives a MarshalProposal -> manifest.Load round trip —
+// the concrete requirement that every proposal pb init could write for a
+// detectable repo is a proposal pb lint accepts.
 func TestDetect_AllFixturesLoadClean(t *testing.T) {
 	names := []string{
 		"detect_node_compose",
 		"detect_go_only",
 		"detect_procfile_only",
 		"detect_procfile_single",
-		"detect_empty",
-		"detect_health",
-		"detect_scripts",
 		"detect_k8s",
 	}
 	for _, name := range names {
@@ -604,6 +631,29 @@ func TestDetect_AllFixturesLoadClean(t *testing.T) {
 				t.Fatalf("Detect(%s): %v", name, err)
 			}
 			mustLoadProposal(t, r)
+		})
+	}
+}
+
+// TestDetect_UndetectableFixturesRejectScaffold proves every testdata/detect_*
+// fixture with no derivable start command still lets Detect succeed (pb init
+// always writes a file) while the written proposal fails pb lint until the
+// scaffold placeholder is replaced — the fix for the "lint passes TODO
+// scaffold" gap.
+func TestDetect_UndetectableFixturesRejectScaffold(t *testing.T) {
+	names := []string{
+		"detect_empty",
+		"detect_health",
+		"detect_scripts",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := fixtureDir(t, name)
+			r, err := Detect(dir)
+			if err != nil {
+				t.Fatalf("Detect(%s): %v", name, err)
+			}
+			mustLoadProposalRejectsScaffold(t, r)
 		})
 	}
 }

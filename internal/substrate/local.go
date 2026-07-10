@@ -25,11 +25,20 @@ type localSubstrate struct {
 	dir string
 }
 
+// startGraceWindow is how long Up waits after spawning the start command
+// before declaring it alive. A dead-on-arrival start command (e.g. a
+// placeholder `echo ...`) exits well within this window, letting Up catch it
+// instead of reporting false success.
+const startGraceWindow = 700 * time.Millisecond
+
 // Up starts the service via run.local.start with the resolved environment.
 func (s *localSubstrate) Up(r *manifest.Ready) error {
 	start := r.Run.Local.Start
 	if start == "" {
 		return errors.New("local: run.local.start is not set")
+	}
+	if err := s.refuseIfRunning(r); err != nil {
+		return err
 	}
 
 	env := os.Environ()
@@ -74,17 +83,61 @@ func (s *localSubstrate) Up(r *manifest.Ready) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("local up: %w", err)
 	}
-	// Reap when it dies so tests/long-lived embedders don't collect zombies.
-	go func() { _ = cmd.Wait() }()
+	// Reap when it dies (also how the grace-window check below observes an
+	// early exit) so tests/long-lived embedders don't collect zombies.
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
 
 	pid := cmd.Process.Pid
-	// NOTE: no liveness check on an existing pidfile — a second Up
-	// overwrites it and orphans the first process group.
+	select {
+	case waitErr := <-waitDone:
+		return fmt.Errorf("local.Up: start command exited immediately (exit %d) — check the start: command in ready.yaml", exitCode(waitErr))
+	case <-time.After(startGraceWindow):
+	}
+
 	if err := os.WriteFile(s.pidfile(r), []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		return err
 	}
 	return nil
+}
+
+// refuseIfRunning errors if r's pidfile names a still-alive process group —
+// Up must never overwrite that pidfile and orphan the process it names. A
+// stale pidfile (dead pid, or unparseable content) is removed instead so Up
+// can proceed.
+func (s *localSubstrate) refuseIfRunning(r *manifest.Ready) error {
+	pidPath := s.pidfile(r)
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		_ = os.Remove(pidPath) // stale garbage pidfile
+		return nil
+	}
+	if syscall.Kill(pid, 0) == nil {
+		return fmt.Errorf("local.Up: %s already running (pid %d) — run pb down first", serviceName(r), pid)
+	}
+	_ = os.Remove(pidPath) // stale: pid no longer alive
+	return nil
+}
+
+// exitCode extracts the exit status from cmd.Wait's error; a nil error means
+// the process exited 0.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 // Ready polls the manifest's readiness probe until it passes or times out.
@@ -100,10 +153,12 @@ func (s *localSubstrate) Seed(r *manifest.Ready) error {
 // Down stops the processes Up started. Stale or missing pidfiles are not
 // errors — Down is idempotent.
 func (s *localSubstrate) Down(r *manifest.Ready) error {
+	svc := serviceName(r)
 	pidPath := s.pidfile(r)
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			fmt.Printf("down: %s not running\n", svc)
 			return nil
 		}
 		return err
@@ -111,6 +166,7 @@ func (s *localSubstrate) Down(r *manifest.Ready) error {
 	defer os.Remove(pidPath)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil || pid <= 0 {
+		fmt.Printf("down: %s not running\n", svc)
 		return nil // stale garbage pidfile
 	}
 	// Guard against a stale pidfile naming a recycled, unrelated pid: only
@@ -123,9 +179,11 @@ func (s *localSubstrate) Down(r *manifest.Ready) error {
 	// ownership needs process start-time or pidfd tracking.
 	out, psErr := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
 	if psErr != nil {
+		fmt.Printf("down: %s not running\n", svc)
 		return nil // pid not alive — stale pidfile, removed by the defer
 	}
 	if !cmdlineLooksLikeStart(string(out), r.Run.Local.Start) {
+		fmt.Printf("down: %s not running\n", svc)
 		return nil // an unrelated process owns this pid now
 	}
 	// NOTE: SIGTERM, fixed 200ms grace, SIGKILL — no configurable drain.
@@ -141,6 +199,7 @@ func (s *localSubstrate) Down(r *manifest.Ready) error {
 	if !pidGone(pid) {
 		return fmt.Errorf("local.Down: pid %d survived SIGKILL — kill it manually", pid)
 	}
+	fmt.Printf("down: %s (pid %d) stopped\n", svc, pid)
 	return nil
 }
 

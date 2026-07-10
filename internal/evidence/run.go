@@ -79,8 +79,13 @@ func (b *Bundle) Run(name string, argv []string, shell bool) (int, error) {
 	// Bound the wait on stragglers holding the output pipe open after exit.
 	cmd.WaitDelay = 10 * time.Second
 
-	// Tee combined stdout+stderr to both the terminal and the log file.
-	w := io.MultiWriter(os.Stdout, logFile)
+	// Tee combined stdout+stderr to both the terminal and the log file. The
+	// terminal side is wrapped to track whether the exercise's own output
+	// ended in a newline, so a command that prints without a trailing
+	// newline (e.g. a bare `{"status": "ok"}`) doesn't run into whatever the
+	// caller prints to stdout next — the log file is left byte-exact.
+	stdoutTee := &trailingNewlineWriter{Writer: os.Stdout, endsInNewline: true}
+	w := io.MultiWriter(stdoutTee, logFile)
 	cmd.Stdout = w
 	cmd.Stderr = w
 
@@ -89,6 +94,9 @@ func (b *Bundle) Run(name string, argv []string, shell bool) (int, error) {
 		return 0, fmt.Errorf("run: spawn %q: %w", cmdStr, err)
 	}
 	waitErr := cmd.Wait()
+	if !stdoutTee.endsInNewline {
+		fmt.Fprintln(os.Stdout)
+	}
 	dur := time.Since(start)
 	timedOut := ctx.Err() == context.DeadlineExceeded
 
@@ -141,6 +149,23 @@ func (b *Bundle) Run(name string, argv []string, shell bool) (int, error) {
 	}
 
 	return exitCode, nil
+}
+
+// trailingNewlineWriter wraps an io.Writer, tracking whether the last byte
+// written ended in a newline. Run uses it to decide whether the terminal
+// stream needs a separating newline after a teed exercise that printed
+// without one.
+type trailingNewlineWriter struct {
+	io.Writer
+	endsInNewline bool
+}
+
+func (w *trailingNewlineWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n > 0 {
+		w.endsInNewline = p[n-1] == '\n'
+	}
+	return n, err
 }
 
 // parsePBRunTimeout reads PB_RUN_TIMEOUT from the environment and returns the

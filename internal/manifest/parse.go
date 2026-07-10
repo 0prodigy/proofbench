@@ -1,14 +1,41 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// errScaffoldStart is the sentinel behind Validate's run.local.start
+// scaffolding error. Detect deliberately writes scaffoldStartCmd when it
+// cannot derive a real start command (so pb init always writes a file); it
+// recognizes this one expected condition via errors.Is and does not
+// surface it as an init failure, while pb lint on a checked-in manifest
+// still sees the user-facing message.
+var errScaffoldStart = errors.New("run.local.start is scaffolding")
+
+// scaffoldStartError carries the user-facing message while matching
+// errScaffoldStart via errors.Is — the sentinel text never appears in what
+// pb lint prints.
+type scaffoldStartError struct{ msg string }
+
+func (e *scaffoldStartError) Error() string        { return e.msg }
+func (e *scaffoldStartError) Is(target error) bool { return target == errScaffoldStart }
+
+// isScaffold reports whether v is exactly a literal placeholder Detect emits
+// when it cannot derive a real command — see detect.go's scaffoldStartCmd.
+// Matched by exact value, not substring, so a legitimate command that
+// happens to mention "TODO" elsewhere is never rejected.
+func isScaffold(v string) bool {
+	return v == scaffoldStartCmd
+}
 
 // validModes is the closed set of known substrate names.
 var validModes = map[string]bool{
@@ -68,13 +95,17 @@ func Load(path string) (*Ready, error) {
 // Validate checks structural validity of a Ready manifest:
 //   - service name non-empty
 //   - run.modes non-empty, each element in {local, compose, k8s-attach, remote}
-//   - local mode declared in run.modes requires run.local.start non-empty
-//   - probe (run.ready) has at most one of http/tcp/exec; timeout and interval
-//     are parseable durations (defaulted to 60s/2s when absent)
+//   - local mode declared in run.modes requires run.local.start non-empty and
+//     not still Detect's generated scaffold placeholder
+//   - probe (run.ready) has at most one of http/tcp/exec; an http probe
+//     normalizes and url.Parses cleanly; timeout and interval are parseable
+//     durations (defaulted to 60s/2s when absent)
 //   - seed step names are unique; each After entry resolves to a seed name or
 //     a resource name; references may not form a cycle among seed-step names
-//   - check names are unique; level is in L0-L5; exercise is non-empty;
-//     driver (if set) is one of exec|playwright
+//   - drive verb run commands are not Detect's generated scaffold placeholder
+//   - check names are unique; level is in L0-L5; exercise is non-empty and
+//     not Detect's generated scaffold placeholder; driver (if set) is one of
+//     exec|playwright
 //   - a check exercise of form "drive.<name>" must reference an existing drive
 //     verb in r.Drive
 func (r *Ready) Validate() error {
@@ -91,6 +122,10 @@ func (r *Ready) Validate() error {
 	}
 
 	if err := validateSeed(r); err != nil {
+		return err
+	}
+
+	if err := validateDrive(r); err != nil {
 		return err
 	}
 
@@ -134,6 +169,9 @@ func validateModes(r *Ready) error {
 		if strings.TrimSpace(r.Run.Local.Start) == "" {
 			return fmt.Errorf("manifest.Validate: run.local.start: required when mode %q is listed", "local")
 		}
+		if isScaffold(r.Run.Local.Start) {
+			return &scaffoldStartError{msg: fmt.Sprintf("manifest.Validate: run.start is generated scaffolding — replace %q with your real start command", scaffoldStartCmd)}
+		}
 	}
 
 	return nil
@@ -156,6 +194,12 @@ func validateProbe(p Probe) error {
 		return fmt.Errorf("manifest.Validate: run.ready: probe must have at most one of http/tcp/exec, got %d", count)
 	}
 
+	if p.HTTP != "" {
+		if _, err := url.Parse(httpProbeURL(p.HTTP)); err != nil {
+			return fmt.Errorf("manifest.Validate: run.ready.http: %q is not a valid URL: %w", p.HTTP, err)
+		}
+	}
+
 	// Validate only checks parseability here; it does not apply the 60s/2s
 	// defaults itself. An empty Timeout/Interval is valid input — the
 	// runtime caller (the substrate probing readiness) applies the default
@@ -172,6 +216,22 @@ func validateProbe(p Probe) error {
 	}
 
 	return nil
+}
+
+// httpProbeURL normalizes k8s-style probe shorthand (":8080/healthz") into a
+// dialable URL. This mirrors internal/substrate/local.go's httpProbeURL
+// exactly — manifest cannot import substrate (substrate already imports
+// manifest, which would cycle) — so lint and the runtime probe can't
+// diverge only if both are kept in lockstep by hand.
+func httpProbeURL(raw string) string {
+	u := raw
+	if strings.HasPrefix(u, ":") {
+		u = "localhost" + u
+	}
+	if !strings.Contains(u, "://") {
+		u = "http://" + u
+	}
+	return u
 }
 
 // validateSeed checks:
@@ -261,10 +321,28 @@ func detectSeedCycles(steps []SeedStep, seedNames map[string]bool) error {
 	return nil
 }
 
+// validateDrive rejects a drive verb whose run command is still Detect's
+// generated scaffold placeholder. Iterates verb names in sorted order for
+// deterministic error reporting.
+func validateDrive(r *Ready) error {
+	verbs := make([]string, 0, len(r.Drive))
+	for verb := range r.Drive {
+		verbs = append(verbs, verb)
+	}
+	sort.Strings(verbs)
+
+	for _, verb := range verbs {
+		if isScaffold(r.Drive[verb].Run) {
+			return fmt.Errorf("manifest.Validate: drive[%q].run is generated scaffolding — replace %q with your real command", verb, scaffoldStartCmd)
+		}
+	}
+	return nil
+}
+
 // validateChecks checks:
 //  1. check names are unique
 //  2. level is in L0-L5
-//  3. exercise is non-empty
+//  3. exercise is non-empty and not Detect's generated scaffold placeholder
 //  4. exercise of form "drive.<name>" references an existing drive verb
 //  5. each requires entry is a plausible env var name (^[A-Z_][A-Z0-9_]*$)
 func validateChecks(r *Ready) error {
@@ -285,6 +363,10 @@ func validateChecks(r *Ready) error {
 
 		if strings.TrimSpace(c.Exercise) == "" {
 			return fmt.Errorf("manifest.Validate: checks[%q].exercise: must not be empty", c.Name)
+		}
+
+		if isScaffold(c.Exercise) {
+			return fmt.Errorf("manifest.Validate: checks[%q].exercise is generated scaffolding — replace %q with your real command", c.Name, scaffoldStartCmd)
 		}
 
 		if strings.HasPrefix(c.Exercise, "drive.") {

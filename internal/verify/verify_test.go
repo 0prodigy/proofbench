@@ -306,7 +306,7 @@ func TestVerdict(t *testing.T) {
 		{"any fail", []evidence.Check{c("a", evidence.CheckPass), c("b", evidence.CheckFail)}, evidence.VerdictFail, "1 pass, 1 fail (b), 0 not-run"},
 		{"two fails named", []evidence.Check{c("a", evidence.CheckFail), c("b", evidence.CheckFail)}, evidence.VerdictFail, "0 pass, 2 fail (a, b), 0 not-run"},
 		{"all not-run", []evidence.Check{c("a", evidence.CheckNotRun)}, evidence.VerdictInconclusive, "0 pass, 0 fail, 1 not-run"},
-		{"no checks", nil, evidence.VerdictInconclusive, "0 pass, 0 fail, 0 not-run"},
+		{"no checks", nil, evidence.VerdictInconclusive, noChecksDeclaredNote},
 		{"pass plus not-run", []evidence.Check{c("a", evidence.CheckPass), c("b", evidence.CheckNotRun)}, evidence.VerdictPass, "1 pass, 0 fail, 1 not-run"},
 	}
 	for _, tt := range tests {
@@ -489,6 +489,168 @@ func TestRunPinsOmittedWithoutGit(t *testing.T) {
 	}
 	if sha, ok := b.M.Pins["repo"]; ok {
 		t.Errorf("pins[repo] = %q, want absent (no git checkout)", sha)
+	}
+}
+
+// ------------------------------------------------------------- legible summary lines
+
+// TestCheckLine proves a fail/not-run summary line carries a short, one-line,
+// trimmed reason, while a pass stays bare — the illegible-failures fix.
+func TestCheckLine(t *testing.T) {
+	tests := []struct {
+		name string
+		c    evidence.Check
+		want string
+	}{
+		{"pass has no reason suffix", evidence.Check{Name: "up", State: evidence.CheckPass}, "[pass] up"},
+		{"pass ignores a stray reason", evidence.Check{Name: "up", State: evidence.CheckPass, Reason: "ignored"}, "[pass] up"},
+		{
+			"fail carries its reason",
+			evidence.Check{Name: "appservice-up", State: evidence.CheckFail, Reason: "http :8391/healthz: connection refused"},
+			"[fail] appservice-up — http :8391/healthz: connection refused",
+		},
+		{
+			"not-run carries its reason",
+			evidence.Check{Name: "stage-progress", State: evidence.CheckNotRun, Reason: "required input PB_EXECUTION_ID unset"},
+			"[not-run] stage-progress — required input PB_EXECUTION_ID unset",
+		},
+		{"fail with no reason falls back to name only", evidence.Check{Name: "x", State: evidence.CheckFail}, "[fail] x"},
+		{
+			"multi-line reason collapses to one line",
+			evidence.Check{Name: "x", State: evidence.CheckFail, Reason: "line one\nline two"},
+			"[fail] x — line one line two",
+		},
+		{
+			"long reason trimmed to ~90 chars",
+			evidence.Check{Name: "x", State: evidence.CheckFail, Reason: strings.Repeat("a", 200)},
+			"[fail] x — " + strings.Repeat("a", maxReasonLen-1) + "…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := checkLine(tt.c); got != tt.want {
+				t.Errorf("checkLine = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRunSummaryLinesCarryReasons proves the exported Run threads each
+// check's reason into Summary.Lines, so a failing CLI run is diagnosable
+// from the summary alone.
+func TestRunSummaryLinesCarryReasons(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "exit 1", Expect: []string{"exitCode(a)==0"}},
+	)
+	_, sum, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "illegible fail", Substrate: "local"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(sum.Lines) != 1 {
+		t.Fatalf("Summary.Lines = %v, want 1 line", sum.Lines)
+	}
+	if !strings.HasPrefix(sum.Lines[0], "[fail] a — ") {
+		t.Errorf("Summary.Lines[0] = %q, want a legible fail line with a reason", sum.Lines[0])
+	}
+}
+
+// ---------------------------------------------------------- empty checks: block
+
+// TestVerdictNoChecksDeclaredHasExplicitNote proves an empty checks list
+// (a manifest with no checks: block at all, not merely all not-run) stays
+// honestly inconclusive but gets a note explaining why, instead of a
+// content-free "0 pass, 0 fail, 0 not-run".
+func TestVerdictNoChecksDeclaredHasExplicitNote(t *testing.T) {
+	v, note := verdict(nil)
+	if v != evidence.VerdictInconclusive {
+		t.Errorf("verdict = %q, want inconclusive", v)
+	}
+	if note != noChecksDeclaredNote {
+		t.Errorf("note = %q, want %q", note, noChecksDeclaredNote)
+	}
+}
+
+// TestRunNoChecksDeclaredSurfacesNote proves the exported Run surfaces the
+// same explicit note through Summary.Note and the sealed bundle's manifest
+// note, for a manifest that declares zero checks.
+func TestRunNoChecksDeclaredSurfacesNote(t *testing.T) {
+	r := &manifest.Ready{}
+	b, sum, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "empty checks", Substrate: "local"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sum.Verdict != evidence.VerdictInconclusive {
+		t.Errorf("Summary.Verdict = %q, want inconclusive", sum.Verdict)
+	}
+	if sum.Note != noChecksDeclaredNote {
+		t.Errorf("Summary.Note = %q, want %q", sum.Note, noChecksDeclaredNote)
+	}
+	if b.M.Note != noChecksDeclaredNote {
+		t.Errorf("bundle manifest note = %q, want %q", b.M.Note, noChecksDeclaredNote)
+	}
+}
+
+// --------------------------------------------------------------- --only typo
+
+// TestValidateOnly proves --only fails fast on any name the manifest never
+// declared, naming the bad check and every declared one.
+func TestValidateOnly(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "a"},
+		manifest.CheckSpec{Name: "b"},
+		manifest.CheckSpec{Name: "c"},
+	)
+	tests := []struct {
+		name    string
+		only    []string
+		wantErr string
+	}{
+		{"empty only is always fine", nil, ""},
+		{"all known", []string{"a", "c"}, ""},
+		{"one typo", []string{"a", "nosuchcheck"}, `verify: unknown check "nosuchcheck" (declared: a, b, c)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateOnly(r, tt.only)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("validateOnly = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("validateOnly = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestRunOnlyUnknownCheckFailsFast proves Run rejects an --only typo before
+// any bring-up: no bundle directory is created, mirroring the unknown-
+// substrate fail-fast behavior above.
+func TestRunOnlyUnknownCheckFailsFast(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(a)==0"}},
+		manifest.CheckSpec{Name: "b", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(b)==0"}},
+	)
+	root := t.TempDir()
+	b, sum, err := Run(r, Opts{EvidenceRoot: root, Claim: "only typo", Substrate: "local", Only: []string{"nosuchcheck"}})
+	if err == nil {
+		t.Fatal("Run(--only nosuchcheck) expected an error, got nil")
+	}
+	wantErr := `verify: unknown check "nosuchcheck" (declared: a, b)`
+	if err.Error() != wantErr {
+		t.Errorf("Run error = %q, want %q", err.Error(), wantErr)
+	}
+	if b != nil || sum != nil {
+		t.Errorf("Run(--only typo) returned bundle %v summary %v, want nil, nil", b, sum)
+	}
+	entries, rerr := os.ReadDir(root)
+	if rerr != nil {
+		t.Fatalf("read evidence root: %v", rerr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Run(--only typo) created %d bundle dir(s), want none", len(entries))
 	}
 }
 
