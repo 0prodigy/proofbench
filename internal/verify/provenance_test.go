@@ -261,8 +261,8 @@ func TestProvenanceVerifiesAllImages(t *testing.T) {
 // failing real image.
 func TestImageFlagIsAdditive(t *testing.T) {
 	const (
-		decoy = "ghcr.io/0prodigy/decoy@sha256:cccc" // agent-chosen, genuinely attested
-		real  = "ghcr.io/0prodigy/real@sha256:dddd"  // the real deployed image, UNATTESTED
+		decoy   = "ghcr.io/0prodigy/decoy@sha256:cccc" // agent-chosen, genuinely attested
+		realImg = "ghcr.io/0prodigy/real@sha256:dddd"  // the real deployed image, UNATTESTED
 	)
 	stubGh(t, func(ref, _, _ string) error {
 		if ref == decoy {
@@ -270,7 +270,7 @@ func TestImageFlagIsAdditive(t *testing.T) {
 		}
 		return errors.New("no attestation matching signer")
 	})
-	pins := map[string]string{"repo": "abc123", "image.svc": real}
+	pins := map[string]string{"repo": "abc123", "image.svc": realImg}
 	inScope := ProvenanceOpts{Owner: "0prodigy", SignerWorkflow: "wf", Image: decoy}
 
 	rung, reason := verifyProvenance(inScope, pins)
@@ -280,8 +280,8 @@ func TestImageFlagIsAdditive(t *testing.T) {
 	if rung != RungR3 {
 		t.Errorf("rung=%q, want R3 (union not fully attested)", rung)
 	}
-	if !strings.Contains(reason, real) {
-		t.Errorf("reason %q should name the unattested real deployed image %q", reason, real)
+	if !strings.Contains(reason, realImg) {
+		t.Errorf("reason %q should name the unattested real deployed image %q", reason, realImg)
 	}
 
 	// Control: when the substrate pin IS attested too, the union verifies to R4.

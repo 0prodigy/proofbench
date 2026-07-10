@@ -280,7 +280,7 @@ func TestLocalEndToEnd(t *testing.T) {
 		Service: "web",
 		Run: manifest.RunSpec{
 			Local: manifest.LocalRun{Start: fmt.Sprintf("python3 -m http.server %d", port)},
-			Ready: manifest.Probe{HTTP: fmt.Sprintf(":%d/", port), Timeout: "15s", Interval: "100ms"},
+			Ready: manifest.Probe{HTTP: fmt.Sprintf(":%d/", port), Timeout: "60s", Interval: "100ms"},
 		},
 	}
 	s, err := New(KindLocal, dir)

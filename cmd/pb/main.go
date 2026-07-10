@@ -261,9 +261,9 @@ func printCmdHelp(cmd string, fs *flag.FlagSet) int {
 	}
 	fmt.Println(h.desc)
 	if fs != nil {
-		var any bool
-		fs.VisitAll(func(*flag.Flag) { any = true })
-		if any {
+		var hasFlags bool
+		fs.VisitAll(func(*flag.Flag) { hasFlags = true })
+		if hasFlags {
 			fmt.Println("\nFlags:")
 			fs.SetOutput(os.Stdout)
 			fs.PrintDefaults()
