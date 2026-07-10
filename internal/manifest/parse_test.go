@@ -355,6 +355,19 @@ func TestValidate_Checks(t *testing.T) {
 				{Name: "ping", Level: "L3", Exercise: "curl :8080", Driver: "exec"},
 			},
 		},
+		{
+			name: "requires valid env names",
+			checks: []CheckSpec{
+				{Name: "ping", Level: "L3", Exercise: "curl :8080", Requires: []string{"PB_EXECUTION_ID", "PB_EXPECTED_ACTION"}},
+			},
+		},
+		{
+			name: "requires rejects a non-env-shaped name",
+			checks: []CheckSpec{
+				{Name: "ping", Level: "L3", Exercise: "curl :8080", Requires: []string{"pb-execution-id"}},
+			},
+			wantErr: "pb-execution-id",
+		},
 	}
 
 	for _, tc := range cases {

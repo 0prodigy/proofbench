@@ -81,6 +81,7 @@ checks:                      # declared validation surfaces (skaffold-verify her
     level: L4                              # proof-ladder rung this check proves
     exercise: drive.create-order
     expect: [ "exitCode == 0", "http.status == 201", "db.orders.rows > @before" ]
+    requires: [PB_EXECUTION_ID]             # unset => the check records not-run, not a hard fail
   - name: e2e-ui
     level: L5
     exercise: playwright tests/e2e/order.spec.ts

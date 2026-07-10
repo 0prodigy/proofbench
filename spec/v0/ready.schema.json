@@ -297,7 +297,7 @@
           "type": "string"
         },
         "expect": {
-          "description": "List of predicate expressions that must all hold for the check to pass (e.g. 'exitCode == 0', 'http.status == 201', 'db.orders.rows > @before').",
+          "description": "List of predicate expressions that must all hold for the check to pass. Implemented grammar (internal/evidence/assert.go), one predicate per string: 'exitCode(<artifactName>)==<int>' (exit code recorded in a command artifact's meta), 'nonempty(<path>)' (file exists and has size > 0), 'rows(<path>)><int>' (JSON-array length, else non-empty line count, exceeds int), 'http(<url>)==<int>' (GET <url> returns status <int>), 'equal(<pathA>,<pathB>)' (two files are byte-identical), 'jsonpath(<artifact>,<path>)==<value>' or '~=<regex>' (dotted-key path into a captured JSON artifact; bare numeric segments index arrays), 'contains(<artifact>,<path>,<value>)' (one-level scan of the resolved array/object for <value>). Examples: 'exitCode(order-roundtrip)==0', 'http(http://localhost:8391/healthz)==200', 'rows(orders.json)>0', 'jsonpath(execution.json,selectedAction)==quick_run'.",
           "type": "array",
           "items": {
             "type": "string"
@@ -309,6 +309,13 @@
           "items": {
             "type": "string",
             "enum": ["command", "snapshot", "screenshot", "log", "recording", "link"]
+          }
+        },
+        "requires": {
+          "description": "environment inputs this check needs; unset at verify time => the check records not-run",
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }

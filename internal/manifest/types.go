@@ -88,6 +88,11 @@ type CheckSpec struct {
 	Exercise  string   `yaml:"exercise"`
 	Expect    []string `yaml:"expect"`
 	Artifacts []string `yaml:"artifacts"`
+	// Requires names environment variable inputs this check needs (e.g. an
+	// operator-supplied execution ID) that must be exported before `pb
+	// verify`. Unset at verify time makes the check record not-run with a
+	// named reason, rather than hard-failing (honest gating, ADR-0012).
+	Requires []string `yaml:"requires,omitempty"`
 }
 
 // Gate names a human gate on a destructive/irreversible step.

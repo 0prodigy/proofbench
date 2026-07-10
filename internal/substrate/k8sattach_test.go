@@ -1,6 +1,7 @@
 package substrate
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -59,7 +60,12 @@ get)
       echo "Error from server (NotFound): pods \"$name\" not found" >&2
       exit 1
     fi
-    echo "${PB_FAKE_POD_READY:-True}"
+    # Dispatch on the -o jsonpath query: imageIDs (Pins) vs readiness (assertPodReady).
+    jsonpath="${rest[3]:-}"
+    case "$jsonpath" in
+    *imageID*) echo "${PB_FAKE_POD_IMAGE_IDS:-}" ;;
+    *) echo "${PB_FAKE_POD_READY:-True}" ;;
+    esac
     exit 0
     ;;
   deploy)
@@ -77,7 +83,13 @@ get)
       echo "Error from server (NotFound): services \"$name\" not found" >&2
       exit 1
     fi
-    echo "service/$name"
+    # Dispatch on the -o query: the selector jsonpath (podForLocator) vs the
+    # plain "-o name" existence probe (assertLive).
+    query="${rest[4]:-}"
+    case "$query" in
+    *selector*) echo "${PB_FAKE_SVC_SELECTOR:-}" ;;
+    *) echo "service/$name" ;;
+    esac
     exit 0
     ;;
   pods)
@@ -403,6 +415,299 @@ func TestK8sAttachUpNoKubectlOnPath(t *testing.T) {
 	}
 	if err := s.Up(&manifest.Ready{}); err == nil || !strings.Contains(err.Error(), "kubectl not found in PATH") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// TestK8sAttachUpDedupSameLocator proves that a sources.k8s entry and a
+// resource's via.k8s naming the identical locator open exactly ONE
+// port-forward, with both names resolving to it.
+func TestK8sAttachUpDedupSameLocator(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not in PATH")
+	}
+	logFile := newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	r := &manifest.Ready{
+		Service: "appservice",
+		Sources: map[string]string{"k8s": "svc/appservice:8000"},
+		Resources: map[string]manifest.Resource{
+			"web": {Type: "service", Via: map[string]string{"k8s": "svc/appservice:8000"}},
+		},
+	}
+	t.Cleanup(func() { _ = s.Down(r) })
+
+	if err := s.Up(r); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	log := readLog(t, logFile)
+	if n := strings.Count(log, "port-forward svc/appservice"); n != 1 {
+		t.Fatalf("expected exactly one port-forward for the shared locator, got %d: %q", n, log)
+	}
+
+	fwds, err := ka.loadForwards()
+	if err != nil {
+		t.Fatalf("loadForwards: %v", err)
+	}
+	if len(fwds) != 2 {
+		t.Fatalf("got %d forwards, want 2 (one tunnel, two names): %+v", len(fwds), fwds)
+	}
+	if fwds[0].LocalPort != fwds[1].LocalPort || fwds[0].PID != fwds[1].PID {
+		t.Fatalf("deduped forwards should share LocalPort/PID: %+v", fwds)
+	}
+
+	ep := s.(Endpoints)
+	appHP, err := ep.Endpoint("appservice")
+	if err != nil {
+		t.Fatalf("Endpoint(appservice): %v", err)
+	}
+	webHP, err := ep.Endpoint("web")
+	if err != nil {
+		t.Fatalf("Endpoint(web): %v", err)
+	}
+	if appHP != webHP {
+		t.Fatalf("Endpoint(appservice)=%q Endpoint(web)=%q, want equal (same forward)", appHP, webHP)
+	}
+}
+
+// TestK8sAttachUpPrintsOneLinePerForward proves Up's success is observable:
+// one "forward ..." line per tunnel actually opened (not per name, for a
+// deduped locator).
+func TestK8sAttachUpPrintsOneLinePerForward(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not in PATH")
+	}
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &manifest.Ready{
+		Service: "appservice",
+		Sources: map[string]string{"k8s": "svc/appservice:8000"},
+		Resources: map[string]manifest.Resource{
+			"mongo": {Type: "mongodb", Via: map[string]string{"k8s": "pod/mongo-0:27017"}},
+		},
+	}
+	t.Cleanup(func() { _ = s.Down(r) })
+
+	out := captureStdout(t, func() {
+		if err := s.Up(r); err != nil {
+			t.Fatalf("Up: %v", err)
+		}
+	})
+	if n := strings.Count(out, "forward "); n != 2 {
+		t.Fatalf("stdout %q: want 2 'forward ' lines (one per opened tunnel), got %d", out, n)
+	}
+	if !strings.Contains(out, "svc/appservice:8000 -> 127.0.0.1:") {
+		t.Errorf("stdout %q missing the service forward line", out)
+	}
+	if !strings.Contains(out, "pod/mongo-0:27017 -> 127.0.0.1:") {
+		t.Errorf("stdout %q missing the resource forward line", out)
+	}
+}
+
+// TestK8sAttachReadyPrintsProbeAndResult proves Ready's outcome is observable
+// on stdout, both for a passing and a failing probe.
+func TestK8sAttachReadyPrintsProbeAndResult(t *testing.T) {
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A TCP probe against a listener that never accepts (no forward opened,
+	// no port bound) is a fast, deterministic failure.
+	r := &manifest.Ready{Run: manifest.RunSpec{Ready: manifest.Probe{TCP: "127.0.0.1:1", Timeout: "300ms", Interval: "50ms"}}}
+	out := captureStdout(t, func() {
+		if err := s.Ready(r); err == nil {
+			t.Fatal("Ready: want error against an unbound port")
+		}
+	})
+	if !strings.Contains(out, "ready tcp 127.0.0.1:1 -> fail:") {
+		t.Errorf("stdout %q missing failing-probe line", out)
+	}
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	w.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	return buf.String()
+}
+
+// TestK8sAttachDownRemovesEmptyPbDir proves Down removes the .pb directory
+// once it is empty, but leaves it alone (and errors nowhere) when other state
+// still lives there.
+func TestK8sAttachDownRemovesEmptyPbDir(t *testing.T) {
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if err := ka.saveForwards(nil); err != nil {
+		t.Fatal(err)
+	}
+	pbDir := filepath.Join(dir, ".pb")
+	if _, err := os.Stat(pbDir); err != nil {
+		t.Fatalf(".pb dir not created: %v", err)
+	}
+
+	if err := s.Down(&manifest.Ready{}); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	if _, err := os.Stat(pbDir); !os.IsNotExist(err) {
+		t.Fatalf(".pb dir should be removed once empty: %v", err)
+	}
+}
+
+// TestK8sAttachDownLeavesNonEmptyPbDir proves Down never touches unrelated
+// state (e.g. a local-substrate log) left in the same .pb directory.
+func TestK8sAttachDownLeavesNonEmptyPbDir(t *testing.T) {
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if err := ka.saveForwards(nil); err != nil {
+		t.Fatal(err)
+	}
+	pbDir := filepath.Join(dir, ".pb")
+	if err := os.WriteFile(filepath.Join(pbDir, "other.log"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Down(&manifest.Ready{}); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	if _, err := os.Stat(pbDir); err != nil {
+		t.Fatalf(".pb dir should survive while non-empty: %v", err)
+	}
+}
+
+// ------------------------------------------------------------------ Pins
+
+func TestK8sAttachPins(t *testing.T) {
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_CONTEXT", "redcat")
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	t.Setenv("PB_FAKE_POD_NAME", "appservice-7f8-abcde")
+	t.Setenv("PB_FAKE_POD_IMAGE_IDS", "docker-pullable://acme/appservice@sha256:deadbeef")
+
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if err := ka.saveForwards([]forward{
+		{Name: "appservice", Locator: "svc/appservice", LocalPort: 12345, PID: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pinner, ok := s.(Pinner)
+	if !ok {
+		t.Fatal("k8sAttach does not implement Pinner")
+	}
+	pins, err := pinner.Pins()
+	if err != nil {
+		t.Fatalf("Pins: %v", err)
+	}
+	if pins["k8s.context"] != "redcat" || pins["k8s.namespace"] != "delta" {
+		t.Errorf("pins = %+v, want k8s.context=redcat k8s.namespace=delta", pins)
+	}
+	if pins["image.appservice"] != "docker-pullable://acme/appservice@sha256:deadbeef" {
+		t.Errorf("pins[image.appservice] = %q", pins["image.appservice"])
+	}
+}
+
+// TestK8sAttachPinsSvcSelectorConvention proves Pins resolves a svc/<name>
+// locator's backing pod via the SERVICE'S OWN selector (e.g.
+// "app.kubernetes.io/name=appservice") when it doesn't follow the
+// "app=<name>" convention — the real-cluster case (svc/appservice,
+// svc/kafka-cluster-kafka-brokers) that the old fixed convention matched
+// nothing for.
+func TestK8sAttachPinsSvcSelectorConvention(t *testing.T) {
+	logFile := newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	t.Setenv("PB_FAKE_SVC_SELECTOR", `{"app.kubernetes.io/name":"appservice"}`)
+	t.Setenv("PB_FAKE_POD_NAME", "appservice-7f8-abcde")
+	t.Setenv("PB_FAKE_POD_IMAGE_IDS", "docker-pullable://acme/appservice@sha256:deadbeef")
+
+	dir := t.TempDir()
+	s, err := New(KindK8sAttach, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := s.(*k8sAttach)
+	if err := ka.saveForwards([]forward{
+		{Name: "appservice", Locator: "svc/appservice", LocalPort: 12345, PID: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pinner := s.(Pinner)
+	pins, err := pinner.Pins()
+	if err != nil {
+		t.Fatalf("Pins: %v", err)
+	}
+	if pins["image.appservice"] != "docker-pullable://acme/appservice@sha256:deadbeef" {
+		t.Errorf("pins[image.appservice] = %q, want the resolved digest (selector-based pod lookup)", pins["image.appservice"])
+	}
+
+	log := readLog(t, logFile)
+	if !strings.Contains(log, "-l app.kubernetes.io/name=appservice") {
+		t.Fatalf("log %q missing the Service-selector-derived -l query", log)
+	}
+	if strings.Contains(log, "-l app=appservice") {
+		t.Fatalf("log %q used the app=<name> fallback convention despite a resolvable selector", log)
+	}
+}
+
+// TestK8sAttachPinsNoForwardsErrors proves Pins reports an error (never a
+// fabricated pin) when Up never ran.
+func TestK8sAttachPinsNoForwardsErrors(t *testing.T) {
+	newFakeKubectl(t)
+	t.Setenv("PB_K8S_NAMESPACE", "delta")
+	s, err := New(KindK8sAttach, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinner := s.(Pinner)
+	if _, err := pinner.Pins(); err == nil {
+		t.Fatal("Pins() with no recorded forwards: want error, got nil")
 	}
 }
 

@@ -88,7 +88,12 @@ func workspaceContext(dir string) (kubeCtx, namespace string, ok bool) {
 }
 
 // Up asserts liveness and opens a port-forward for the service and each
-// resource carrying a Via["k8s"] locator, recording them so Down can reap them.
+// resource carrying a Via["k8s"] locator, recording them so Down can reap
+// them. sources.k8s and a resource's via.k8s may name the identical locator
+// (e.g. both point at svc/appservice:8000) — those are deduplicated into one
+// tunnel so both names resolve to it rather than opening a redundant second
+// forward. One line is printed per tunnel actually opened, so a successful
+// `pb up` is observable rather than silent.
 func (s *k8sAttach) Up(r *manifest.Ready) error {
 	if err := checkKubectl(); err != nil {
 		return err
@@ -100,20 +105,55 @@ func (s *k8sAttach) Up(r *manifest.Ready) error {
 	}
 
 	opened := make([]forward, 0, len(targets))
-	for _, t := range targets {
-		if err := s.assertLive(t.Locator); err != nil {
+	for _, group := range dedupForwardTargets(targets) {
+		first := group[0]
+		if err := s.assertLive(first.Locator); err != nil {
 			s.reap(opened) // roll back forwards opened so far
-			return fmt.Errorf("k8s-attach: %s (%s): %w", t.Name, t.Locator, err)
+			return fmt.Errorf("k8s-attach: %s (%s): %w", first.Name, first.Locator, err)
 		}
-		local, pid, err := s.openForward(t.Locator, t.RemotePort)
+		local, pid, err := s.openForward(first.Locator, first.RemotePort)
 		if err != nil {
 			s.reap(opened)
-			return fmt.Errorf("k8s-attach: port-forward %s (%s): %w", t.Name, t.Locator, err)
+			return fmt.Errorf("k8s-attach: port-forward %s (%s): %w", first.Name, first.Locator, err)
 		}
-		t.LocalPort, t.PID = local, pid
-		opened = append(opened, t)
+		fmt.Printf("forward %s -> 127.0.0.1:%d\n", forwardLabel(first), local)
+		for _, t := range group {
+			t.LocalPort, t.PID = local, pid
+			opened = append(opened, t)
+		}
 	}
 	return s.saveForwards(opened)
+}
+
+// dedupForwardTargets groups forwardTargets sharing the same locator+port
+// pair into one group, preserving first-seen order, so Up opens exactly one
+// tunnel per unique in-cluster target no matter how many manifest names (a
+// sources.k8s entry and a resource's via.k8s) reference it.
+func dedupForwardTargets(targets []forward) [][]forward {
+	order := make([]string, 0, len(targets))
+	groups := map[string][]forward{}
+	for _, t := range targets {
+		key := fmt.Sprintf("%s:%d", t.Locator, t.RemotePort)
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], t)
+	}
+	out := make([][]forward, 0, len(order))
+	for _, key := range order {
+		out = append(out, groups[key])
+	}
+	return out
+}
+
+// forwardLabel renders a forward's in-cluster target for the "forward ..."
+// progress line: "<locator>:<remotePort>" when a remote port was declared,
+// else the bare locator (kubectl then uses the target's own port).
+func forwardLabel(f forward) string {
+	if f.RemotePort > 0 {
+		return fmt.Sprintf("%s:%d", f.Locator, f.RemotePort)
+	}
+	return f.Locator
 }
 
 // Ready polls the manifest's readiness probe against the FORWARDED localhost
@@ -129,7 +169,27 @@ func (s *k8sAttach) Ready(r *manifest.Ready) error {
 		p.TCP = substituteEndpoints(p.TCP, eps)
 		p.Exec = substituteEndpoints(p.Exec, eps)
 	}
-	return waitProbe(s.dir, p)
+	err := waitProbe(s.dir, p)
+	if err != nil {
+		fmt.Printf("ready %s -> fail: %v\n", probeLabel(p), err)
+	} else {
+		fmt.Printf("ready %s -> ok\n", probeLabel(p))
+	}
+	return err
+}
+
+// probeLabel renders the declared probe for the "ready ..." progress line.
+func probeLabel(p manifest.Probe) string {
+	switch {
+	case p.HTTP != "":
+		return "http " + p.HTTP
+	case p.TCP != "":
+		return "tcp " + p.TCP
+	case p.Exec != "":
+		return "exec " + p.Exec
+	default:
+		return "probe"
+	}
 }
 
 // endpointMap loads the recorded forwards into a name -> 127.0.0.1:port map,
@@ -178,13 +238,24 @@ func (s *k8sAttach) Down(_ *manifest.Ready) error {
 	fwds, err := s.loadForwards()
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.removeEmptyPbDir()
 			return nil
 		}
 		return err
 	}
 	s.reap(fwds)
 	_ = os.Remove(s.forwardsFile())
+	s.removeEmptyPbDir()
 	return nil
+}
+
+// removeEmptyPbDir removes the substrate's .pb directory once Down has
+// cleared its own forwards file, but only if that leaves the directory
+// empty — os.Remove refuses to remove a non-empty directory, so any other
+// substrate/seed state left there is never touched. Best-effort like the
+// forwards-file removal above: a failure here is not Down's failure.
+func (s *k8sAttach) removeEmptyPbDir() {
+	_ = os.Remove(filepath.Join(s.dir, ".pb"))
 }
 
 // Endpoint satisfies the optional Endpoints capability: it returns the
@@ -200,6 +271,108 @@ func (s *k8sAttach) Endpoint(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("k8s-attach: no forward for %q", name)
+}
+
+// Pins satisfies the optional Pinner capability (pins.go): the resolved
+// kubectl context/namespace, plus each forwarded target's backing pod image
+// digest(s), keyed "image.<name>" — so an evidence bundle can prove WHICH
+// build k8s-attach exercised (PLAN §5 "run pinning"). A per-target digest
+// lookup failure is skipped, not fatal: pins are best-effort provenance, and
+// a missing pin is reported by its absence, never faked.
+func (s *k8sAttach) Pins() (map[string]string, error) {
+	fwds, err := s.loadForwards()
+	if err != nil {
+		return nil, fmt.Errorf("k8sAttach.Pins: load forwards: %w", err)
+	}
+	out := map[string]string{"k8s.namespace": s.namespace}
+	if s.context != "" {
+		out["k8s.context"] = s.context
+	}
+	for _, f := range fwds {
+		digest, err := s.podImageDigest(f.Locator)
+		if err != nil {
+			continue
+		}
+		out["image."+f.Name] = digest
+	}
+	return out, nil
+}
+
+// podImageDigest resolves the concrete pod backing locator (a svc name
+// resolves via the Service's own selector when it has one, else the
+// "app=<name>" convention; a deploy name resolves via that convention) and
+// reads its container image digest(s) via a read-only
+// `kubectl get pod -o jsonpath={.status.containerStatuses[*].imageID}`.
+func (s *k8sAttach) podImageDigest(locator string) (string, error) {
+	pod, err := s.podForLocator(locator)
+	if err != nil {
+		return "", err
+	}
+	out, err := s.kubectlOut("get", "pod/"+pod, "-o",
+		`jsonpath={range .status.containerStatuses[*]}{.imageID}{","}{end}`)
+	if err != nil {
+		return "", fmt.Errorf("pod %q imageIDs: %s", pod, out)
+	}
+	digest := strings.Trim(strings.TrimSpace(out), ",")
+	if digest == "" {
+		return "", fmt.Errorf("pod %q: no imageIDs reported", pod)
+	}
+	return digest, nil
+}
+
+// podForLocator resolves a forward locator (pod/svc/deploy) to a concrete
+// pod name. A deploy name still resolves via the "app=<name>" convention
+// (mirroring resolvePod). A svc name first reads the Service's OWN selector
+// (real Services often don't follow the "app=<name>" convention — e.g.
+// svc/appservice or svc/kafka-cluster-kafka-brokers may select on
+// "app.kubernetes.io/name=<name>" or another label entirely) and only falls
+// back to "app=<name>" when the Service has no selector or the query fails.
+func (s *k8sAttach) podForLocator(locator string) (string, error) {
+	kind, name := splitKindName(locator)
+	switch kind {
+	case "pod":
+		return name, nil
+	case "svc", "service":
+		if sel, ok := s.svcSelector(name); ok {
+			return s.firstPod("-l", sel, "--field-selector=status.phase=Running")
+		}
+		return s.firstPod("-l", "app="+name)
+	case "deploy", "deployment":
+		return s.firstPod("-l", "app="+name)
+	default:
+		return "", fmt.Errorf("unsupported locator kind %q", kind)
+	}
+}
+
+// svcSelector reads a Service's actual label selector via a read-only
+// `kubectl get svc <name> -o jsonpath={.spec.selector}` and renders it as a
+// "-l" selector string with keys SORTED (k1=v1,k2=v2) for deterministic
+// output. ok is false — and the caller falls back to the "app=<name>"
+// convention — when the Service has no selector (e.g. a headless/manually
+// managed endpoint) or the query fails.
+func (s *k8sAttach) svcSelector(name string) (selector string, ok bool) {
+	out, err := s.kubectlOut("get", "svc", name, "-o", "jsonpath={.spec.selector}")
+	if err != nil {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return "", false
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &m); err != nil || len(m) == 0 {
+		return "", false
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, k+"="+m[k])
+	}
+	return strings.Join(pairs, ","), true
 }
 
 // forwardTargets collects the port-forward targets from the manifest: the

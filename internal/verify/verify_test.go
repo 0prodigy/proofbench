@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -406,5 +407,288 @@ func TestRunPairingFieldsLandInManifest(t *testing.T) {
 	if reopened.M.PairsWith != "20260101-120000-verify" || reopened.M.Kind != "after" {
 		t.Errorf("reopened manifest pairsWith=%q kind=%q, want 20260101-120000-verify/after",
 			reopened.M.PairsWith, reopened.M.Kind)
+	}
+}
+
+// ------------------------------------------------------------------- pins
+
+// runGit runs `git -C dir <args>`, failing the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// initGitRepo creates a git-init'd, one-commit repo at dir.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "config", "user.email", "pb@example.com")
+	runGit(t, dir, "config", "user.name", "pb")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "f.txt")
+	runGit(t, dir, "commit", "--quiet", "-m", "init")
+}
+
+// TestRunPinsRepoSHA proves Run pins the git commit of the repo under test,
+// suffixing "-dirty" once the tree has uncommitted changes, and that the pin
+// round-trips through the sealed bundle on disk.
+func TestRunPinsRepoSHA(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	r := ready(manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(a)==0"}})
+	b, _, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "pins", Substrate: "local", Dir: dir})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	sha := b.M.Pins["repo"]
+	if len(sha) < 7 || strings.HasSuffix(sha, "-dirty") {
+		t.Fatalf("pins[repo] = %q, want a clean git sha", sha)
+	}
+
+	reopened, err := evidence.Open(b.Dir)
+	if err != nil {
+		t.Fatalf("evidence.Open: %v", err)
+	}
+	if reopened.M.Pins["repo"] != sha {
+		t.Errorf("reopened pins[repo] = %q, want %q (round trip)", reopened.M.Pins["repo"], sha)
+	}
+
+	// Dirty the tree; the next run's pin must record it.
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b2, _, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "pins dirty", Substrate: "local", Dir: dir})
+	if err != nil {
+		t.Fatalf("Run (dirty): %v", err)
+	}
+	if !strings.HasSuffix(b2.M.Pins["repo"], "-dirty") {
+		t.Errorf("dirty repo pin = %q, want -dirty suffix", b2.M.Pins["repo"])
+	}
+	if strings.TrimSuffix(b2.M.Pins["repo"], "-dirty") != sha {
+		t.Errorf("dirty pin sha %q, want same commit %q", b2.M.Pins["repo"], sha)
+	}
+}
+
+// TestRunPinsOmittedWithoutGit proves an absent git checkout omits the repo
+// pin entirely rather than fabricating one.
+func TestRunPinsOmittedWithoutGit(t *testing.T) {
+	dir := t.TempDir() // no git init
+	r := ready(manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "echo hi", Expect: []string{"exitCode(a)==0"}})
+	b, _, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "no git", Substrate: "local", Dir: dir})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sha, ok := b.M.Pins["repo"]; ok {
+		t.Errorf("pins[repo] = %q, want absent (no git checkout)", sha)
+	}
+}
+
+// ------------------------------------------------------------------- proof level "none"
+
+// TestRunSummaryProofLevelNoneWhenNothingPassed proves the CLI-facing Summary
+// reports "none" (never a blank string) when no rung passed, while the
+// bundle manifest's proofLevel stays omitted (its enum has no "none" value).
+func TestRunSummaryProofLevelNoneWhenNothingPassed(t *testing.T) {
+	r := ready(manifest.CheckSpec{Name: "a", Level: "L2", Exercise: "exit 1", Expect: []string{"exitCode(a)==0"}})
+	b, sum, err := Run(r, Opts{EvidenceRoot: t.TempDir(), Claim: "always fails", Substrate: "local"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sum.ProofLevel != "none" {
+		t.Errorf("Summary.ProofLevel = %q, want \"none\"", sum.ProofLevel)
+	}
+	if b.M.ProofLevel != "" {
+		t.Errorf("manifest proofLevel = %q, want omitted", b.M.ProofLevel)
+	}
+}
+
+// ------------------------------------------------------------------- gates
+
+func TestGateForMatchesDriveVerbOrCheckName(t *testing.T) {
+	r := &manifest.Ready{
+		Checks: []manifest.CheckSpec{
+			{Name: "release", Exercise: "drive.deploy"},
+			{Name: "prod-write", Exercise: "curl -X POST http://x/y"},
+			{Name: "unit", Exercise: "echo ok"},
+		},
+		Gates: []manifest.Gate{
+			{On: "deploy", Reason: "cluster release is irreversible"},
+			{On: "prod-write", Reason: "manual approval required"},
+		},
+	}
+	if g, ok := gateFor(r, r.Checks[0]); !ok || g.Reason != "cluster release is irreversible" {
+		t.Errorf("release: gateFor = %+v, %v", g, ok)
+	}
+	if g, ok := gateFor(r, r.Checks[1]); !ok || g.Reason != "manual approval required" {
+		t.Errorf("prod-write: gateFor = %+v, %v", g, ok)
+	}
+	if _, ok := gateFor(r, r.Checks[2]); ok {
+		t.Errorf("unit: gateFor should not match, no gate names it")
+	}
+}
+
+func TestGateForNoGatesIsZeroBehaviorChange(t *testing.T) {
+	r := ready(manifest.CheckSpec{Name: "a", Exercise: "drive.deploy"})
+	if _, ok := gateFor(r, r.Checks[0]); ok {
+		t.Error("gateFor should never match when the manifest declares no gates")
+	}
+}
+
+// TestRunChecksGatedCheckIsNotRunAndNeverExecutes proves a gated check
+// records not-run with the gate's reason and never shells out, while an
+// un-gated check in the same manifest still runs.
+func TestRunChecksGatedCheckIsNotRunAndNeverExecutes(t *testing.T) {
+	r := &manifest.Ready{
+		Drive: map[string]manifest.DriveVerb{"deploy": {Run: "echo deploying"}},
+		Checks: []manifest.CheckSpec{
+			{Name: "release", Level: "L5", Exercise: "drive.deploy", Expect: []string{"exitCode(release)==0"}},
+			{Name: "unit", Level: "L2", Exercise: "echo ok", Expect: []string{"exitCode(unit)==0"}},
+		},
+		Gates: []manifest.Gate{{On: "deploy", Reason: "cluster release is irreversible"}},
+	}
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{}, ops, nil, false)
+	if checks[0].State != evidence.CheckNotRun || checks[0].Reason != "gated: cluster release is irreversible" {
+		t.Errorf("release: state %q reason %q, want not-run/\"gated: cluster release is irreversible\"",
+			checks[0].State, checks[0].Reason)
+	}
+	if checks[1].State != evidence.CheckPass {
+		t.Errorf("unit: state %q, want pass", checks[1].State)
+	}
+	if strings.Join(ops.ran, ",") != "unit" {
+		t.Errorf("ran %v — a gated check must never shell out", ops.ran)
+	}
+}
+
+// TestVerdictGatedSkipForcesInconclusive proves a gated not-run check forces
+// inconclusive even when every other check passed — a gate must never read
+// as a fake pass (PLAN §3.7).
+func TestVerdictGatedSkipForcesInconclusive(t *testing.T) {
+	checks := []evidence.Check{
+		{Name: "a", State: evidence.CheckPass},
+		{Name: "b", State: evidence.CheckNotRun, Reason: "gated: manual approval required"},
+	}
+	v, note := verdict(checks)
+	if v != evidence.VerdictInconclusive {
+		t.Errorf("verdict = %q, want inconclusive (a gated skip must never pass); note=%q", v, note)
+	}
+}
+
+// --------------------------------------------------------- required inputs
+
+// TestRunChecksMissingRequiredInputIsNotRun proves a check declaring an env
+// input it requires (checks[].requires) records not-run with a named reason,
+// and never shells out, when that env var is unset in the process
+// environment — the honest-gating fix for a required input hard-failing
+// instead of gating.
+func TestRunChecksMissingRequiredInputIsNotRun(t *testing.T) {
+	r := ready(
+		manifest.CheckSpec{
+			Name: "action-resolution", Level: "L4", Exercise: "echo hi",
+			Expect: []string{"exitCode(action-resolution)==0"}, Requires: []string{"PB_EXECUTION_ID"},
+		},
+	)
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{}, ops, nil, false)
+	if checks[0].State != evidence.CheckNotRun || checks[0].Reason != "required input PB_EXECUTION_ID unset" {
+		t.Errorf("state %q reason %q, want not-run/\"required input PB_EXECUTION_ID unset\"",
+			checks[0].State, checks[0].Reason)
+	}
+	if len(ops.ran) != 0 {
+		t.Errorf("ran %v — a check with an unset required input must never shell out", ops.ran)
+	}
+}
+
+// TestRunChecksRequiredInputSetRuns proves the same check runs normally once
+// its required env var is exported.
+func TestRunChecksRequiredInputSetRuns(t *testing.T) {
+	t.Setenv("PB_EXECUTION_ID", "exec-123")
+	r := ready(
+		manifest.CheckSpec{
+			Name: "action-resolution", Level: "L4", Exercise: "echo hi",
+			Expect: []string{"exitCode(action-resolution)==0"}, Requires: []string{"PB_EXECUTION_ID"},
+		},
+	)
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{}, ops, nil, false)
+	if checks[0].State != evidence.CheckPass {
+		t.Errorf("state %q, want pass once PB_EXECUTION_ID is set", checks[0].State)
+	}
+	if strings.Join(ops.ran, ",") != "action-resolution" {
+		t.Errorf("ran %v, want the check to have executed", ops.ran)
+	}
+}
+
+// TestVerdictRequiredInputNotRunDoesNotForceInconclusive proves a not-run
+// from a missing required input behaves like any other not-run for verdict
+// purposes — unlike a gated skip, it does not force inconclusive.
+func TestVerdictRequiredInputNotRunDoesNotForceInconclusive(t *testing.T) {
+	checks := []evidence.Check{
+		{Name: "a", State: evidence.CheckPass},
+		{Name: "b", State: evidence.CheckNotRun, Reason: "required input PB_EXECUTION_ID unset"},
+	}
+	v, note := verdict(checks)
+	if v != evidence.VerdictPass {
+		t.Errorf("verdict = %q, want pass (a missing-required-input not-run must not force inconclusive); note=%q", v, note)
+	}
+}
+
+// ------------------------------------------------------------- missing exercise file
+
+// TestRunCheckExecMissingExerciseFileIsNotRun proves an exec exercise that is
+// unambiguously a bare file reference to a nonexistent file records not-run
+// (ADR-0012 preflight-class problem), never a poisoning fail.
+func TestRunCheckExecMissingExerciseFileIsNotRun(t *testing.T) {
+	r := ready(manifest.CheckSpec{Name: "e2e", Level: "L2", Exercise: "tests/e2e/missing.sh"})
+	checks := runChecks(r, Opts{}, newFakeOps(), nil, false)
+	if checks[0].State != evidence.CheckNotRun {
+		t.Fatalf("state %q, want not-run", checks[0].State)
+	}
+	if !strings.Contains(checks[0].Reason, "exercise file not found") || !strings.Contains(checks[0].Reason, "tests/e2e/missing.sh") {
+		t.Errorf("reason %q should name the missing exercise file", checks[0].Reason)
+	}
+}
+
+// TestRunCheckPlaywrightMissingExerciseFileIsNotRun proves the same for the
+// playwright driver — the redcat case this gap fixes.
+func TestRunCheckPlaywrightMissingExerciseFileIsNotRun(t *testing.T) {
+	binDir := t.TempDir()
+	npx := filepath.Join(binDir, "npx")
+	if err := os.WriteFile(npx, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	r := ready(manifest.CheckSpec{Name: "e2e", Level: "L5", Driver: "playwright", Exercise: "tests/e2e/does-not-exist.spec.ts"})
+	checks := runChecks(r, Opts{}, newFakeOps(), nil, false)
+	if checks[0].State != evidence.CheckNotRun {
+		t.Fatalf("state %q, want not-run", checks[0].State)
+	}
+	if !strings.Contains(checks[0].Reason, "exercise file not found") || !strings.Contains(checks[0].Reason, "does-not-exist.spec.ts") {
+		t.Errorf("reason %q should name the missing spec file", checks[0].Reason)
+	}
+}
+
+// TestRunCheckAmbiguousShellStringStillRuns proves an ambiguous shell
+// command (not a clear file reference) is never preflight-checked for file
+// existence — it still runs and is judged on its own exit code.
+func TestRunCheckAmbiguousShellStringStillRuns(t *testing.T) {
+	r := ready(manifest.CheckSpec{Name: "x", Level: "L2", Exercise: "echo tests/e2e/nonexistent.sh", Expect: []string{"exitCode(x)==0"}})
+	ops := newFakeOps()
+	checks := runChecks(r, Opts{}, ops, nil, false)
+	if checks[0].State != evidence.CheckPass {
+		t.Errorf("state %q reason %q, want pass — an ambiguous shell string must still run", checks[0].State, checks[0].Reason)
+	}
+	if strings.Join(ops.ran, ",") != "x" {
+		t.Errorf("ran %v, want the check to have executed", ops.ran)
 	}
 }

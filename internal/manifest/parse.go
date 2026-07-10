@@ -3,6 +3,7 @@ package manifest
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,6 +38,11 @@ var validDrivers = map[string]bool{
 	"exec":       true,
 	"playwright": true,
 }
+
+// validEnvName matches a plausible environment variable name (checks[].requires
+// entries): upper-case letters, digits, and underscores, not starting with a
+// digit.
+var validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // Load reads and parses a ready.yaml at path into a Ready, then runs
 // Validate on it.
@@ -260,6 +266,7 @@ func detectSeedCycles(steps []SeedStep, seedNames map[string]bool) error {
 //  2. level is in L0-L5
 //  3. exercise is non-empty
 //  4. exercise of form "drive.<name>" references an existing drive verb
+//  5. each requires entry is a plausible env var name (^[A-Z_][A-Z0-9_]*$)
 func validateChecks(r *Ready) error {
 	checkNames := make(map[string]bool, len(r.Checks))
 	for _, c := range r.Checks {
@@ -284,6 +291,12 @@ func validateChecks(r *Ready) error {
 			verb := strings.TrimPrefix(c.Exercise, "drive.")
 			if _, ok := r.Drive[verb]; !ok {
 				return fmt.Errorf("manifest.Validate: checks[%q].exercise: drive verb %q is not defined in drive", c.Name, verb)
+			}
+		}
+
+		for _, n := range c.Requires {
+			if !validEnvName.MatchString(n) {
+				return fmt.Errorf("manifest.Validate: checks[%q].requires: %q is not a plausible env var name (want %s)", c.Name, n, validEnvName.String())
 			}
 		}
 	}

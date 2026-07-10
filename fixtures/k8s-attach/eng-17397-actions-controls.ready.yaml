@@ -48,9 +48,11 @@ resources:
 
 # Drive verbs are the REAL lyric-qa entrypoints the QA agent uses — not
 # look-alikes. IDs the scripts need (scenario/sequence/sequenceNote/app/
-# execution) are supplied by the QA agent as environment variables, exported
-# before `pb up`/`pb verify`. Reads write a JSON document the jsonpath/contains
-# predicates below assert against; `pb evidence add` claims those files.
+# execution) are supplied by the QA agent as environment variables (the
+# execution/action inputs the checks below need are declared via
+# checks[].requires, so an unexported one records honest not-run instead of a
+# hard fail). Reads write a JSON document the jsonpath/contains predicates
+# below assert against; `pb evidence add` claims those files.
 #
 # The lyric-qa scripts own their own cluster access via --env/--context (they
 # port-forward mongo/appservice internally) — pb's forwards make the localhost
@@ -87,10 +89,13 @@ drive:
 
 checks:
   # L3 — appservice is up and serving (health = TCP came up + a real GET).
+  # NOTE: appservice has no `GET /scenarios/:id` route on the deployed redcat
+  # build (confirmed live: "Cannot GET"); that surface migrated off appservice.
+  # Use /health, confirmed 200 through the pb forward.
   - name: appservice-up
     level: L3
     exercise: >-
-      curl -sf -o /dev/null "http://${resources.appservice.host}:${resources.appservice.port}/scenarios/$PB_SCENARIO_A"
+      curl -sf -o /dev/null "http://${resources.appservice.host}:${resources.appservice.port}/health"
     expect:
       - "exitCode(appservice-up)==0"
 
@@ -102,6 +107,7 @@ checks:
     exercise: "drive.read-execution"
     expect:
       - "jsonpath(execution.json,selectedAction)==$PB_EXPECTED_ACTION"
+    requires: [PB_EXECUTION_ID, PB_EXPECTED_ACTION]
 
   # L4 — stage progress: the execution advances through the SELECTED action's
   # ordered stages, each reaching a terminal SUCCEEDED state.
@@ -112,11 +118,15 @@ checks:
       - "contains(execution.json,stages,validate)"
       - "contains(execution.json,stages,transform)"
       - "contains(execution.json,stages,SUCCEEDED)"
+    requires: [PB_EXECUTION_ID, PB_EXPECTED_ACTION]
 
   # L5 — end-to-end: the run-monitor stage-log advances validate -> transform
   # -> publish in the studio UI, captured as a screenshot via the playwright
   # driver (trace/PNG sealed with provenance tool, ADR-0013). Scope: just the
   # stage-log spec; confirm the studio-ui A&C branch with the cluster owner.
+  # STATUS: tests/e2e/eng-17397-stage-log.spec.ts is not yet committed — this
+  # check surfaces honest not-run (missing driver target, ADR-0012) until the
+  # spec file lands; see known_walls below. Do not delete the check.
   - name: stage-log-observed
     level: L5
     driver: playwright
@@ -169,3 +179,11 @@ known_walls:
     recover: >-
       pass all three via --scenario-id/--sequence-id/--sequence-note-id (the
       script places them in the query string).
+  - symptom: "stage-log-observed reports not-run, never pass or fail"
+    cause: >-
+      tests/e2e/eng-17397-stage-log.spec.ts does not exist yet in this repo —
+      the L5 playwright check has no spec file to drive.
+    recover: >-
+      commit the spec file at that path before expecting this check to
+      execute; until then, not-run is the honest result (do not delete the
+      check to make the bundle look clean).

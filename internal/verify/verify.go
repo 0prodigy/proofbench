@@ -5,6 +5,9 @@ package verify
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -69,6 +72,9 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if pins := resolvePins(dir, s); len(pins) > 0 {
+		b.M.Pins = pins
+	}
 	endpoints := resolveEndpoints(r, s)
 	checks := runChecks(r, o, b, endpoints, unattached(r, s, endpoints))
 	b.M.Checks = append(b.M.Checks, checks...)
@@ -78,14 +84,66 @@ func Run(r *manifest.Ready, o Opts) (*evidence.Bundle, *Summary, error) {
 	if err := b.SetVerdict(v, note); err != nil {
 		return nil, nil, err
 	}
-	return b, &Summary{ProofLevel: level, Checks: checks, Verdict: v}, nil
+	// The bundle manifest's proofLevel stays "" (omitted; spec/v0's enum has
+	// no "none" value) when nothing passed, but the CLI-facing Summary must
+	// never render a blank "proof:" line.
+	summaryLevel := level
+	if summaryLevel == "" {
+		summaryLevel = "none"
+	}
+	return b, &Summary{ProofLevel: summaryLevel, Checks: checks, Verdict: v}, nil
+}
+
+// resolvePins collects run-pinning identifiers (PLAN §5: "run pinning — SHAs
+// /versions of everything exercised") into the bundle's manifest: the repo
+// under test's git commit, plus whatever the substrate's optional Pinner
+// capability reports (image digests, cluster context/namespace, ...). Either
+// source is omitted, never fabricated, when it can't be resolved — a
+// Pinner error is not fatal to the run, since pins are provenance, not a
+// check.
+func resolvePins(dir string, s substrate.Substrate) map[string]string {
+	out := map[string]string{}
+	if sha, ok := repoPin(dir); ok {
+		out["repo"] = sha
+	}
+	if pinner, ok := s.(substrate.Pinner); ok {
+		if sp, err := pinner.Pins(); err == nil {
+			for k, v := range sp {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// repoPin resolves the git commit the repo under test is pinned to via
+// `git -C dir rev-parse HEAD`, suffixed "-dirty" when `git status --porcelain`
+// reports uncommitted changes. Absent git (dir isn't a checkout, or git isn't
+// installed) omits the pin entirely — never a fabricated value.
+func repoPin(dir string) (string, bool) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", false
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", false
+	}
+	if statusOut, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output(); err == nil && strings.TrimSpace(string(statusOut)) != "" {
+		sha += "-dirty"
+	}
+	return sha, true
 }
 
 // runChecks executes every declared check independently — one failure never
 // aborts the rest — and returns one tri-state result per CheckSpec, in order.
 // endpoints (resource/service name -> host:port, resolved via the substrate's
 // optional Endpoints capability) are substituted into exercise strings so the
-// drive verbs stay substrate-blind (they always dial localhost).
+// drive verbs stay substrate-blind (they always dial localhost). A check
+// declaring env inputs it requires (spec.Requires) that are unset in the
+// process environment at verify time records not-run rather than hard-failing
+// — the operator-supplied ids these checks need (e.g. an execution ID) are
+// documented on the check itself, not just in a fixture comment.
 func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]string, notAttached bool) []evidence.Check {
 	out := make([]evidence.Check, 0, len(r.Checks))
 	for _, spec := range r.Checks {
@@ -97,6 +155,18 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 		if len(o.Only) > 0 && !slices.Contains(o.Only, spec.Name) {
 			c.State = evidence.CheckNotRun
 			c.Reason = "filtered"
+			out = append(out, c)
+			continue
+		}
+		if g, gated := gateFor(r, spec); gated {
+			c.State = evidence.CheckNotRun
+			c.Reason = "gated: " + g.Reason
+			out = append(out, c)
+			continue
+		}
+		if name, missing := missingRequires(spec.Requires); missing {
+			c.State = evidence.CheckNotRun
+			c.Reason = fmt.Sprintf("required input %s unset", name)
 			out = append(out, c)
 			continue
 		}
@@ -115,6 +185,38 @@ func runChecks(r *manifest.Ready, o Opts, ops bundleOps, endpoints map[string]st
 		out = append(out, runCheck(r, spec, o, ops, endpoints, c))
 	}
 	return out
+}
+
+// missingRequires reports the first name in requires whose environment
+// variable is unset or empty in the current process, if any — the honest-
+// gating signal for a check that declares operator-supplied env inputs it
+// needs (PLAN §3.7-style: never a hardcoded assumption they're set).
+func missingRequires(requires []string) (name string, missing bool) {
+	for _, n := range requires {
+		if os.Getenv(n) == "" {
+			return n, true
+		}
+	}
+	return "", false
+}
+
+// gateFor reports the manifest gate (PLAN §3.7 "human gates as schema")
+// matching spec, if any: a gates[].on naming either the check's resolved
+// drive verb (its exercise's "drive.<verb>" indirection) or the check's own
+// name. Manifests with no gates — the vast majority, and every manifest
+// written before this feature — always report no match, so behavior is
+// unchanged for them.
+func gateFor(r *manifest.Ready, spec manifest.CheckSpec) (manifest.Gate, bool) {
+	if len(r.Gates) == 0 {
+		return manifest.Gate{}, false
+	}
+	verb, _ := strings.CutPrefix(spec.Exercise, "drive.")
+	for _, g := range r.Gates {
+		if g.On == spec.Name || (verb != "" && g.On == verb) {
+			return g, true
+		}
+	}
+	return manifest.Gate{}, false
 }
 
 // resolveExercise turns a CheckSpec exercise into a shell command:
@@ -272,6 +374,20 @@ func runCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps,
 		c.Reason = unattachedReason(o.Substrate, unresolved)
 		return c
 	}
+	// A missing exercise input (the driver would shell out against a file
+	// that isn't there) is a preflight-class problem (ADR-0012), not a
+	// verdict-poisoning failure: not-run with a reason naming the path.
+	if path, ok := exerciseFilePath(spec.Driver, exercise); ok {
+		full := path
+		if !filepath.IsAbs(full) {
+			full = filepath.Join(dir, full)
+		}
+		if _, statErr := os.Stat(full); statErr != nil {
+			c.State = evidence.CheckNotRun
+			c.Reason = fmt.Sprintf("exercise file not found: %s", path)
+			return c
+		}
+	}
 	spec.Exercise = exercise // already resolved; the driver's own substitution becomes a no-op
 	env := checkdriver.Env{Dir: dir, Endpoints: endpoints}
 	if _, err := d.Exercise(spec, env, capture); err != nil {
@@ -280,6 +396,46 @@ func runCheck(r *manifest.Ready, spec manifest.CheckSpec, o Opts, ops bundleOps,
 		return c
 	}
 	return evaluateExpects(ops, spec.Expect, c)
+}
+
+// exerciseFilePath reports whether exercise (already endpoint-resolved) is
+// unambiguously a bare file reference, and if so, the path — a
+// preflight-class check (ADR-0012), never a heuristic that risks running an
+// ordinary shell command. The playwright driver's exercise IS a spec file
+// path by construction, so it always qualifies. The exec driver's exercise
+// only qualifies when it is a single whitespace-free token free of shell
+// metacharacters that also looks like a path (a "/" or a recognized
+// script/spec extension) — an ambiguous shell string ("npm test", "curl ...")
+// is left alone and still runs, matching or failing on its own merits.
+func exerciseFilePath(driver, exercise string) (string, bool) {
+	trimmed := strings.TrimSpace(exercise)
+	if trimmed == "" {
+		return "", false
+	}
+	if driver == checkdriver.KindPlaywright {
+		return trimmed, true
+	}
+	if driver != "" && driver != checkdriver.KindExec {
+		return "", false
+	}
+	if strings.ContainsAny(trimmed, " \t\n|&;()<>$`\\*?[]{}'\"#~") {
+		return "", false
+	}
+	if strings.Contains(trimmed, "/") || hasScriptExt(trimmed) {
+		return trimmed, true
+	}
+	return "", false
+}
+
+// hasScriptExt reports whether s ends in a common test/script extension —
+// part of exerciseFilePath's "clear file reference" heuristic.
+func hasScriptExt(s string) bool {
+	for _, ext := range []string{".spec.ts", ".spec.js", ".test.ts", ".test.js", ".sh", ".py", ".js", ".ts"} {
+		if strings.HasSuffix(s, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // evaluateExpects runs each expect predicate via ops.Assert, recording every
@@ -351,11 +507,13 @@ func levelNum(s string) (int, bool) {
 }
 
 // verdict derives the bundle verdict plus a counts note from the check
-// results: pass iff no check failed and at least one passed; fail if any
-// failed (naming them); else inconclusive.
+// results: pass iff no check failed, at least one passed, and no check was
+// skipped for being gated (PLAN §3.7: a gated skip must read as inconclusive,
+// never as a fake pass); fail if any failed (naming them); else inconclusive.
 func verdict(checks []evidence.Check) (string, string) {
 	var pass, fail, notRun int
 	var failedNames []string
+	gated := false
 	for _, c := range checks {
 		switch c.State {
 		case evidence.CheckPass:
@@ -365,6 +523,9 @@ func verdict(checks []evidence.Check) (string, string) {
 			failedNames = append(failedNames, c.Name)
 		default:
 			notRun++
+			if strings.HasPrefix(c.Reason, "gated: ") {
+				gated = true
+			}
 		}
 	}
 	if fail > 0 {
@@ -373,7 +534,7 @@ func verdict(checks []evidence.Check) (string, string) {
 		return evidence.VerdictFail, note
 	}
 	note := fmt.Sprintf("%d pass, %d fail, %d not-run", pass, fail, notRun)
-	if pass > 0 {
+	if pass > 0 && !gated {
 		return evidence.VerdictPass, note
 	}
 	return evidence.VerdictInconclusive, note
