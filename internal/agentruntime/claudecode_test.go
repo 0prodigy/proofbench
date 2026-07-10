@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,21 @@ EOF
 	}
 	if !strings.Contains(argvStr, "--no-session-persistence") {
 		t.Errorf("argv missing --no-session-persistence: %s", argvStr)
+	}
+
+	fields := strings.Fields(argvStr)
+	schemaIdx := -1
+	for i, f := range fields {
+		if f == "--json-schema" {
+			schemaIdx = i
+			break
+		}
+	}
+	if schemaIdx == -1 || schemaIdx+1 >= len(fields) {
+		t.Fatalf("argv missing --json-schema value: %s", argvStr)
+	}
+	if !json.Valid([]byte(fields[schemaIdx+1])) {
+		t.Errorf("--json-schema value must be inline JSON, not a path, got %q", fields[schemaIdx+1])
 	}
 }
 
@@ -299,6 +315,44 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","sessi
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("RunRound took %v after a 200ms timeout, want a prompt return (< 5s)", elapsed)
+	}
+}
+
+func TestClaudeCodeArgRejected(t *testing.T) {
+	// Reproduces the real-world moat-blocker: the CLI rejects the invocation
+	// itself (a bad --json-schema value) before a single round begins — no
+	// stream-json line is ever written, only a stderr usage/arg error. This
+	// must classify as StatusNotRun ("the round never produced a result"),
+	// not StatusInconclusive ("ran but produced no proposal").
+	writeFakeClaude(t, versionStub+`
+echo "Error: --json-schema is not valid JSON: JSON Parse error: Unexpected token '.'" >&2
+exit 1
+`)
+	rt, err := New(KindClaudeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Preflight(); err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, ProposalSchemaFile), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := rt.RunRound(RoundOpts{Dir: t.TempDir(), Prompt: "explore", MaxTurns: 3, OutDir: outDir})
+	if err != nil {
+		t.Fatalf("RunRound: %v", err)
+	}
+	if res.Status != StatusNotRun {
+		t.Fatalf("Status = %q, want %q (reason %q)", res.Status, StatusNotRun, res.Reason)
+	}
+	if !strings.Contains(res.Reason, "runtime rejected invocation") {
+		t.Errorf("Reason = %q, want it to name runtime rejected invocation", res.Reason)
+	}
+	if !strings.Contains(res.Reason, "not valid JSON") {
+		t.Errorf("Reason = %q, want it to quote the stderr first line", res.Reason)
 	}
 }
 

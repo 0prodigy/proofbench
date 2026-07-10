@@ -156,7 +156,20 @@ func (r *claudeCodeRuntime) RunRound(o RoundOpts) (*RoundResult, error) {
 		timeout = defaultRoundTimeout
 	}
 
+	// The CLI's --json-schema flag takes the schema as inline JSON text, not
+	// a file path — Explore already wrote the same bytes to schemaPath for
+	// the evidence record; RunRound re-reads and compacts them for the argv
+	// value rather than passing the path itself.
 	schemaPath := filepath.Join(o.OutDir, ProposalSchemaFile)
+	schemaRaw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("agentruntime: claude-code RunRound: read %s: %w", schemaPath, err)
+	}
+	var schemaJSON bytes.Buffer
+	if err := json.Compact(&schemaJSON, schemaRaw); err != nil {
+		return nil, fmt.Errorf("agentruntime: claude-code RunRound: %s is not valid JSON: %w", schemaPath, err)
+	}
+
 	argv := []string{
 		bin,
 		"-p", o.Prompt,
@@ -166,7 +179,7 @@ func (r *claudeCodeRuntime) RunRound(o RoundOpts) (*RoundResult, error) {
 		"--permission-mode", "dontAsk",
 		"--allowedTools", "Read,Glob,Grep",
 		"--disallowedTools", "WebFetch,WebSearch",
-		"--json-schema", schemaPath,
+		"--json-schema", schemaJSON.String(),
 		"--no-session-persistence",
 	}
 
@@ -288,10 +301,10 @@ type systemRecord struct {
 // plus any api_retry error categories observed mid-stream. A single line
 // beyond maxRoundLogLine is tolerated — skipped, not fatal — so one runaway
 // line can't take down classification of an otherwise-good round.
-func scanRoundLog(logPath string) (last *resultRecord, categories map[string]bool, err error) {
+func scanRoundLog(logPath string) (last *resultRecord, categories map[string]bool, hadAnyLine bool, err error) {
 	f, err := os.Open(logPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("agentruntime: claude-code: open %s: %w", logPath, err)
+		return nil, nil, false, fmt.Errorf("agentruntime: claude-code: open %s: %w", logPath, err)
 	}
 	defer f.Close()
 
@@ -304,6 +317,7 @@ func scanRoundLog(logPath string) (last *resultRecord, categories map[string]boo
 		if len(line) == 0 {
 			continue
 		}
+		hadAnyLine = true
 		var probe struct{ Type, Subtype string }
 		if err := json.Unmarshal(line, &probe); err != nil {
 			continue // not a JSON record this protocol version defines
@@ -328,16 +342,16 @@ func scanRoundLog(logPath string) (last *resultRecord, categories map[string]boo
 	// whatever was already scanned rather than failing the whole round over
 	// one runaway line.
 	if serr := sc.Err(); serr != nil && !errors.Is(serr, bufio.ErrTooLong) {
-		return last, categories, fmt.Errorf("agentruntime: claude-code: scan %s: %w", logPath, serr)
+		return last, categories, hadAnyLine, fmt.Errorf("agentruntime: claude-code: scan %s: %w", logPath, serr)
 	}
-	return last, categories, nil
+	return last, categories, hadAnyLine, nil
 }
 
 // classifyRoundLog maps the round's on-disk log to a RoundResult per the
 // tri-state mapping: never pass/fail, always a status honestly derived from
 // what was observed (or not observed).
 func classifyRoundLog(logPath, stderrPath string, waitErr error, dur time.Duration) *RoundResult {
-	last, categories, err := scanRoundLog(logPath)
+	last, categories, hadAnyLine, err := scanRoundLog(logPath)
 	if err != nil {
 		return &RoundResult{
 			Status:     StatusInconclusive,
@@ -345,10 +359,10 @@ func classifyRoundLog(logPath, stderrPath string, waitErr error, dur time.Durati
 			DurationMS: dur.Milliseconds(),
 		}
 	}
-	return classifyResult(last, categories, logPath, stderrPath, waitErr, dur)
+	return classifyResult(last, categories, hadAnyLine, logPath, stderrPath, waitErr, dur)
 }
 
-func classifyResult(last *resultRecord, categories map[string]bool, logPath, stderrPath string, waitErr error, dur time.Duration) *RoundResult {
+func classifyResult(last *resultRecord, categories map[string]bool, hadAnyLine bool, logPath, stderrPath string, waitErr error, dur time.Duration) *RoundResult {
 	// A terminal success with structured output wins unconditionally — a
 	// mid-stream api_retry that recovered (e.g. a transient 529/rate-limit)
 	// must not reclassify a good round as not-run.
@@ -375,6 +389,15 @@ func classifyResult(last *resultRecord, categories map[string]bool, logPath, std
 	}
 
 	if last == nil {
+		// No result record and no turn count observed at all: this can be a
+		// genuine mid-round death (inconclusive) or the CLI never accepting
+		// the invocation in the first place (not-run) — e.g. an arg-parse
+		// error printed to stderr before a single stream-json line was
+		// written. Only the latter gets reclassified; a round that emitted
+		// any stdout at all is presumed to have actually started.
+		if reason, ok := notRunReason(hadAnyLine, dur, stderrPath); ok {
+			return &RoundResult{Status: StatusNotRun, Reason: reason, DurationMS: dur.Milliseconds()}
+		}
 		return &RoundResult{Status: StatusInconclusive, Reason: protocolErrorReason(logPath, stderrPath, waitErr), DurationMS: dur.Milliseconds()}
 	}
 
@@ -408,6 +431,78 @@ func resultToRoundResult(last *resultRecord, dur time.Duration) *RoundResult {
 		res.DurationMS = dur.Milliseconds()
 	}
 	return res
+}
+
+// notRunProcessThreshold bounds how quickly a process must have exited,
+// with zero stdout lines observed, to be treated as never having started a
+// round at all (vs. a slow protocol-breaking death mid-round).
+const notRunProcessThreshold = 1 * time.Second
+
+// cliUsageErrMarkers are stderr substrings (checked case-insensitively) the
+// claude binary itself emits when it rejects an invocation before running
+// any round — arg parsing, unknown flags, malformed flag values — as
+// distinct from an in-round failure.
+var cliUsageErrMarkers = []string{
+	"is not valid json",
+	"unknown option",
+	"unknown argument",
+	"unrecognized argument",
+	"invalid option",
+	"invalid argument",
+	"usage:",
+}
+
+// notRunReason reports whether a round with no result record should be
+// classified StatusNotRun rather than StatusInconclusive: either stderr's
+// first line matches a known CLI usage/arg-parse rejection, or the process
+// exited near-instantly (notRunProcessThreshold) having emitted no stdout
+// lines at all — both signal the runtime never actually started a round.
+func notRunReason(hadAnyLine bool, dur time.Duration, stderrPath string) (string, bool) {
+	firstLine := firstStderrLine(stderrPath)
+	switch {
+	case firstLine != "" && looksLikeCLIUsageError(firstLine):
+		return firstLine + " — runtime rejected invocation", true
+	case !hadAnyLine && dur < notRunProcessThreshold:
+		if firstLine != "" {
+			return firstLine + " — runtime rejected invocation", true
+		}
+		return "runtime rejected invocation (exited immediately with no output)", true
+	default:
+		return "", false
+	}
+}
+
+// looksLikeCLIUsageError reports whether line reads like the claude binary
+// rejecting its own invocation (bad flag, bad flag value) rather than a
+// failure that occurred once a round was underway.
+func looksLikeCLIUsageError(line string) bool {
+	low := strings.ToLower(line)
+	for _, m := range cliUsageErrMarkers {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstStderrLine returns the first non-empty trimmed line of the file at
+// stderrPath, or "" if it can't be read or is empty — never a fatal error,
+// since this is only used to enrich a reason string.
+func firstStderrLine(stderrPath string) string {
+	f, err := os.Open(stderrPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxRoundLogLine)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // protocolErrorReason names where the raw evidence lives (the round log and
