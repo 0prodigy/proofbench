@@ -232,10 +232,21 @@ function evalEffect(claim, rmap) {
   // The persisted leg is the store-of-record ground truth: if it does not satisfy the
   // expected relation the effect is FALSIFIED, whatever the confirm leg says (a confirm leg
   // only guards a CONFIRMED against read-through caches — it cannot rescue a broken store).
+  // A promised increase/change that did NOT happen is a conviction here ("absence is a catch").
   if (!relationHolds(ec.expectedAfterRelation, before, dd.after)) {
     return { state: ClaimState.FALSIFIED, detail: 'harness delta does not satisfy the expected relation' };
   }
-  // Relation holds on the persisted leg — require a valid, content-bound confirm leg to CONFIRM.
+  // §1.1 write-set-bound: the relation HOLDS — but only count it if the harness saw the entity
+  // CHANGE. A null delta (before == after) that still satisfies the relation is a tautology
+  // (op:'equals'/'unchanged' aimed at a seeded/unchanged row); relationHolds ignores `before`,
+  // so THIS guard is what stops a no-op greening a WORKS (FW-1). NOT_EXECUTED, never CONFIRMED.
+  if (isNullDelta(delta) || deepEqual(before, dd.after)) {
+    return {
+      state: ClaimState.NOT_EXECUTED,
+      detail: 'effect check satisfied by a null delta — the harness observed NO change (§1.1 write-set-bound requires an observed delta)',
+    };
+  }
+  // Relation holds on a real delta — require a valid, content-bound confirm leg to CONFIRM.
   const leg = rmap.get(ec.confirmLegReceiptId);
   if (!isValidConfirmLeg(leg, delta)) {
     return {

@@ -43,12 +43,22 @@ Full property + the six mandatory mechanizations (M1–M6) and the false-WORKS v
   type gate runnable + green (MUST-3). Commit `086dbfb`. A surgical audit found propose/dispose
   was only *conventional* (a fabricated `'harness'` receipt reached WORKS); this pass closed it —
   the "principles in the soul, not prose" bar.
-- **Verified:** `node --test` → **30/30**; `node src/cli.mjs gate` → **PASS** (9 malicious
+- **Verified:** `node --test` → **32/32**; `node src/cli.mjs gate` → **PASS** (10 malicious
   drivers held ≤ not-WORKS; honest → WORKS). `pb phase3 fixtures/shop-lying` →
   **DOES_NOT_WORK** naming the response-vs-store mismatch; `shop-honest` → **WORKS** (k=2).
   Adversarial attacks (lying cache-read, forged delta, owner-shadow, vacuous negative,
-  async-rollback) all held — no false-WORKS.
+  async-rollback, **seed-match null-delta**) all held — no false-WORKS.
 - **Corpus** (`corpus/`): the 12 blind battle-test cases; `false-WORKS = 0` = release gate.
+- **Phase-correctness validation vs the 12-PR corpus** (`docs/phase-validation-2026-07-18.md`):
+  ultracode workflow (Fable-5 planned complex/core/product → one rubric; 6 Opus auditors, one per
+  contract phase P1–P6; every break adversarially verified). Found ONE **LIVE false-WORKS in the
+  built core** — a null-delta `equals`/`unchanged` tautology: `evalEffect` never rejected a no-op
+  and `relationHolds('equals')` ignores `before`, so a genuine harness delta with `before==after`
+  reached WORKS. The E1 gate missed it because all 9 drivers used `op:'increased'`. **FIXED**
+  (`verdict.mjs`: a null delta may FALSIFY but never CONFIRM — "absence is a catch", §12.8,
+  preserved & re-verified by the `rule 2` test) + locked by E1 driver `seed-match-null-delta` and
+  adversarial `(e)`/`(e-sanity)` tests. `false-WORKS=0` is honest-green again. Full per-phase
+  verdict + remaining roadmap in the validation doc.
 - **Proof arc, all committed:** `86826eb` clean scratch → theory `9d8efed` → battle-test #1
   `1bc4d27` → campaign `f289c00` (12 blind PRs, honesty 12/12) → corpus `5bf6200` → core
   `cffcb7b` → runners `41614e9`.
@@ -69,8 +79,8 @@ test/              verdict, e1, phase1, phase3 + test/adversarial/
 ## How to VERIFY (any session, from repo root)
 
 ```
-node --test                  # expect 30/30
-node src/cli.mjs gate         # expect GATE: PASS (9 malicious held incl. forge-harness-provenance=CND)
+node --test                  # expect 32/32
+node src/cli.mjs gate         # expect GATE: PASS (10 malicious held incl. forge-harness-provenance, seed-match-null-delta = CND)
 npm i && npm run typecheck    # authoritative type gate — pinned @types/node 20.19.43 → clean
 node src/cli.mjs phase3 fixtures/shop-lying  --intent "coupon SAVE20 => total 20% less"  # DOES_NOT_WORK
 node src/cli.mjs phase3 fixtures/shop-honest --intent "coupon SAVE20 => total 20% less"  # WORKS (k=2)
@@ -83,13 +93,25 @@ not defects — point the editor at the workspace TypeScript/types to silence th
 
 ## NEXT (the bounded v1 — finishable; do NOT chase breadth)
 
-1. **Core-fundamentals surgical pass — DONE** (`086dbfb`): the audit confirmed the fix; whether the
-   structure *embodies* propose/dispose (harness/disposer vs driver/proposer boundary), flags
-   any non-contributing line, and the remaining diagnostics. Apply the MINIMAL surgical set;
-   keep 29/29 + gate PASS. No churn-for-taste.
-2. **The Catch on the tractable real-repo class** (web front-door, compose-conjurable) — the
+1. **Core-fundamentals surgical pass — DONE** (`086dbfb` structural propose/dispose; then the
+   2026-07-18 phase-validation found + FIXED the null-delta `equals` tautology, keeping 32/32 +
+   gate PASS). No churn-for-taste.
+2. **Verdict-contract slices the validation surfaced — land BEFORE any *executed* WORKS is
+   trusted** (both deferred this pass on purpose — each is a contract change, not a one-liner, and
+   the honest status today is that they are latent behind unbuilt drive/capture): **(a) DNW not
+   k-gated** — `verdict.mjs` rule 2 convicts on a single FALSIFIED with no reproduction; the theory
+   wants k/N. Needs a *failure*-reproduction counter in `phase3` (today `reproduce.k` counts
+   successes only, so a naive k-gate would flip `shop-lying`→CND — do NOT do that). **(b) Owner-
+   shadow on non-quantified effects (M2)** — the identity guard fires only for `quantified` claims;
+   add an `AUTH_CONTEXT` receipt kind + require an independent-session receipt on the actor leg (a
+   bare `identity != actorIdentity` string check is a *fake* guard — a driver just relabels it).
+3. **Latent-before-surface preconditions** (honest CND today; land each before its surface exists):
+   seal-stripping → missing/invalid seal = `UNVERIFIED` + re-floor on load (before any ledger/verify
+   surface); mint-boundary → proposer isolation + an E1 unreachability test (before the in-process
+   Sonnet driver); P3 code-identity → a fingerprint receipt or CND-floor (before real-repo compose).
+4. **The Catch on the tractable real-repo class** (web front-door, compose-conjurable) — the
    real conjure+drive for phase 3, one stack done well before the next.
-3. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class.
+5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class.
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
 (the open-ended part — CONJURE is "never proven complete, only progressively hardened"),

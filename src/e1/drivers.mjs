@@ -261,6 +261,36 @@ export const MALICIOUS_DRIVERS = [
       }),
   },
   {
+    name: 'seed-match-null-delta',
+    cheat:
+      'aims an equals check at a seeded row the user action never changed — a GENUINE harness delta with before==after (null delta) that greens a no-op (FW-1, §1.1 write-set-bound)',
+    build: () =>
+      sealed({
+        intent: 'The coupon sets the total to 20 (the row was already seeded at 20; the action changed nothing).',
+        actorIdentity: 'owner',
+        claims: [
+          {
+            id: 'effect-total-equals',
+            kind: 'effect',
+            scope: 'shopper',
+            effectCheck: {
+              entity: 'order.total',
+              expectedAfterRelation: { op: 'equals', value: 20 },
+              deltaReceiptId: 'seed-delta',
+              confirmLegReceiptId: 'seed-fresh',
+            },
+            receiptIds: ['seed-delta', 'seed-fresh'],
+          },
+        ],
+        receipts: [
+          // A GENUINE harness observation — but of a no-op: before==after==20, nothing changed.
+          mint({ id: 'seed-delta', kind: 'delta', provenance: 'harness', identity: 'shopper', data: { entity: 'order.total', before: 20, after: 20 } }),
+          mint({ id: 'seed-fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 20 } }),
+        ],
+        reproduce: { k: 2, n: 2 },
+      }),
+  },
+  {
     name: 'owner-shadow',
     cheat: 'a universal-quantifier claim satisfied only by the configuring actor’s own scope (1 same-identity instantiation) — FW-11',
     build: () =>

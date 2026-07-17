@@ -306,3 +306,69 @@ test('(d sanity) adding the attempt receipt to the negative earns WORKS', () => 
   });
   assert.equal(evaluate(b), Verdict.WORKS);
 });
+
+// ── (e) Seed-match null-delta tautology (FW-1 / §1.1 write-set-bound) ─────────────────
+//
+// An effect claim is admissible only if it binds an entity the harness saw CHANGE. An
+// op:'equals'/'unchanged' check aimed at a row the action never changed (before == after) is a
+// tautology: relationHolds ignores `before`, so a GENUINE harness delta of a no-op would
+// otherwise green WORKS. evalEffect rejects a null delta for EVERY op → NOT_EXECUTED → CND.
+
+test('(e) seed-match: a null-delta (before==after) equals check must NOT reach WORKS', () => {
+  const b = sealed({
+    intent: 'The coupon sets the total to 20 (the row was already seeded at 20).',
+    actorIdentity: 'owner',
+    claims: [
+      {
+        id: 'effect-total-equals',
+        kind: 'effect',
+        scope: 'shopper',
+        effectCheck: {
+          entity: 'order.total',
+          expectedAfterRelation: { op: 'equals', value: 20 },
+          deltaReceiptId: 'seed-delta',
+          confirmLegReceiptId: 'seed-fresh',
+        },
+        receiptIds: ['seed-delta', 'seed-fresh'],
+      },
+    ],
+    receipts: [
+      // Genuine harness receipts — but of a no-op: before == after == 20.
+      mint({ id: 'seed-delta', kind: 'delta', provenance: 'harness', identity: 'shopper', data: { entity: 'order.total', before: 20, after: 20 } }),
+      mint({ id: 'seed-fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 20 } }),
+    ],
+    reproduce: { k: 2, n: 2 },
+  });
+  assert.ok(b.seal, 'sealed bundle carries a seal');
+  assert.equal(verifySeal(b, b.seal.publicKey), true, 'seal is intact — the lie is structural, not a tamper');
+  assert.notEqual(evaluate(b), Verdict.WORKS, 'a no-op (null delta) can never confirm an effect');
+  assert.equal(evaluate(b), Verdict.COULD_NOT_DETERMINE);
+});
+
+test('(e sanity) the SAME equals check on a REAL change (before != after) still earns WORKS', () => {
+  // Behaviour-preserving control: only `before` differs from the (e) breach (40 -> 20 is a real delta).
+  const b = sealed({
+    intent: 'The coupon changes the total from 40 to 20.',
+    actorIdentity: 'owner',
+    claims: [
+      {
+        id: 'effect-total-equals',
+        kind: 'effect',
+        scope: 'shopper',
+        effectCheck: {
+          entity: 'order.total',
+          expectedAfterRelation: { op: 'equals', value: 20 },
+          deltaReceiptId: 'store-delta',
+          confirmLegReceiptId: 'fresh',
+        },
+        receiptIds: ['store-delta', 'fresh'],
+      },
+    ],
+    receipts: [
+      mint({ id: 'store-delta', kind: 'delta', provenance: 'harness', identity: 'shopper', data: { entity: 'order.total', before: 40, after: 20 } }),
+      mint({ id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 20 } }),
+    ],
+    reproduce: { k: 2, n: 2 },
+  });
+  assert.equal(evaluate(b), Verdict.WORKS);
+});
