@@ -37,7 +37,13 @@ Full property + the six mandatory mechanizations (M1–M6) and the false-WORKS v
   Deterministic tri-state verdict; real ed25519 seal (tamper → UNVERIFIED). Commit `cffcb7b`.
 - **Phase runners + fixtures + adversarial suite**: `src/phases/phase{1,2,3}.mjs`,
   `fixtures/shop-{honest,lying}`, `test/adversarial/`. Commit `41614e9`.
-- **Verified:** `node --test` → **29/29**; `node src/cli.mjs gate` → **PASS** (8 malicious
+- **Propose/dispose made STRUCTURAL** (`src/harness.mjs` mint + `newBundle` forces `agent`): a
+  fabricated `'harness'`-labelled receipt is downgraded to `agent` → verdict CND; the new
+  `forge-harness-provenance` driver proves it. Fresh-session confirm leg content-bound (MUST-2);
+  type gate runnable + green (MUST-3). Commit `086dbfb`. A surgical audit found propose/dispose
+  was only *conventional* (a fabricated `'harness'` receipt reached WORKS); this pass closed it —
+  the "principles in the soul, not prose" bar.
+- **Verified:** `node --test` → **30/30**; `node src/cli.mjs gate` → **PASS** (9 malicious
   drivers held ≤ not-WORKS; honest → WORKS). `pb phase3 fixtures/shop-lying` →
   **DOES_NOT_WORK** naming the response-vs-store mismatch; `shop-honest` → **WORKS** (k=2).
   Adversarial attacks (lying cache-read, forged delta, owner-shadow, vacuous negative,
@@ -63,15 +69,21 @@ test/              verdict, e1, phase1, phase3 + test/adversarial/
 ## How to VERIFY (any session, from repo root)
 
 ```
-node --test                 # expect 29/29
-node src/cli.mjs gate        # expect GATE: PASS
+node --test                  # expect 30/30
+node src/cli.mjs gate         # expect GATE: PASS (9 malicious held incl. forge-harness-provenance=CND)
+npm i && npm run typecheck    # authoritative type gate — pinned @types/node 20.19.43 → clean
 node src/cli.mjs phase3 fixtures/shop-lying  --intent "coupon SAVE20 => total 20% less"  # DOES_NOT_WORK
 node src/cli.mjs phase3 fixtures/shop-honest --intent "coupon SAVE20 => total 20% less"  # WORKS (k=2)
 ```
 
+**Type gate authority:** `npm run typecheck` (pinned `@types/node` 20.19.43 + lockfile) is the
+green, authoritative gate. Editor LSP diagnostics from a *different* ambient `@types/node`
+(e.g. `phase3` `child.on`, a fixture's `IncomingMessage.signal`) are version-mismatch artifacts,
+not defects — point the editor at the workspace TypeScript/types to silence them.
+
 ## NEXT (the bounded v1 — finishable; do NOT chase breadth)
 
-1. **Core-fundamentals surgical pass** (in progress): a read-only audit is checking whether the
+1. **Core-fundamentals surgical pass — DONE** (`086dbfb`): the audit confirmed the fix; whether the
    structure *embodies* propose/dispose (harness/disposer vs driver/proposer boundary), flags
    any non-contributing line, and the remaining diagnostics. Apply the MINIMAL surgical set;
    keep 29/29 + gate PASS. No churn-for-taste.
