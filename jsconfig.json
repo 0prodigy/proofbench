@@ -11,5 +11,5 @@
     "types": ["node"]
   },
   "typeAcquisition": { "enable": true, "include": ["node"] },
-  "include": ["src/**/*.mjs", "test/**/*.mjs"]
+  "include": ["src/**/*.mjs", "test/**/*.mjs", "corpus/**/*.mjs"]
 }
