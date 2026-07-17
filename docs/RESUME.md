@@ -126,6 +126,13 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    - **Setup recipe:** a per-repo `pb-recipe-v1` JSON (generalizes `fixtures/*/pb-fixture.json`) —
      build-from-tree@SHA, conjure, out-of-band tap cmd, fresh-world recreate, disclosed REST setup,
      front-door URL. The **walk stays agent-proposed** (never recipe data — avoids the Gherkin grave).
+   - **REPO-AGNOSTIC, NEVER OVERFIT TO n8n (Akash, 2026-07-18).** n8n is case **#1 of N**, not THE
+     case — the pipeline is recipe-driven (no repo hardcoded in `conjure/storetap/drive`) and
+     **verification RANDOMLY PICKS a recipe from the corpus pool each run**, so any n8n-specific
+     assumption surfaces immediately. Grow the pool across the 12-PR corpus (a SQLite AND a Postgres
+     repo, a form AND a CRUD/admin front door). A repo whose surface isn't built yet (canvas =
+     documenso, egress = ghost, very-big = posthog/sentry) declines to **honest CND** — never a
+     forced n8n-shaped fit. The release gate runs the FULL pool; iteration random-picks.
 4. **Real-repo Catch roadmap (M1→M7).** First target **n8n #7130** (single-process, plain-DOM Form
    Trigger, SQLite store; merge SHA `3ddc176dfa2d3d99a328a29a3a8613e35ff456a0`, n8n@1.12.0);
    cal.com is the evidence-picked fallback if conjure is infeasible. **Progress:** M1 spike ✅
@@ -133,10 +140,16 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `recipes/n8n-form-trigger-pr7130/`) · **M3 ✅ `fcd2d4d`, hand-verified** (`src/conjure.mjs` +
    `pb conjure`: builds real n8n from-tree, mints code-identity fingerprint = P3-1 landed, form
    serves; note from-tree build is NOT bit-reproducible → git SHA is the stable identity,
-   image_digest is a per-build attestation) · **M4 store-tap — IN FLIGHT** (`src/storetap.mjs`:
-   `docker exec sqlite3` out-of-band delta, mints the persisted leg). Then → M5 browser drive
-   (containerized selenium + W3C WebDriver via fetch; **owner-shadow becomes *testable***) → M6 the
-   n8n Catch end-to-end (blind→EXECUTED; differential merge-SHA=WORKS vs parent-SHA≠WORKS) → M7
+   image_digest is a per-build attestation) · **M4 ✅ `0538fa3`** (`src/storetap.mjs`: `docker exec
+   sqlite3` out-of-band delta, mints the persisted leg; engine-guarded to sqlite). **Reshape (anti-
+   overfit, §3):** before M5, GROW THE POOL + RANDOMIZE. In flight: **documenso + medusa conjure
+   spikes** (Postgres/compose — force the psql tap adapter + compose conjure + a 2nd/3rd recipe).
+   Near-term: **M4b psql tap adapter** (the engine-guard's psql branch, from the spikes' facts) ·
+   **more recipes** (`recipes/<repo>/`) · **random-pick verification harness** (pick a corpus recipe
+   each run). Then → M5 browser drive
+   (containerized selenium + W3C WebDriver via fetch, repo-agnostic; **owner-shadow becomes
+   *testable***) → M6 the Catch end-to-end on a RANDOM repo (blind→EXECUTED; differential
+   merge-SHA=WORKS vs parent-SHA≠WORKS) → M7
    adversarial. **Latent fixes land WITH their surface:** seal-stripping @ M6/persist; mint-boundary
    isolation + P1 `quantified` @ M7 proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
