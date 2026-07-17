@@ -15,10 +15,18 @@
 import { createHash, sign, verify, createPublicKey } from 'node:crypto';
 import { verdict } from './verdict.mjs';
 
-/** Stable, key-sorted JSON so the manifest digest is order-independent. */
+/**
+ * Stable, key-sorted JSON so the manifest digest is order-independent.
+ * @param {any} value
+ * @returns {string}
+ */
 function stableStringify(value) {
   return JSON.stringify(sortKeys(value));
 }
+/**
+ * @param {any} v
+ * @returns {any}
+ */
 function sortKeys(v) {
   if (Array.isArray(v)) return v.map(sortKeys);
   if (v && typeof v === 'object') {
@@ -92,7 +100,7 @@ function manifestDigest(bundle) {
 export function sealBundle(bundle, privKey) {
   const digest = manifestDigest(bundle);
   const signature = sign(null, Buffer.from(digest, 'hex'), privKey).toString('base64');
-  const publicKey = createPublicKey(privKey)
+  const publicKey = createPublicKey(privKey.export({ type: 'pkcs8', format: 'pem' }))
     .export({ type: 'spki', format: 'der' })
     .toString('base64');
   return { ...bundle, seal: { algorithm: 'ed25519', digest, signature, publicKey } };

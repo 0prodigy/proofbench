@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "typeAcquisition": { "enable": true, "include": ["node"] },
+  "include": ["src/**/*.mjs", "test/**/*.mjs"]
+}

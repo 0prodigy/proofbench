@@ -77,6 +77,11 @@ test('rule 2 — a FALSIFIED claim yields DOES_NOT_WORK', () => {
 });
 
 test('rule 3 — effect confirmed only with a harness, non-sourcePR delta + a valid confirm leg', () => {
+  /**
+   * @param {Partial<import('../src/types.mjs').Receipt>} [deltaOverrides]
+   * @param {string} [legKind]
+   * @param {{observed?:number, nonce?:string, dest?:string}} [legData]
+   */
   const base = (deltaOverrides = {}, legKind = 'fresh-session', legData = { observed: 1 }) =>
     newBundle({
       intent: 'x',
@@ -119,6 +124,7 @@ test('rule 3 — effect confirmed only with a harness, non-sourcePR delta + a va
 });
 
 test('rule 4 — a negative claim needs BOTH a null delta AND an attempt receipt (M1)', () => {
+  /** @param {boolean} withAttempt */
   const mk = (withAttempt) =>
     newBundle({
       intent: 'x',
@@ -142,6 +148,11 @@ test('rule 4 — a negative claim needs BOTH a null delta AND an attempt receipt
 });
 
 test('rule 5 — a quantified claim needs >=2 distinct non-actor instantiations + a confirmed negative', () => {
+  /**
+   * @param {import('../src/types.mjs').Receipt[]} receipts
+   * @param {string[]} claimReceiptIds
+   * @param {import('../src/types.mjs').Claim[]} [extraClaims]
+   */
   const quantified = (receipts, claimReceiptIds, extraClaims = []) =>
     newBundle({
       intent: 'any user can book',
@@ -194,6 +205,7 @@ test('rule 5 — a quantified claim needs >=2 distinct non-actor instantiations 
 });
 
 test('rule 6 — WORKS needs a confirmed effect, all claims satisfied, and reproduce k>=2', () => {
+  /** @param {number} k */
   const mk = (k) =>
     newBundle({
       intent: 'x',

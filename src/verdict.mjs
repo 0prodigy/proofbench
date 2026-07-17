@@ -32,11 +32,20 @@ import {
 } from './types.mjs';
 
 const TOOL_RANK = rankOf(Provenance.TOOL);
+const HARNESS_RANK = rankOf(Provenance.HARNESS);
 
-/** Stable, key-sorted JSON so structural equality is order-independent. */
+/**
+ * Stable, key-sorted JSON so structural equality is order-independent.
+ * @param {any} value
+ * @returns {string}
+ */
 function stableStringify(value) {
   return JSON.stringify(sortKeys(value));
 }
+/**
+ * @param {any} v
+ * @returns {any}
+ */
 function sortKeys(v) {
   if (Array.isArray(v)) return v.map(sortKeys);
   if (v && typeof v === 'object') {
@@ -47,6 +56,11 @@ function sortKeys(v) {
   }
   return v;
 }
+/**
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
 function deepEqual(a, b) {
   return stableStringify(a) === stableStringify(b);
 }
@@ -62,14 +76,48 @@ function receiptMap(bundle) {
 }
 
 /**
+ * Resolve a claim's receipt ids to the receipts present in the map (missing ids dropped).
+ * @param {import('./types.mjs').Claim} claim
+ * @param {Map<string, import('./types.mjs').Receipt>} rmap
+ * @returns {import('./types.mjs').Receipt[]}
+ */
+function claimReceipts(claim, rmap) {
+  /** @type {import('./types.mjs').Receipt[]} */
+  const out = [];
+  for (const id of claim.receiptIds || []) {
+    const r = rmap.get(id);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+/**
  * Rule 1: a receipt can satisfy a claim only if it is tool|harness provenance.
  * @param {import('./types.mjs').Receipt|undefined} r
+ * @returns {r is import('./types.mjs').Receipt}
  */
 function satisfies(r) {
   return !!r && rankOf(r.provenance) >= TOOL_RANK;
 }
 
-/** A delta is "null" when the harness saw no change in the window. */
+/**
+ * The persisted leg (a `delta` receipt) is the store-of-record ground truth (§1.1) and is
+ * admissible only if it is HARNESS provenance — an out-of-band store-handle observation the
+ * driving agent has no write-handle to. A tool/agent `delta` is an app-surface read (the
+ * app's own endpoint / an internal verify route) masquerading as ground truth (§4, M3/FW-19);
+ * it may corroborate as a confirm leg but can never satisfy the persisted leg.
+ * @param {import('./types.mjs').Receipt|undefined} r
+ * @returns {r is import('./types.mjs').Receipt}
+ */
+function satisfiesPersisted(r) {
+  return !!r && rankOf(r.provenance) >= HARNESS_RANK;
+}
+
+/**
+ * A delta is "null" when the harness saw no change in the window.
+ * @param {import('./types.mjs').Receipt} deltaReceipt
+ * @returns {boolean}
+ */
 function isNullDelta(deltaReceipt) {
   const d = (deltaReceipt && deltaReceipt.data) || {};
   if (d.nullDelta === true) return true;
@@ -80,6 +128,9 @@ function isNullDelta(deltaReceipt) {
 /**
  * Whether the observed before/after satisfies the effect check's relation.
  * @param {{op:string, value?:any}|undefined} rel
+ * @param {any} before
+ * @param {any} after
+ * @returns {boolean}
  */
 function relationHolds(rel, before, after) {
   if (!rel || typeof rel.op !== 'string') return false;
@@ -112,7 +163,12 @@ function isValidConfirmLeg(leg, delta) {
   return false;
 }
 
-/** Egress content-binding: a shared same-window nonce, or a hash of the delta content. */
+/**
+ * Egress content-binding: a shared same-window nonce, or a hash of the delta content.
+ * @param {import('./types.mjs').Receipt} egress
+ * @param {import('./types.mjs').Receipt} delta
+ * @returns {boolean}
+ */
 function contentBinds(egress, delta) {
   const en = egress && egress.data ? egress.data.nonce : undefined;
   const dn = delta && delta.data ? delta.data.nonce : undefined;
@@ -131,10 +187,11 @@ function evalEffect(claim, rmap) {
   const ec = claim.effectCheck;
   if (!ec) return { state: ClaimState.NOT_EXECUTED, detail: 'effect claim has no effectCheck' };
   const delta = rmap.get(ec.deltaReceiptId);
-  if (!satisfies(delta) || delta.kind !== ReceiptKind.DELTA) {
+  if (!satisfiesPersisted(delta) || delta.kind !== ReceiptKind.DELTA) {
     return {
       state: ClaimState.NOT_EXECUTED,
-      detail: 'delta receipt missing or not tool/harness provenance (agent evidence cannot satisfy)',
+      detail:
+        'delta receipt missing or not a HARNESS store-handle observation — a tool/agent or app-endpoint read cannot satisfy the persisted leg (§1.1/§4, M3)',
     };
   }
   if (delta.sourcePR === true) {
@@ -170,9 +227,9 @@ function evalEffect(claim, rmap) {
  * @param {Map<string, import('./types.mjs').Receipt>} rmap
  */
 function evalNegative(claim, rmap) {
-  const receipts = (claim.receiptIds || []).map((id) => rmap.get(id)).filter(Boolean);
+  const receipts = claimReceipts(claim, rmap);
   const attempt = receipts.find((r) => r.kind === ReceiptKind.ATTEMPT && satisfies(r));
-  const delta = receipts.find((r) => r.kind === ReceiptKind.DELTA && satisfies(r));
+  const delta = receipts.find((r) => r.kind === ReceiptKind.DELTA && satisfiesPersisted(r));
   if (!attempt) {
     return {
       state: ClaimState.NOT_EXECUTED,
@@ -195,7 +252,7 @@ function evalNegative(claim, rmap) {
  * @param {Map<string, import('./types.mjs').Receipt>} rmap
  */
 function evalReach(claim, rmap) {
-  const receipts = (claim.receiptIds || []).map((id) => rmap.get(id)).filter(Boolean);
+  const receipts = claimReceipts(claim, rmap);
   const nav = receipts.find((r) => r.kind === ReceiptKind.NAV && satisfies(r));
   if (!nav) return { state: ClaimState.NOT_EXECUTED, detail: 'no navigation receipt' };
   if (nav.data && nav.data.frontDoor === true) {
@@ -211,7 +268,7 @@ function evalReach(claim, rmap) {
  * @param {Map<string, import('./types.mjs').Receipt>} rmap
  */
 function evalSurvive(claim, rmap) {
-  const receipts = (claim.receiptIds || []).map((id) => rmap.get(id)).filter(Boolean);
+  const receipts = claimReceipts(claim, rmap);
   const probe = receipts.find((r) => satisfies(r) && r.data && 'survived' in r.data);
   if (!probe) return { state: ClaimState.NOT_EXECUTED, detail: 'no hostile-probe receipt' };
   if (probe.data.survived === true) return { state: ClaimState.CONFIRMED, detail: 'hostile-repertoire class survived' };
@@ -226,7 +283,7 @@ function evalSurvive(claim, rmap) {
  */
 function naJustified(claim, rmap) {
   if (claim.kind !== ClaimKind.SURVIVE && claim.kind !== ClaimKind.REACH) return false;
-  const receipts = (claim.receiptIds || []).map((id) => rmap.get(id)).filter(Boolean);
+  const receipts = claimReceipts(claim, rmap);
   return receipts.some((r) => satisfies(r) && r.data && r.data.naJustification);
 }
 
@@ -239,9 +296,9 @@ function naJustified(claim, rmap) {
  * @returns {Set<string>}
  */
 function distinctInstantiations(claim, rmap, actorIdentity) {
-  const receipts = (claim.receiptIds || []).map((id) => rmap.get(id)).filter(Boolean);
+  const receipts = claimReceipts(claim, rmap);
   const deltas = receipts.filter(
-    (r) => r.kind === ReceiptKind.DELTA && satisfies(r) && r.sourcePR !== true
+    (r) => r.kind === ReceiptKind.DELTA && satisfiesPersisted(r) && r.sourcePR !== true
   );
   const ec = claim.effectCheck;
   /** @type {Set<string>} */

@@ -27,6 +27,7 @@ test('each malicious driver individually: seal intact but not WORKS (tampered-se
   assert.equal(MALICIOUS_DRIVERS.length, 8);
   for (const d of MALICIOUS_DRIVERS) {
     const bundle = d.build();
+    assert.ok(bundle.seal, `${d.name} must be sealed`);
     if (d.name === 'tampered-seal') {
       assert.equal(verifySeal(bundle, bundle.seal.publicKey), false, 'tampered seal must not verify');
     } else {
@@ -38,6 +39,7 @@ test('each malicious driver individually: seal intact but not WORKS (tampered-se
 
 test('honest driver: seal verifies and the verdict is WORKS', () => {
   const b = HONEST_DRIVER.build();
+  assert.ok(b.seal);
   assert.equal(verifySeal(b, b.seal.publicKey), true);
   assert.equal(verdict(b).state, Verdict.WORKS);
 });

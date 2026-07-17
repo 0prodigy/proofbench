@@ -1,0 +1,6 @@
+{
+  "kind": "shop-v1",
+  "entry": "app.mjs",
+  "storeEnv": "STORE_PATH",
+  "scenario": { "item": "widget", "coupon": "SAVE10", "invalidCoupon": "NOPE" }
+}
