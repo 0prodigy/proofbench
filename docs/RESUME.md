@@ -110,13 +110,33 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    an owner-shadow risk. So FW-P1-B is a **P1-compiler responsibility + capture-side auth-context**
    (which front door / independent session — the signal that distinguishes the trap from a single
    actor lives on the drive/capture side, not the verdict). Land it WITH that slice, not before.
-3. **Latent-before-surface preconditions** (honest CND today; land each before its surface exists):
-   seal-stripping → missing/invalid seal = `UNVERIFIED` + re-floor on load (before any ledger/verify
-   surface); mint-boundary → proposer isolation + an E1 unreachability test (before the in-process
-   Sonnet driver); P3 code-identity → a fingerprint receipt or CND-floor (before real-repo compose).
-4. **The Catch on the tractable real-repo class** (web front-door, compose-conjurable) — the
-   real conjure+drive for phase 3, one stack done well before the next.
-5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class.
+3. **BUILD ARCHITECTURE — decided 2026-07-18 (Fable-designed, Akash-approved).** Strategic call:
+   BUILD THE SURFACE, don't harden the core speculatively (the FW-P1-B revert is empirical proof a
+   latent fix ahead of its surface is wrong code; theory §8 wants an *executed* case next; the core
+   is honest-green for every reachable path). Dependency rule (Akash): no hard zero-dep rule, but no
+   "whole-world" deps in pb — **the project-under-test's own deps live in its conjure/container, not
+   in pb**. Concrete (all keep pb's runtime deps at ZERO; trust core `verdict.mjs`/`harness.mjs`
+   stays FROZEN):
+   - **Store tap (persisted leg):** `docker exec <ctr> sqlite3 -json <db> "<static query>"` (or
+     `psql` for Postgres SUTs) — reads the store file out-of-band = HARNESS provenance (NOT the app's
+     endpoint, §1.1/§4); sqlite CLI overlaid into the SUT image by the recipe. No pb DB dep.
+   - **Browser drive:** a containerized `selenium/standalone-chromium` sidecar driven over **W3C
+     WebDriver (JSON over `fetch`)** — browser deps live in a container like the SUT's; customer-
+     portable. No pb browser dep (Playwright-as-pb-dep rejected).
+   - **Setup recipe:** a per-repo `pb-recipe-v1` JSON (generalizes `fixtures/*/pb-fixture.json`) —
+     build-from-tree@SHA, conjure, out-of-band tap cmd, fresh-world recreate, disclosed REST setup,
+     front-door URL. The **walk stays agent-proposed** (never recipe data — avoids the Gherkin grave).
+4. **Real-repo Catch roadmap (M1→M7).** First target **n8n #7130** (single-process, plain-DOM Form
+   Trigger, SQLite store; merge SHA `3ddc176dfa2d3d99a328a29a3a8613e35ff456a0`, n8n@1.12.0);
+   cal.com is the evidence-picked fallback if conjure is infeasible. **M1 conjure spike — IN FLIGHT**
+   (scratchpad `m1-n8n/`, no pb code: build+up+form-serves+`docker exec sqlite3` taps executions).
+   Then M2 recipe loader (`src/recipe.mjs`) → M3 conjure runner + **code-identity fingerprint**
+   (P3-1 lands here) → M4 store-tap runner → M5 browser drive (**owner-shadow becomes *testable***
+   here) → M6 the n8n Catch end-to-end (blind→EXECUTED; differential merge-SHA=WORKS vs
+   parent-SHA≠WORKS) → M7 adversarial extension. **Latent fixes land WITH their surface:** seal-
+   stripping @ the M6/persist surface; mint-boundary isolation + P1 `quantified` marking @ the M7
+   proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive primitives — generality earned per case.
+5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
 (the open-ended part — CONJURE is "never proven complete, only progressively hardened"),
