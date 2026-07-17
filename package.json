@@ -1,0 +1,14 @@
+{
+  "name": "pb",
+  "version": "0.1.0",
+  "description": "Proof-of-work for AI change — the honesty core + E1 malicious-driver gate (Phase 3).",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pb": "src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "gate": "node src/cli.mjs gate"
+  }
+}
