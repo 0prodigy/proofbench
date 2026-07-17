@@ -96,15 +96,20 @@ not defects — point the editor at the workspace TypeScript/types to silence th
 1. **Core-fundamentals surgical pass — DONE** (`086dbfb` structural propose/dispose; then the
    2026-07-18 phase-validation found + FIXED the null-delta `equals` tautology, keeping 32/32 +
    gate PASS). No churn-for-taste.
-2. **Verdict-contract slices the validation surfaced — land BEFORE any *executed* WORKS is
-   trusted** (both deferred this pass on purpose — each is a contract change, not a one-liner, and
-   the honest status today is that they are latent behind unbuilt drive/capture): **(a) DNW not
-   k-gated** — `verdict.mjs` rule 2 convicts on a single FALSIFIED with no reproduction; the theory
-   wants k/N. Needs a *failure*-reproduction counter in `phase3` (today `reproduce.k` counts
-   successes only, so a naive k-gate would flip `shop-lying`→CND — do NOT do that). **(b) Owner-
-   shadow on non-quantified effects (M2)** — the identity guard fires only for `quantified` claims;
-   add an `AUTH_CONTEXT` receipt kind + require an independent-session receipt on the actor leg (a
-   bare `identity != actorIdentity` string check is a *fake* guard — a driver just relabels it).
+2. **Verdict-contract slices the validation surfaced.** **(a) DNW not k-gated — DONE** (`b9f4325`):
+   rule 2 now convicts only when the failure reproduced (`reproduce.kFail >= 2`), else CND; `kFail`
+   is a SEPARATE failure count in phase1/phase3 (reusing `reproduce.k`, which counts successes,
+   would flip `shop-lying`→CND — that trap is why it's separate). **(b) Owner-shadow on
+   non-quantified effects (FW-P1-B) — NOT a verdict-layer fix (tried, reverted, proven unsound).**
+   A verdict-only `identity === actorIdentity` floor on non-quantified effects OVER-FIRES on
+   legitimate single-actor effects: `phase1`'s `suite-passes` effect runs as `identity:'ci'` under
+   `actorIdentity:'ci'`, so the floor flipped an honest WORKS→CND (empirical proof a string floor
+   can't tell owner-shadow-masking from a genuine single-actor effect). The right home: **rule 5
+   already catches owner-shadow for `quantified` claims** — a *generalizable* user capability should
+   be marked `quantified` by the **P1 compiler** (unbuilt); a genuinely non-quantified effect is not
+   an owner-shadow risk. So FW-P1-B is a **P1-compiler responsibility + capture-side auth-context**
+   (which front door / independent session — the signal that distinguishes the trap from a single
+   actor lives on the drive/capture side, not the verdict). Land it WITH that slice, not before.
 3. **Latent-before-surface preconditions** (honest CND today; land each before its surface exists):
    seal-stripping → missing/invalid seal = `UNVERIFIED` + re-floor on load (before any ledger/verify
    surface); mint-boundary → proposer isolation + an E1 unreachability test (before the in-process

@@ -18,12 +18,23 @@ Everything else is either (a) a **false-DNW** logic divergence (not release-gate
 **core backstop gap** that goes live once the drive/capture side is built, or (c) **latent behind
 unbuilt surfaces** and correctly declining to CND today (the honest-CND-by-construction working).
 
-> **STATUS 2026-07-18 (same day):** Finding #1 (FW-P1-A) **FIXED** — `verdict.mjs evalEffect` now
-> rejects a null delta *after* the relation check, so a no-op may FALSIFY but never CONFIRM
-> ("absence is a catch", §12.8, preserved). Locked by E1 driver `seed-match-null-delta` (gate now
-> 10 malicious, PASS) + adversarial `(e)`/`(e-sanity)` tests. `node --test` 32/32, typecheck clean.
-> `false-WORKS=0` is honest-green again. Findings #2 (DNW k-gate) and #3 (owner-shadow/M2) are
-> **deferred by design** — both are verdict-contract changes, not surgical edits (see roadmap).
+> **STATUS 2026-07-18 (same day):**
+> - **#1 (FW-P1-A null-delta tautology) — FIXED** (`fa84c5d`): `verdict.mjs evalEffect` rejects a
+>   null delta *after* the relation check, so a no-op may FALSIFY but never CONFIRM ("absence is a
+>   catch", §12.8, preserved). Locked by E1 driver `seed-match-null-delta` (gate 10) + `(e)`/`(e-sanity)` tests.
+> - **#2 (DNW not k-gated) — FIXED** (`b9f4325`): rule 2 convicts only when the failure reproduced
+>   (`reproduce.kFail >= 2`), else CND ("observed once, could not reproduce"); `kFail` is a separate
+>   failure count in phase1/phase3 (reusing `reproduce.k`=successes would flip `shop-lying`→CND).
+> - **#3 (owner-shadow on non-quantified effects) — investigated, reverted, RELOCATED.** A
+>   verdict-only `identity === actorIdentity` floor is UNSOUND: it over-fires on `phase1`'s
+>   legitimate single-actor `suite-passes` effect (`identity:'ci' === actorIdentity:'ci'`),
+>   flipping an honest WORKS→CND. Rule 5 already catches owner-shadow for `quantified` claims; a
+>   *generalizable* capability should be marked `quantified` by the (unbuilt) **P1 compiler**, and
+>   the trap-vs-single-actor signal lives on the **capture side**. So FW-P1-B is a P1-compiler +
+>   capture responsibility, to land WITH that slice — not a verdict floor.
+>
+> Verified after #1+#2: `node --test` 33/33, `pb gate` PASS (10), shop-lying=DOES_NOT_WORK,
+> shop-honest=WORKS, typecheck clean. `false-WORKS=0` is honest-green.
 
 ## Per-phase verdict (contract soundness vs impl reality)
 
