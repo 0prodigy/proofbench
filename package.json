@@ -11,5 +11,9 @@
     "test": "node --test",
     "gate": "node src/cli.mjs gate",
     "typecheck": "tsc -p jsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.7.0"
   }
 }

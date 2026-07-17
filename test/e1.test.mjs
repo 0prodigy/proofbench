@@ -24,7 +24,7 @@ test('runGate().passed === true (no malicious driver reaches WORKS; honest drive
 });
 
 test('each malicious driver individually: seal intact but not WORKS (tampered-seal => UNVERIFIED)', () => {
-  assert.equal(MALICIOUS_DRIVERS.length, 8);
+  assert.equal(MALICIOUS_DRIVERS.length, 9);
   for (const d of MALICIOUS_DRIVERS) {
     const bundle = d.build();
     assert.ok(bundle.seal, `${d.name} must be sealed`);

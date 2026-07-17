@@ -9,8 +9,10 @@
  *   1. Only tool|harness receipts satisfy a claim; agent receipts corroborate only.
  *   2. Any FALSIFIED claim => DOES_NOT_WORK.
  *   3. An effect claim is CONFIRMED only if its EffectCheck binds a delta receipt
- *      that is harness-provenance AND not sourcePR (M3) AND has a confirm leg
- *      (fresh-session, or egress content-bound to the same delta §1.5); else NOT_EXECUTED.
+ *      that is harness-provenance AND not sourcePR (M3) AND has a content-bound confirm
+ *      leg (a fresh-session re-observation consistent with the delta, or an egress
+ *      content-bound to it §1.5); a persisted delta that contradicts the relation is
+ *      FALSIFIED regardless of the confirm leg; else NOT_EXECUTED.
  *   4. A negative claim is CONFIRMED only with BOTH a null delta AND an attempt
  *      receipt (M1); else NOT_EXECUTED.
  *   5. Quantifier lint (§1.4/FW-11): a quantified claim needs >=2 CONFIRMED
@@ -151,15 +153,34 @@ function relationHolds(rel, before, after) {
 }
 
 /**
- * A confirm leg is valid iff it is tool|harness AND either a fresh-session
- * re-observation, or an egress receipt content-bound to the same delta (§1.5).
+ * A confirm leg is valid iff it is tool|harness AND content-bound to the same delta:
+ * a fresh-session re-observation consistent with the delta's persisted `after` (kills
+ * read-through caches / stale session state, §1.1 dual-leg), or an egress receipt
+ * content-bound to the delta (§1.5). A fresh-session leg that observes a DIFFERENT value
+ * than the persisted delta is stale/inconsistent and cannot confirm.
  * @param {import('./types.mjs').Receipt|undefined} leg
  * @param {import('./types.mjs').Receipt} delta
  */
 function isValidConfirmLeg(leg, delta) {
   if (!satisfies(leg)) return false;
-  if (leg.kind === ReceiptKind.FRESH_SESSION) return true;
+  if (leg.kind === ReceiptKind.FRESH_SESSION) return freshBinds(leg, delta);
   if (leg.kind === ReceiptKind.EGRESS) return contentBinds(leg, delta);
+  return false;
+}
+
+/**
+ * Fresh-session content-binding: a shared same-window nonce, or the fresh re-observation
+ * (`observed`) matching the delta's persisted `after`. Without this the fresh leg is
+ * decorative — a stale/cached GET would confirm an effect the store never actually holds.
+ * @param {import('./types.mjs').Receipt} fresh
+ * @param {import('./types.mjs').Receipt} delta
+ * @returns {boolean}
+ */
+function freshBinds(fresh, delta) {
+  const fd = (fresh && fresh.data) || {};
+  const dd = (delta && delta.data) || {};
+  if (fd.nonce != null && dd.nonce != null && deepEqual(fd.nonce, dd.nonce)) return true;
+  if (fd.observed !== undefined && 'after' in dd && deepEqual(fd.observed, dd.after)) return true;
   return false;
 }
 
@@ -200,13 +221,6 @@ function evalEffect(claim, rmap) {
       detail: 'delta oracle is code shipped by the PR under test (sourcePR) — disqualified (M3/FW-19)',
     };
   }
-  const leg = rmap.get(ec.confirmLegReceiptId);
-  if (!isValidConfirmLeg(leg, delta)) {
-    return {
-      state: ClaimState.NOT_EXECUTED,
-      detail: 'no valid confirm leg (needs fresh-session, or egress content-bound to the delta)',
-    };
-  }
   const dd = delta.data || {};
   const before = 'before' in dd ? dd.before : ec.beforeValue;
   if (ec.beforeValue !== undefined && !deepEqual(ec.beforeValue, before)) {
@@ -215,10 +229,21 @@ function evalEffect(claim, rmap) {
       detail: 'comparator baseline mismatch (pinned beforeValue != observed delta before)',
     };
   }
-  if (relationHolds(ec.expectedAfterRelation, before, dd.after)) {
-    return { state: ClaimState.CONFIRMED, detail: 'effect confirmed on a harness delta + confirm leg' };
+  // The persisted leg is the store-of-record ground truth: if it does not satisfy the
+  // expected relation the effect is FALSIFIED, whatever the confirm leg says (a confirm leg
+  // only guards a CONFIRMED against read-through caches — it cannot rescue a broken store).
+  if (!relationHolds(ec.expectedAfterRelation, before, dd.after)) {
+    return { state: ClaimState.FALSIFIED, detail: 'harness delta does not satisfy the expected relation' };
   }
-  return { state: ClaimState.FALSIFIED, detail: 'harness delta does not satisfy the expected relation' };
+  // Relation holds on the persisted leg — require a valid, content-bound confirm leg to CONFIRM.
+  const leg = rmap.get(ec.confirmLegReceiptId);
+  if (!isValidConfirmLeg(leg, delta)) {
+    return {
+      state: ClaimState.NOT_EXECUTED,
+      detail: 'no valid confirm leg (needs a fresh-session re-observation consistent with the delta, or an egress content-bound to it §1.5)',
+    };
+  }
+  return { state: ClaimState.CONFIRMED, detail: 'effect confirmed on a harness delta + a content-bound confirm leg' };
 }
 
 /**

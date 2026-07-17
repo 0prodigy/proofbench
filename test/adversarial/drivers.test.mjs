@@ -14,6 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { newBundle, sealBundle, verifySeal } from '../../src/evidence.mjs';
+import { mint } from '../../src/harness.mjs';
 import { verdict } from '../../src/verdict.mjs';
 import { Verdict } from '../../src/types.mjs';
 
@@ -68,11 +69,12 @@ test('(b) forged delta from the app endpoint (tool-provenance) must NOT reach WO
     receipts: [
       // Sourced from the app's OWN GET endpoint (which lies: says 40 while the store holds 50).
       // A driver's own read is at best TOOL provenance — it is not the store handle.
-      { id: 'app-endpoint-delta', kind: 'delta', provenance: 'tool', identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } },
-      { id: 'app-endpoint-fresh', kind: 'fresh-session', provenance: 'tool', identity: 'shopper', data: { observed: 40 } },
+      mint({ id: 'app-endpoint-delta', kind: 'delta', provenance: 'tool', identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } }),
+      mint({ id: 'app-endpoint-fresh', kind: 'fresh-session', provenance: 'tool', identity: 'shopper', data: { observed: 40 } }),
     ],
     reproduce: { k: 2, n: 2 },
   });
+  assert.ok(b.seal, 'sealed bundle carries a seal');
   assert.equal(verifySeal(b, b.seal.publicKey), true, 'seal is intact — the lie is structural, not a tamper');
   assert.notEqual(evaluate(b), Verdict.WORKS, 'a tool-provenance (app-endpoint) delta must never satisfy the persisted leg');
   assert.equal(evaluate(b), Verdict.COULD_NOT_DETERMINE);
@@ -97,8 +99,9 @@ test('(b) forged delta labelled agent-provenance must NOT reach WORKS', () => {
       },
     ],
     receipts: [
+      // The agent read it back itself — a proposer receipt (no mint), forced to agent.
       { id: 'agent-delta', kind: 'delta', provenance: 'agent', identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } },
-      { id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 40 } },
+      mint({ id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 40 } }),
     ],
     reproduce: { k: 2, n: 2 },
   });
@@ -124,8 +127,8 @@ test("(b) delta from the PR's own internal verification endpoint (sourcePR) must
       },
     ],
     receipts: [
-      { id: 'pr-delta', kind: 'delta', provenance: 'harness', sourcePR: true, identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } },
-      { id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 40 } },
+      mint({ id: 'pr-delta', kind: 'delta', provenance: 'harness', sourcePR: true, identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } }),
+      mint({ id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 40 } }),
     ],
     reproduce: { k: 2, n: 2 },
   });
@@ -152,8 +155,8 @@ test('(b sanity) the SAME effect via a genuine harness store-handle delta DOES r
       },
     ],
     receipts: [
-      { id: 'store-delta', kind: 'delta', provenance: 'harness', identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } },
-      { id: 'fresh', kind: 'fresh-session', provenance: 'tool', identity: 'shopper', data: { observed: 40 } },
+      mint({ id: 'store-delta', kind: 'delta', provenance: 'harness', identity: 'shopper', data: { entity: 'order.total', before: null, after: 40 } }),
+      mint({ id: 'fresh', kind: 'fresh-session', provenance: 'tool', identity: 'shopper', data: { observed: 40 } }),
     ],
     reproduce: { k: 2, n: 2 },
   });
@@ -195,7 +198,7 @@ test('(c) owner-shadow: the same non-actor identity twice for a quantified claim
       { id: 'fresh-2', kind: 'fresh-session', provenance: 'harness', identity: 'alice', data: { observed: 1 } },
       { id: 'attempt-x', kind: 'attempt', provenance: 'harness', identity: 'mallory', data: { rejected: true, status: 403 } },
       { id: 'delta-x', kind: 'delta', provenance: 'harness', identity: 'mallory', data: { entity: 'booking:x', before: 0, after: 0, nullDelta: true } },
-    ],
+    ].map(mint),
     reproduce: { k: 2, n: 2 },
   });
   assert.notEqual(evaluate(b), Verdict.WORKS, 'one identity twice is a single instantiation, not two');
@@ -227,7 +230,7 @@ test('(c) owner-shadow: both instantiations under the configuring actor => not W
       { id: 'fresh-1', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } },
       { id: 'delta-2', kind: 'delta', provenance: 'harness', identity: 'owner', data: { entity: 'booking:2', before: 0, after: 1 } },
       { id: 'fresh-2', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } },
-    ],
+    ].map(mint),
     reproduce: { k: 2, n: 2 },
   });
   assert.equal(evaluate(b), Verdict.COULD_NOT_DETERMINE);
@@ -247,7 +250,7 @@ test('(d) vacuous negative: null delta but no attempt receipt, atop a real effec
     { id: 'fresh-e', kind: 'fresh-session', provenance: 'harness', identity: 'alice', data: { observed: 40 } },
     // The negative's null delta — with NO attempt receipt to prove anything was tried.
     { id: 'delta-null', kind: 'delta', provenance: 'harness', identity: 'attacker', data: { entity: 'order', before: 0, after: 0, nullDelta: true } },
-  ];
+  ].map(mint);
   const b = sealed({
     intent: 'The discount persists; an out-of-scope actor cannot place an order.',
     actorIdentity: 'owner',
@@ -298,7 +301,7 @@ test('(d sanity) adding the attempt receipt to the negative earns WORKS', () => 
       { id: 'fresh-e', kind: 'fresh-session', provenance: 'harness', identity: 'alice', data: { observed: 40 } },
       { id: 'attempt-n', kind: 'attempt', provenance: 'harness', identity: 'attacker', data: { request: 'POST /orders (out-of-scope)', rejected: true, status: 403 } },
       { id: 'delta-null', kind: 'delta', provenance: 'harness', identity: 'attacker', data: { entity: 'order', before: 0, after: 0, nullDelta: true } },
-    ],
+    ].map(mint),
     reproduce: { k: 2, n: 2 },
   });
   assert.equal(evaluate(b), Verdict.WORKS);

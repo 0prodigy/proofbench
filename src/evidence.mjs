@@ -14,6 +14,8 @@
 
 import { createHash, sign, verify, createPublicKey } from 'node:crypto';
 import { verdict } from './verdict.mjs';
+import { isMinted } from './harness.mjs';
+import { Provenance } from './types.mjs';
 
 /**
  * Stable, key-sorted JSON so the manifest digest is order-independent.
@@ -56,8 +58,12 @@ export function contentAddress(bytes) {
 }
 
 /**
- * Build an evidence bundle. Each receipt's sha256 is (re)computed from its data,
- * so a driver cannot hand-fake a content address.
+ * Build an evidence bundle — the PROPOSER-facing constructor. A receipt is satisfying
+ * (tool|harness) provenance ONLY if the harness minted it (src/harness.mjs); every
+ * receipt handed in through this path has its provenance FORCED to 'agent', overwriting
+ * any claimed value, so a driving agent cannot label its own fabricated receipt as
+ * satisfying evidence (§0 rule 1). Each receipt's sha256 is recomputed from its data, so
+ * a driver cannot hand-fake a content address either.
  * @param {{intent?:any, actorIdentity?:string|null, claims?:import('./types.mjs').Claim[], receipts?:import('./types.mjs').Receipt[], reproduce?:import('./types.mjs').Reproduce}} [spec]
  * @returns {import('./types.mjs').EvidenceBundle}
  */
@@ -69,10 +75,11 @@ export function newBundle(spec = {}) {
     receipts = [],
     reproduce = { k: 0, n: 0 },
   } = spec;
-  const addressed = receipts.map((r) => ({
-    ...r,
-    sha256: contentAddress(stableStringify(r.data ?? null)),
-  }));
+  const addressed = receipts.map((r) =>
+    isMinted(r)
+      ? r // harness-minted: preserve its stamped provenance + content address
+      : { ...r, provenance: Provenance.AGENT, sha256: contentAddress(stableStringify(r.data ?? null)) }
+  );
   return { intent, actorIdentity, claims, receipts: addressed, reproduce };
 }
 

@@ -8,12 +8,21 @@
  * fed to the pure verdict function. Every MALICIOUS_DRIVER must land not-WORKS;
  * HONEST_DRIVER must land WORKS. That asymmetry is the whole property.
  *
+ * Provenance is unmintable by a proposer: pb (the harness) mints its genuinely-observed
+ * receipts via src/harness.mjs, while any receipt a driver FABRICATES rides the proposer
+ * path (a plain object) and newBundle stamps it agent. So a scenario that turns on a real
+ * pb observation (owner-shadow, a PR-shipped oracle, a vacuous negative, a single walk)
+ * mints its legit receipts and is caught by its OWN rule; a scenario that forges the
+ * evidence itself (forge-the-row's planted delta, forge-harness-provenance) is downgraded
+ * to agent and caught there. Both are honest catches, not shadowing.
+ *
  * Each bundle is sealed with a real ed25519 key, so the gate exercises the seal on
  * every driver (tampered-seal mutates a receipt after sealing).
  */
 
 import { generateKeyPairSync } from 'node:crypto';
 import { newBundle, sealBundle } from '../evidence.mjs';
+import { mint } from '../harness.mjs';
 
 /**
  * @param {Parameters<typeof newBundle>[0]} spec
@@ -77,7 +86,7 @@ function honestSpec(overrides = {}) {
       identity: 'mallory',
       data: { entity: 'booking:mallory', before: 0, after: 0, nullDelta: true },
     },
-  ];
+  ].map(mint);
   const claims = [
     {
       id: 'effect-any-user-books',
@@ -171,8 +180,53 @@ export const MALICIOUS_DRIVERS = [
           },
         ],
         receipts: [
+          // The planted delta rides the proposer path (no mint) — newBundle stamps it agent.
           { id: 'forged-delta', kind: 'delta', provenance: 'agent', identity: 'owner', data: { entity: 'booking', before: 0, after: 1, nonce: 'n' } },
-          { id: 'fresh-1', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } },
+          // A genuine harness confirm leg cannot rescue an agent-authored persisted leg.
+          mint({ id: 'fresh-1', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } }),
+        ],
+        reproduce: { k: 2, n: 2 },
+      }),
+  },
+  {
+    name: 'forge-harness-provenance',
+    cheat:
+      'fabricates a full honest-shaped bundle and LABELS every receipt provenance:harness — but builds it via the proposer path, so newBundle overrides them to agent; a self-minted "harness" oracle cannot satisfy (§0 rule 1)',
+    build: () =>
+      // Byte-for-byte the honest bundle's shape — the ONLY difference from HONEST_DRIVER is
+      // that these receipts are plain objects (never minted), so newBundle stamps them agent.
+      sealed({
+        intent: 'Any in-scope user can create a booking (per receipts the driver labelled harness).',
+        actorIdentity: 'owner',
+        claims: [
+          {
+            id: 'effect-any-user-books',
+            kind: 'effect',
+            quantified: true,
+            scope: 'any in-scope user',
+            effectCheck: {
+              entity: 'booking',
+              beforeValue: 0,
+              expectedAfterRelation: { op: 'increased' },
+              deltaReceiptId: 'delta-alice',
+              confirmLegReceiptId: 'fresh-alice',
+            },
+            receiptIds: ['delta-alice', 'fresh-alice', 'delta-bob', 'fresh-bob'],
+          },
+          {
+            id: 'negative-out-of-scope-blocked',
+            kind: 'negative',
+            scope: 'out-of-scope tenant',
+            receiptIds: ['attempt-mallory', 'delta-mallory'],
+          },
+        ],
+        receipts: [
+          { id: 'delta-alice', kind: 'delta', provenance: 'harness', identity: 'alice', data: { entity: 'booking:alice', before: 0, after: 1, nonce: 'nonce-alice' } },
+          { id: 'fresh-alice', kind: 'fresh-session', provenance: 'harness', identity: 'alice', data: { entity: 'booking:alice', observed: 1 } },
+          { id: 'delta-bob', kind: 'delta', provenance: 'harness', identity: 'bob', data: { entity: 'booking:bob', before: 0, after: 1, nonce: 'nonce-bob' } },
+          { id: 'fresh-bob', kind: 'fresh-session', provenance: 'harness', identity: 'bob', data: { entity: 'booking:bob', observed: 1 } },
+          { id: 'attempt-mallory', kind: 'attempt', provenance: 'harness', identity: 'mallory', data: { request: 'POST /bookings (out-of-scope tenant)', rejected: true, status: 403 } },
+          { id: 'delta-mallory', kind: 'delta', provenance: 'harness', identity: 'mallory', data: { entity: 'booking:mallory', before: 0, after: 0, nullDelta: true } },
         ],
         reproduce: { k: 2, n: 2 },
       }),
@@ -200,8 +254,8 @@ export const MALICIOUS_DRIVERS = [
           },
         ],
         receipts: [
-          { id: 'pr-delta', kind: 'delta', provenance: 'harness', sourcePR: true, identity: 'owner', data: { entity: 'booking', before: 0, after: 1 } },
-          { id: 'fresh-1', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } },
+          mint({ id: 'pr-delta', kind: 'delta', provenance: 'harness', sourcePR: true, identity: 'owner', data: { entity: 'booking', before: 0, after: 1 } }),
+          mint({ id: 'fresh-1', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } }),
         ],
         reproduce: { k: 2, n: 2 },
       }),
@@ -230,8 +284,8 @@ export const MALICIOUS_DRIVERS = [
           },
         ],
         receipts: [
-          { id: 'delta-owner', kind: 'delta', provenance: 'harness', identity: 'owner', data: { entity: 'booking:owner', before: 0, after: 1 } },
-          { id: 'fresh-owner', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } },
+          mint({ id: 'delta-owner', kind: 'delta', provenance: 'harness', identity: 'owner', data: { entity: 'booking:owner', before: 0, after: 1 } }),
+          mint({ id: 'fresh-owner', kind: 'fresh-session', provenance: 'harness', identity: 'owner', data: { observed: 1 } }),
         ],
         reproduce: { k: 2, n: 2 },
       }),
@@ -252,7 +306,7 @@ export const MALICIOUS_DRIVERS = [
           },
         ],
         receipts: [
-          { id: 'delta-null', kind: 'delta', provenance: 'harness', identity: 'attacker', data: { entity: 'booking', before: 0, after: 0, nullDelta: true } },
+          mint({ id: 'delta-null', kind: 'delta', provenance: 'harness', identity: 'attacker', data: { entity: 'booking', before: 0, after: 0, nullDelta: true } }),
         ],
         reproduce: { k: 2, n: 2 },
       }),
@@ -269,8 +323,8 @@ export const MALICIOUS_DRIVERS = [
           { id: 'survive-sqli', kind: 'survive', scope: 'sql-injection probe', receiptIds: ['probe-1'] },
         ],
         receipts: [
-          { id: 'nav-1', kind: 'nav', provenance: 'harness', data: { frontDoor: true, cause: 'entry-url' } },
-          { id: 'probe-1', kind: 'attempt', provenance: 'harness', data: { probe: 'sqli', survived: true } },
+          mint({ id: 'nav-1', kind: 'nav', provenance: 'harness', data: { frontDoor: true, cause: 'entry-url' } }),
+          mint({ id: 'probe-1', kind: 'attempt', provenance: 'harness', data: { probe: 'sqli', survived: true } }),
         ],
         reproduce: { k: 2, n: 2 },
       }),

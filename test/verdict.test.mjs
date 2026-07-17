@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newBundle } from '../src/evidence.mjs';
+import { mint } from '../src/harness.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { Verdict, ClaimState } from '../src/types.mjs';
 
@@ -68,7 +69,7 @@ test('rule 2 — a FALSIFIED claim yields DOES_NOT_WORK', () => {
     receipts: [
       { id: 'd', kind: 'delta', provenance: 'harness', data: { entity: 'row', before: 1, after: 1 } },
       { id: 'f', kind: 'fresh-session', provenance: 'harness', data: { observed: 1 } },
-    ],
+    ].map(mint),
     reproduce: { k: 2, n: 2 },
   });
   const v = verdict(b);
@@ -104,7 +105,7 @@ test('rule 3 — effect confirmed only with a harness, non-sourcePR delta + a va
       receipts: [
         { id: 'd', kind: 'delta', provenance: 'harness', data: { entity: 'row', before: 0, after: 1, nonce: 'n1' }, ...deltaOverrides },
         { id: 'f', kind: legKind, provenance: 'harness', data: legData },
-      ],
+      ].map(mint),
       reproduce: { k: 2, n: 2 },
     });
   // valid fresh-session leg -> CONFIRMED
@@ -140,7 +141,7 @@ test('rule 4 — a negative claim needs BOTH a null delta AND an attempt receipt
       receipts: [
         { id: 'a', kind: 'attempt', provenance: 'harness', data: { request: 'POST', rejected: true, status: 403 } },
         { id: 'd', kind: 'delta', provenance: 'harness', data: { entity: 'row', before: 0, after: 0, nullDelta: true } },
-      ],
+      ].map(mint),
       reproduce: { k: 2, n: 2 },
     });
   assert.equal(stateOf(verdict(mk(true)).scoreboard, 'n'), ClaimState.CONFIRMED);
@@ -174,7 +175,7 @@ test('rule 5 — a quantified claim needs >=2 distinct non-actor instantiations 
         },
         ...extraClaims,
       ],
-      receipts,
+      receipts: receipts.map(mint),
       reproduce: { k: 2, n: 2 },
     });
 
@@ -228,7 +229,7 @@ test('rule 6 — WORKS needs a confirmed effect, all claims satisfied, and repro
       receipts: [
         { id: 'd', kind: 'delta', provenance: 'harness', identity: 'u1', data: { entity: 'row', before: 0, after: 1 } },
         { id: 'f', kind: 'fresh-session', provenance: 'harness', identity: 'u1', data: { observed: 1 } },
-      ],
+      ].map(mint),
       reproduce: { k, n: 2 },
     });
   assert.equal(verdict(mk(2)).state, Verdict.WORKS);
@@ -254,7 +255,7 @@ test('rule 7 — nothing falsified but a required check NOT_EXECUTED => CND nami
         receiptIds: ['f'],
       },
     ],
-    receipts: [{ id: 'f', kind: 'fresh-session', provenance: 'harness', data: { observed: 1 } }],
+    receipts: [{ id: 'f', kind: 'fresh-session', provenance: 'harness', data: { observed: 1 } }].map(mint),
     reproduce: { k: 2, n: 2 },
   });
   const v = verdict(b);

@@ -72,6 +72,7 @@ export const ReceiptKind = Object.freeze({
   FRESH_SESSION: 'fresh-session', // re-observation from a fresh user session (§1.1)
   EGRESS: 'egress', // outbound call recorded in the sealed-room egress ledger (§1.5)
   NAV: 'nav', // navigation with its recorded cause (§1.2.4)
+  COMPARATOR: 'comparator', // pinned arithmetic baseline from a declared layer (§1.1 comparator provenance)
 });
 
 /**

@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newBundle } from '../evidence.mjs';
+import { mint } from '../harness.mjs';
 import { verdict } from '../verdict.mjs';
 
 const COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
@@ -177,7 +178,7 @@ export async function runPhase2(repoDir, opts = {}) {
           identity: 'pb',
           data: { entity: `front-door ${url}`, observed: 'served', status: served[1].status },
         },
-      ];
+      ].map(mint);
       const claims = [
         {
           id: 'front-door-ready',
@@ -199,13 +200,15 @@ export async function runPhase2(repoDir, opts = {}) {
     // Came up but did not serve enough independent requests => attempted, not confirmed => CND.
     const statuses = polls.map((p) => (p.served ? String(p.status) : p.error || 'no-response')).join(', ');
     /** @type {import('../types.mjs').Receipt[]} */
-    const receipts = polls.map((p, idx) => ({
-      id: `probe-${idx + 1}`,
-      kind: 'attempt',
-      provenance: 'harness',
-      identity: 'pb',
-      data: { entity: `front-door ${url}`, served: p.served, status: p.status, error: p.error },
-    }));
+    const receipts = polls.map((p, idx) =>
+      mint({
+        id: `probe-${idx + 1}`,
+        kind: 'attempt',
+        provenance: 'harness',
+        identity: 'pb',
+        data: { entity: `front-door ${url}`, served: p.served, status: p.status, error: p.error },
+      })
+    );
     const claims = [
       {
         id: 'front-door-ready',

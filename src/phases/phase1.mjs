@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newBundle } from '../evidence.mjs';
+import { mint } from '../harness.mjs';
 import { verdict } from '../verdict.mjs';
 
 const RUNS = 2;
@@ -189,13 +190,15 @@ export async function runPhase1(repoDir) {
         ? `phase1: the suite did not complete (timeout/signal) on ${cmd} — nothing was verified.`
         : `phase1: ${cmd} ran but executed 0 tests — nothing was verified (§1.3 zero-tests hole); refusing to mint a confirming result.`
     );
-    const receipts = runs.map((r, idx) => ({
-      id: `run-${idx + 1}`,
-      kind: 'attempt',
-      provenance: 'harness',
-      identity: 'ci',
-      data: { cmd, exitCode: r.exitCode, testsRan: r.testsRan, tail: tail(r.out) },
-    }));
+    const receipts = runs.map((r, idx) =>
+      mint({
+        id: `run-${idx + 1}`,
+        kind: 'attempt',
+        provenance: 'harness',
+        identity: 'ci',
+        data: { cmd, exitCode: r.exitCode, testsRan: r.testsRan, tail: tail(r.out) },
+      })
+    );
     const claims = [
       {
         id: 'suite-passes',
@@ -230,9 +233,10 @@ export async function runPhase1(repoDir) {
       kind: 'fresh-session',
       provenance: 'harness',
       identity: 'ci',
-      data: { entity: 'test-suite', cmd, exitCode: runs[1].exitCode, testsRan: runs[1].testsRan, failed: runs[1].failed },
+      // `observed` content-binds this fresh re-observation to run-1's persisted `after` (§1.1).
+      data: { entity: 'test-suite', cmd, observed: runs[1].exitCode, exitCode: runs[1].exitCode, testsRan: runs[1].testsRan, failed: runs[1].failed },
     },
-  ];
+  ].map(mint);
   const claims = [
     {
       id: 'suite-passes',

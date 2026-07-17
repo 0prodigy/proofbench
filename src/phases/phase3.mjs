@@ -21,6 +21,7 @@ import { existsSync, readFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newBundle } from '../evidence.mjs';
+import { mint } from '../harness.mjs';
 import { verdict } from '../verdict.mjs';
 
 const REPRODUCTIONS = 2;
@@ -331,9 +332,11 @@ export async function runPhase3(opts = {}) {
       kind: 'fresh-session',
       provenance: 'tool',
       identity: 'shopper',
+      // `observed` content-binds the fresh GET to the persisted delta's `after` (§1.1): a
+      // stale/cached GET that disagrees with the store cannot confirm the effect.
       data: { entity: 'order.total', orderId, observed: freshObserved },
     },
-  ];
+  ].map(mint);
   /** @type {import('../types.mjs').Claim[]} */
   const claims = [
     {
@@ -352,26 +355,30 @@ export async function runPhase3(opts = {}) {
 
   if (negLeg) {
     const observedDiscount = negLeg.base - (negLeg.badPersisted ?? negLeg.base);
-    receipts.push({
-      id: 'neg-attempt',
-      kind: 'attempt',
-      provenance: 'tool',
-      identity: 'shopper',
-      data: {
-        request: `POST /orders {item:${item}, coupon:${invalidCoupon}}`,
-        orderId: negLeg.badResp.body && negLeg.badResp.body.id,
-        reportedTotal: negLeg.badResp.body && negLeg.badResp.body.total,
-        status: negLeg.badResp.status,
-      },
-    });
-    receipts.push({
-      id: 'neg-delta',
-      kind: 'delta',
-      provenance: 'harness',
-      identity: 'shopper',
-      sourcePR: false,
-      data: { entity: 'order.discount', before: 0, after: 0, nullDelta: observedDiscount === 0, observedDiscount },
-    });
+    receipts.push(
+      mint({
+        id: 'neg-attempt',
+        kind: 'attempt',
+        provenance: 'tool',
+        identity: 'shopper',
+        data: {
+          request: `POST /orders {item:${item}, coupon:${invalidCoupon}}`,
+          orderId: negLeg.badResp.body && negLeg.badResp.body.id,
+          reportedTotal: negLeg.badResp.body && negLeg.badResp.body.total,
+          status: negLeg.badResp.status,
+        },
+      })
+    );
+    receipts.push(
+      mint({
+        id: 'neg-delta',
+        kind: 'delta',
+        provenance: 'harness',
+        identity: 'shopper',
+        sourcePR: false,
+        data: { entity: 'order.discount', before: 0, after: 0, nullDelta: observedDiscount === 0, observedDiscount },
+      })
+    );
     claims.push({
       id: 'invalid-coupon-no-discount',
       kind: 'negative',
@@ -396,7 +403,12 @@ export async function runPhase3(opts = {}) {
       `phase3: persisted total=${persisted} != pricing-quoted discounted total=${discounted} for coupon ${coupon} (base ${base}).`
     );
   }
-  if (reported === persisted && persisted === discounted && it0.stable) {
+  if (freshObserved !== persisted) {
+    diagnosis.push(
+      `phase3: fresh-session GET returned total=${freshObserved} but the persisted store shows total=${persisted}; the fresh read is stale/inconsistent with the store handle and cannot confirm the effect (§1.1 dual-leg).`
+    );
+  }
+  if (reported === persisted && persisted === discounted && freshObserved === persisted && it0.stable) {
     diagnosis.push(
       `phase3: coupon ${coupon} persisted correctly (store=${persisted}=quoted), confirmed on a fresh session and stable across the ${SETTLE_WINDOW_MS}ms settle window; reproduced k=${k}/${REPRODUCTIONS}.`
     );
