@@ -10,6 +10,7 @@
  */
 
 import { resolve } from 'node:path';
+import { conjure, teardownSut } from './conjure.mjs';
 import { runGate } from './e1/gate.mjs';
 import { runPhase1 } from './phases/phase1.mjs';
 import { runPhase2 } from './phases/phase2.mjs';
@@ -29,6 +30,7 @@ function usage() {
     '  phase1 <dir>    run the repo\'s own test suite → WORKS/DOES_NOT_WORK/CND',
     '  phase2 <dir>    bring up docker-compose + prove the front door serves → READY/CND',
     '  phase3 <dir> [--intent "..."]   HTTP-drive a fixture app + confirm the effect persists',
+    '  conjure <recipeDir> [--keep]    bring up a real SUT from a pb-recipe-v1 + mint its code-identity fingerprint',
     '  prove           [stage 2] conjure + drive a real feature — not built yet',
     '  help            show this help',
     '',
@@ -74,6 +76,58 @@ function renderGate(result) {
   return lines.join('\n');
 }
 
+/**
+ * GET the resolved front door as the bring-up + world proof (200 text/html serving the form).
+ * @param {string} url
+ * @returns {Promise<{status:number|null, contentType:string, bytes:number, hasForm:boolean, error?:string}>}
+ */
+async function proveFrontDoor(url) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+    const body = await res.text();
+    return {
+      status: res.status,
+      contentType: res.headers.get('content-type') || '',
+      bytes: body.length,
+      hasForm: /<form\b/i.test(body),
+    };
+  } catch (e) {
+    return { status: null, contentType: '', bytes: 0, hasForm: false, error: String((e && /** @type {any} */ (e).message) || e) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * @param {import('./conjure.mjs').SutHandle} handle
+ * @param {{status:number|null, contentType:string, bytes:number, hasForm:boolean, error?:string}} proof
+ * @param {boolean} keep
+ * @returns {string}
+ */
+function renderConjure(handle, proof, keep) {
+  const fp = handle.receipts.find((r) => r.kind === 'fingerprint');
+  const d = (fp && fp.data) || {};
+  const ready = handle.receipts.find((r) => r.kind === 'attempt');
+  const lines = [`pb conjure — ${handle.recipe.name}`, '', '  fingerprint (harness):', `    mode:          ${d.mode}`];
+  if (d.sha) lines.push(`    sha:           ${d.sha}`);
+  if (d.image_digest) lines.push(`    image_digest:  ${d.image_digest}`);
+  if (d.version_label) lines.push(`    version_label: ${d.version_label}`);
+  lines.push(`    image:         ${d.image_ref_or_tag}`);
+  lines.push(`    container:     ${handle.containerName}`);
+  lines.push(`  ready:           ${ready ? `${ready.data.request} → ${ready.data.status}` : 'n/a'}`);
+  lines.push(`  front door:      ${handle.frontDoorUrl}`);
+  if (proof.status === 200 && proof.hasForm) {
+    lines.push(`  SUT up:          GET front door → 200 ${proof.contentType.split(';')[0]} (form served, ${proof.bytes} bytes)`);
+  } else {
+    const seen = proof.status === null ? `no-response${proof.error ? ` (${proof.error})` : ''}` : `${proof.status} ${proof.contentType}`.trim();
+    lines.push(`  SUT up:          GET front door → ${seen} (form ${proof.hasForm ? 'served' : 'NOT served'})`);
+  }
+  if (keep) lines.push(`  kept:            container ${handle.containerName} left up (tear down: docker rm -f ${handle.containerName})`);
+  return lines.join('\n');
+}
+
 async function main() {
   const cmd = process.argv[2];
 
@@ -102,6 +156,31 @@ async function main() {
     }
     process.stdout.write(renderPhase(result) + '\n');
     process.exit(result.verdict.state === Verdict.WORKS ? 0 : 1);
+  }
+
+  if (cmd === 'conjure') {
+    const dir = process.argv[3];
+    if (!dir || dir.startsWith('--')) {
+      process.stderr.write(`pb conjure: missing <recipeDir>\n\n${usage()}\n`);
+      process.exit(2);
+    }
+    const keep = process.argv.includes('--keep');
+    const abs = resolve(dir);
+    /** @type {import('./conjure.mjs').SutHandle|null} */
+    let handle = null;
+    let code = 0;
+    try {
+      handle = await conjure(abs);
+      const proof = await proveFrontDoor(handle.frontDoorUrl);
+      process.stdout.write(renderConjure(handle, proof, keep) + '\n');
+    } catch (e) {
+      // Honest failure: a bring-up/setup error is CND, never evidence against the change.
+      process.stdout.write(`CND (could not conjure): ${String((e && /** @type {any} */ (e).message) || e)} — this is not evidence against your change\n`);
+      code = 1;
+    } finally {
+      if (handle && !keep) await teardownSut(handle);
+    }
+    process.exit(code);
   }
 
   if (cmd === undefined || cmd === 'help' || cmd === '--help' || cmd === '-h') {

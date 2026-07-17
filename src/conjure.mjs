@@ -1,0 +1,486 @@
+// @ts-check
+/**
+ * The CONJURE RUNNER — turn a pb-recipe-v1 into a live, drivable SUT.
+ *
+ * conjure() brings up a REAL system-under-test from a recipe: it binds CODE-IDENTITY
+ * (build-from-tree@SHA or a pinned image digest), runs a FRESH world (a brand-new
+ * container per call, so fresh_world:recreate holds), polls the disclosed READY signal
+ * (the ready response IS the bring-up proof), applies the disclosed setup_overlay, then
+ * walks the disclosed REST SETUP through a minimal cookie jar. It mints — via the harness
+ * mint(), the only path to HARNESS provenance — a code-identity FINGERPRINT and a bring-up
+ * receipt (the ready request answered): together they prove "the code actually running is
+ * the code under test" (the P3 identity binding). It returns a live SUT handle; the caller
+ * drives it (M4/M5) and calls teardownSut() to reap it.
+ *
+ * A failure tears down partial state (like phase2's finally) but SUCCESS leaves the SUT
+ * up — that is the whole point. Zero runtime deps: docker via child_process (mirroring
+ * phase2's helper), git via child_process, HTTP via global fetch.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { loadRecipe } from './recipe.mjs';
+import { mint } from './harness.mjs';
+
+const READY_TIMEOUT_MS = 30000;
+const POLL_INTERVAL_MS = 1000;
+const PROBE_TIMEOUT_MS = 3000;
+const HTTP_TIMEOUT_MS = 10000;
+const DOCKER_TIMEOUT_MS = 120000;
+const PULL_TIMEOUT_MS = 300000;
+const BUILD_TIMEOUT_MS = 600000;
+const CLONE_TIMEOUT_MS = 300000;
+const GIT_TIMEOUT_MS = 120000;
+const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spawnSync default
+
+/**
+ * @typedef {Object} Docker
+ * @property {(args:string[], timeoutMs:number, opts?:{env?:NodeJS.ProcessEnv}) => import('node:child_process').SpawnSyncReturns<string>} run
+ */
+
+/**
+ * A live SUT handle returned by {@link conjure}.
+ * @typedef {Object} SutHandle
+ * @property {import('./recipe.mjs').Recipe} recipe
+ * @property {string} containerName the fresh-world container (unique per conjure)
+ * @property {string} baseUrl e.g. http://localhost:5678
+ * @property {string} frontDoorUrl the user-facing URL, placeholders resolved
+ * @property {Record<string,any>} captures values captured from setup responses
+ * @property {import('./types.mjs').Receipt[]} receipts [fingerprint, bringup] — harness provenance
+ * @property {string|null} _cloneDir temp from-tree checkout to reap on teardown (null otherwise)
+ * @property {() => Promise<void>} teardown
+ */
+
+// ---------------------------------------------------------------------------
+// Pure helpers (unit-tested; docker-free)
+// ---------------------------------------------------------------------------
+
+const DIRECTIVE =
+  /^\s*(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\b/i;
+
+/**
+ * Inject the disclosed build_overlay just before the corepack line (M1's 2026-corepack-vs-
+ * 2023-tree signature fix). A bare shell line is RUN-prefixed; a line that already begins
+ * with a Dockerfile directive (e.g. `ENV ...`) is emitted verbatim.
+ * @param {string} text the original Dockerfile
+ * @param {string[]} [overlayLines]
+ * @returns {string}
+ */
+export function overlayDockerfile(text, overlayLines) {
+  if (!overlayLines || overlayLines.length === 0) return text;
+  const lines = text.split('\n');
+  let at = lines.findIndex((l) => /corepack\s+enable/.test(l));
+  if (at === -1) at = lines.findIndex((l) => /corepack/.test(l));
+  if (at === -1) throw new Error('conjure: build_overlay is set but no corepack line was found to anchor the overlay');
+  const injected = overlayLines.map((l) => (DIRECTIVE.test(l) ? l : `RUN ${l}`));
+  return [...lines.slice(0, at), ...injected, ...lines.slice(at)].join('\n');
+}
+
+/**
+ * Resolve every `{name}` in a template via lookup(name); throw (naming it) if unresolved.
+ * @param {string} template
+ * @param {(name:string)=>any} lookup
+ * @returns {string}
+ */
+export function resolvePlaceholders(template, lookup) {
+  return template.replace(/\{([^}]+)\}/g, (_, name) => {
+    const v = lookup(name);
+    if (v === undefined || v === null) throw new Error(`conjure: unresolved placeholder {${name}} in "${template}"`);
+    return String(v);
+  });
+}
+
+/**
+ * Walk a simple `$.a.b` JSONPath (the capture syntax). Non-`$` paths and off-path reads
+ * return undefined.
+ * @param {any} obj
+ * @param {string} path
+ * @returns {any}
+ */
+export function extractJsonPath(obj, path) {
+  if (typeof path !== 'string' || path[0] !== '$') return undefined;
+  let cur = obj;
+  for (const key of path.slice(1).split('.').filter(Boolean)) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+/** @param {string} s @returns {string} docker-safe slug */
+function slug(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'sut';
+}
+
+/** @param {string} s snake_case -> camelCase (so `{webhook_id}` finds a `webhookId` field) */
+function camelize(s) {
+  return s.replace(/_([a-z0-9])/g, (_, ch) => ch.toUpperCase());
+}
+
+/**
+ * Collect scalar leaf fields (first-wins) from a setup body, so a front-door placeholder
+ * can resolve to a minted id carried in the body (e.g. the workflow node's webhookId).
+ * @param {any} node
+ * @param {Record<string,any>} out
+ */
+function collectScalars(node, out) {
+  if (Array.isArray(node)) {
+    for (const x of node) collectScalars(x, out);
+    return;
+  }
+  if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) {
+      if (v !== null && typeof v === 'object') collectScalars(v, out);
+      else if (!(k in out)) out[k] = v;
+    }
+  }
+}
+
+/**
+ * Best-effort FROM base derivation (resolving ARG defaults), so we can pre-pull the base
+ * the way M1 proved. If a var stays unresolved, return null and let `docker build` pull it.
+ * @param {string} text
+ * @returns {string|null}
+ */
+function deriveBaseImage(text) {
+  /** @type {Record<string,string>} */
+  const args = {};
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const m = /^\s*ARG\s+([A-Za-z_]\w*)=(.+?)\s*$/.exec(line);
+    if (m) args[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+  for (const line of lines) {
+    const m = /^\s*FROM\s+(\S+)/i.exec(line);
+    if (!m) continue;
+    const ref = m[1]
+      .replace(/\$\{([A-Za-z_]\w*)\}/g, (_, n) => args[n] ?? '$?')
+      .replace(/\$([A-Za-z_]\w*)/g, (_, n) => args[n] ?? '$?');
+    return ref.includes('$') ? null : ref;
+  }
+  return null;
+}
+
+/** @param {string} [s] @param {number} [n] */
+function tail(s, n = 800) {
+  s = s || '';
+  return s.length > n ? s.slice(-n) : s;
+}
+
+/** @param {number} ms */
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Docker / git / HTTP (child_process + global fetch; mirrors phase2's helper)
+// ---------------------------------------------------------------------------
+
+/** @returns {Docker|null} */
+function detectDocker() {
+  const v = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8' });
+  if (v.error || v.status !== 0) return null;
+  return {
+    run: (args, timeoutMs, opts) =>
+      spawnSync('docker', args, {
+        encoding: 'utf8',
+        timeout: timeoutMs,
+        maxBuffer: MAX_BUFFER,
+        env: (opts && opts.env) || process.env,
+      }),
+  };
+}
+
+/** @param {string[]} args @param {number} timeoutMs */
+function git(args, timeoutMs) {
+  return spawnSync('git', args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: MAX_BUFFER });
+}
+
+/** @param {string} url @returns {Promise<number|null>} the status, or null if unreachable */
+async function probeStatus(url) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+    return res.status;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** @param {Response} res @returns {string[]} */
+function readSetCookies(res) {
+  const h = /** @type {any} */ (res.headers);
+  if (typeof h.getSetCookie === 'function') return h.getSetCookie();
+  const raw = res.headers.get('set-cookie');
+  return raw ? [raw] : [];
+}
+
+/** @param {Map<string,string>} jar */
+function cookieHeader(jar) {
+  return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+/**
+ * A single setup HTTP request through a minimal cookie jar: sends the accumulated cookies,
+ * absorbs any Set-Cookie from the response, returns status + parsed JSON.
+ * @param {string} method
+ * @param {string} url
+ * @param {any} body inline JSON body, or undefined for none
+ * @param {Map<string,string>} jar
+ * @returns {Promise<{status:number, text:string, json:any}>}
+ */
+async function httpReq(method, url, body, jar) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    /** @type {Record<string,string>} */
+    const headers = {};
+    const cookie = cookieHeader(jar);
+    if (cookie) headers['Cookie'] = cookie;
+    /** @type {RequestInit} */
+    const init = { method, headers, signal: controller.signal, redirect: 'manual' };
+    if (body !== undefined && body !== null) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, init);
+    for (const c of readSetCookies(res)) {
+      const first = c.split(';')[0];
+      const eq = first.indexOf('=');
+      if (eq > 0) {
+        const name = first.slice(0, eq).trim();
+        const value = first.slice(eq + 1).trim();
+        if (name && value) jar.set(name, value); // never let a cleared cookie wipe the jar
+      }
+    }
+    const text = await res.text();
+    let json;
+    try {
+      json = text ? JSON.parse(text) : undefined;
+    } catch {
+      json = undefined;
+    }
+    return { status: res.status, text, json };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Image (code-identity) resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the SUT image and its digest per code_identity. from_tree: shallow partial-clone
+ * @SHA, overlay the Dockerfile, build (cache-skipping if the per-SHA tag already exists).
+ * pinned_image: pull and verify the digest matches. cloneDir is registered via onCloneDir
+ * the instant it exists, so a mid-clone failure still gets reaped.
+ * @param {Docker} docker
+ * @param {import('./recipe.mjs').Recipe} recipe
+ * @param {(dir:string)=>void} onCloneDir
+ * @returns {Promise<{image:string, imageDigest:string|undefined, sha:string|undefined}>}
+ */
+async function resolveImage(docker, recipe, onCloneDir) {
+  const ci = recipe.code_identity;
+
+  if (ci.mode === 'pinned_image') {
+    const pull = docker.run(['pull', ci.image_ref], PULL_TIMEOUT_MS);
+    if (pull.status !== 0) throw new Error(`conjure: docker pull ${ci.image_ref} failed (exit ${pull.status}): ${tail(pull.stderr || pull.stdout)}`);
+    const insp = docker.run(['image', 'inspect', ci.image_ref, '--format', '{{json .RepoDigests}}'], DOCKER_TIMEOUT_MS);
+    /** @type {string[]} */
+    let digests = [];
+    try {
+      digests = JSON.parse((insp.stdout || '[]').trim()) || [];
+    } catch {
+      digests = [];
+    }
+    const shas = digests.map((d) => String(d).split('@')[1] || '').filter(Boolean);
+    if (!shas.includes(ci.image_digest)) {
+      throw new Error(`conjure: pinned image ${ci.image_ref} digest mismatch — recipe pins ${ci.image_digest} but pulled ${shas.join(', ') || '(none)'}`);
+    }
+    return { image: ci.image_ref, imageDigest: ci.image_digest, sha: undefined };
+  }
+
+  // from_tree
+  const tag = `pb-sut-${slug(recipe.name)}-${ci.sha.slice(0, 7)}`;
+  const cached = docker.run(['image', 'inspect', tag], DOCKER_TIMEOUT_MS).status === 0;
+  if (!cached) {
+    const cloneDir = mkdtempSync(join(tmpdir(), 'pb-conjure-'));
+    onCloneDir(cloneDir);
+    const clone = git(['clone', '--filter=blob:none', ci.repo, cloneDir], CLONE_TIMEOUT_MS);
+    if (clone.status !== 0) throw new Error(`conjure: git clone ${ci.repo} failed (exit ${clone.status}): ${tail(clone.stderr || clone.stdout)}`);
+    const co = git(['-C', cloneDir, 'checkout', ci.sha], GIT_TIMEOUT_MS);
+    if (co.status !== 0) throw new Error(`conjure: git checkout ${ci.sha} failed (exit ${co.status}): ${tail(co.stderr || co.stdout)}`);
+
+    const dfPath = join(cloneDir, ci.dockerfile);
+    if (!existsSync(dfPath)) throw new Error(`conjure: dockerfile ${ci.dockerfile} not found in the checkout of ${ci.sha}`);
+    const overlaid = overlayDockerfile(readFileSync(dfPath, 'utf8'), ci.build_overlay);
+    const overlayPath = join(cloneDir, 'Dockerfile.pb-overlay');
+    writeFileSync(overlayPath, overlaid);
+
+    const base = deriveBaseImage(overlaid);
+    if (base) docker.run(['pull', base], PULL_TIMEOUT_MS); // best-effort; the build pulls FROM if this misses
+
+    const buildArgs = ['build', '-f', overlayPath, '-t', tag];
+    // Supply the M1-disclosed dev build-type only when the tree declares that arg (derived, not blind).
+    if (/^\s*ARG\s+N8N_RELEASE_TYPE\b/im.test(overlaid)) buildArgs.push('--build-arg', 'N8N_RELEASE_TYPE=dev');
+    buildArgs.push(join(cloneDir, ci.context));
+    const build = docker.run(buildArgs, BUILD_TIMEOUT_MS, { env: { ...process.env, DOCKER_BUILDKIT: '1' } });
+    if (build.status !== 0) throw new Error(`conjure: docker build failed (exit ${build.status}): ${tail(build.stderr || build.stdout)}`);
+  }
+  const idInsp = docker.run(['image', 'inspect', tag, '--format', '{{.Id}}'], DOCKER_TIMEOUT_MS);
+  const imageDigest = (idInsp.stdout || '').trim() || undefined;
+  return { image: tag, imageDigest, sha: ci.sha };
+}
+
+// ---------------------------------------------------------------------------
+// conjure / teardown
+// ---------------------------------------------------------------------------
+
+/**
+ * Bring up a real SUT from a pb-recipe-v1 and return a live, drivable handle. A failure
+ * reaps partial state; success leaves the SUT running for the caller to drive.
+ * @param {string} recipeDir directory holding recipe.json (+ body files)
+ * @returns {Promise<SutHandle>}
+ */
+export async function conjure(recipeDir) {
+  const recipe = loadRecipe(recipeDir);
+  const docker = detectDocker();
+  if (!docker) throw new Error('conjure: docker is not available (`docker version` did not respond — is the daemon running?).');
+
+  const ci = recipe.code_identity;
+  const c = recipe.conjure;
+  const baseUrl = `http://localhost:${c.published_port}`;
+
+  /** @type {string|null} */ let containerName = null;
+  /** @type {string|null} */ let cloneDir = null;
+  let success = false;
+  try {
+    const { image, imageDigest, sha } = await resolveImage(docker, recipe, (d) => {
+      cloneDir = d;
+    });
+
+    // Fresh world: a unique container name per conjure => fresh_world:recreate is a brand-new container.
+    const runtag = Date.now().toString(36);
+    containerName = `pb-sut-${slug(recipe.name)}-${runtag}`;
+    const envArgs = Object.entries(c.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+    const run = docker.run(['run', '-d', '--name', containerName, '-p', `${c.published_port}:${c.container_port}`, ...envArgs, image], DOCKER_TIMEOUT_MS);
+    if (run.status !== 0) throw new Error(`conjure: docker run failed (exit ${run.status}): ${tail(run.stderr || run.stdout)}`);
+
+    // Ready: poll the disclosed ready signal — the ready response IS the bring-up proof.
+    const readyUrl = `${baseUrl}${c.ready_signal.path}`;
+    const expect = c.ready_signal.expect_status;
+    /** @type {number|null} */ let readyStatus = null;
+    let lastSeen = 'no-response';
+    const deadline = Date.now() + READY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const s = await probeStatus(readyUrl);
+      lastSeen = s === null ? 'no-response' : String(s);
+      if (s === expect) {
+        readyStatus = s;
+        break;
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (readyStatus === null) throw new Error(`conjure: SUT did not answer ${readyUrl} with ${expect} within ${READY_TIMEOUT_MS / 1000}s (last: ${lastSeen})`);
+
+    // setup_overlay: disclosed setup-time fixups (e.g. `apk add sqlite` for the store tap).
+    for (const line of c.setup_overlay || []) {
+      const ex = docker.run(['exec', '-u', 'root', containerName, 'sh', '-c', line], DOCKER_TIMEOUT_MS);
+      if (ex.status !== 0) throw new Error(`conjure: setup_overlay "${line}" failed (exit ${ex.status}): ${tail(ex.stderr || ex.stdout)}`);
+    }
+
+    // auth_preflight + setup: a minimal cookie jar, ordered steps, captures.
+    /** @type {Map<string,string>} */ const jar = new Map();
+    if (recipe.auth_preflight) {
+      await httpReq(recipe.auth_preflight.method, `${baseUrl}${recipe.auth_preflight.path}`, undefined, jar);
+    }
+    /** @type {Record<string,any>} */ const captures = {};
+    /** @type {Record<string,any>} */ const bodyDerived = {};
+    for (const step of recipe.setup) {
+      const path = resolvePlaceholders(step.path, (n) => captures[n]);
+      let body;
+      if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
+      else if (step.body !== undefined) body = step.body;
+      if (body !== undefined) collectScalars(body, bodyDerived);
+      const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar);
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(`conjure: setup step "${step.id}" failed: HTTP ${res.status} ${tail(res.text, 300)}`);
+      }
+      if (step.capture) {
+        for (const [name, jp] of Object.entries(step.capture)) captures[name] = extractJsonPath(res.json, jp);
+      }
+    }
+
+    // Front door: resolve placeholders from captures, else a minted id in a setup body.
+    const frontDoorUrl = `${baseUrl}${resolvePlaceholders(recipe.front_door.url_template, (n) => captures[n] ?? bodyDerived[camelize(n)] ?? bodyDerived[n])}`;
+
+    // Identity + bring-up proof: minted (harness provenance) — the code running IS the code under test.
+    const fingerprint = mint({
+      id: 'fingerprint',
+      kind: 'fingerprint',
+      provenance: 'harness',
+      data: {
+        mode: ci.mode,
+        ...(sha ? { sha } : {}),
+        ...(imageDigest ? { image_digest: imageDigest } : {}),
+        version_label: ci.version_label,
+        image_ref_or_tag: image,
+        container: containerName,
+      },
+    });
+    const bringup = mint({
+      id: 'bringup',
+      kind: 'attempt',
+      provenance: 'harness',
+      data: { request: `GET ${readyUrl}`, status: readyStatus, ready: true },
+    });
+
+    /** @type {SutHandle} */
+    const handle = {
+      recipe,
+      containerName,
+      baseUrl,
+      frontDoorUrl,
+      captures,
+      receipts: [fingerprint, bringup],
+      _cloneDir: cloneDir,
+      teardown: () => teardownSut(handle),
+    };
+    success = true;
+    return handle;
+  } finally {
+    if (!success) await cleanup(docker, containerName, cloneDir);
+  }
+}
+
+/**
+ * Reap a conjured SUT: remove the container and the from-tree checkout. Safe to call twice.
+ * @param {SutHandle|null} [handle]
+ * @returns {Promise<void>}
+ */
+export async function teardownSut(handle) {
+  if (!handle) return;
+  await cleanup(detectDocker(), handle.containerName, handle._cloneDir);
+}
+
+/**
+ * @param {Docker|null} docker
+ * @param {string|null} containerName
+ * @param {string|null} cloneDir
+ */
+async function cleanup(docker, containerName, cloneDir) {
+  if (docker && containerName) docker.run(['rm', '-f', containerName], DOCKER_TIMEOUT_MS); // no-op if already gone
+  if (cloneDir) {
+    try {
+      rmSync(cloneDir, { recursive: true, force: true });
+    } catch {
+      /* already gone */
+    }
+  }
+}
