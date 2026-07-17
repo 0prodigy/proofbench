@@ -154,6 +154,29 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    isolation + P1 `quantified` @ M7 proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
+6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
+   Catch). Point pb at a REAL Lyric multi-repo + dev-package change: ENG-17397 = Actions/Stages/
+   Controls across **7 repos** (appservice `ENG-17397-action-and-interrupts`, metadata-service,
+   mosaic-function-stage-control [new], mosaic-function-scenario, lyric-py/lyric-runner-py
+   `ENG-17398` dev-pinned wheels, ui-monorepo) + db-migrations + Nuclio functions (see
+   `~/lyric/.tickets/ENG-17397/branches.json`). This is the FIRST **Lyric class** (k8s-attach
+   substrate), complementing the OSS docker-compose class — same `pb-recipe-v1` contract, new modes.
+   **Huge leverage — the Lyric side ALREADY has pb-shaped primitives** (`~/lyric/.tickets/ENG-17397/
+   evidence/*/manifest.json` schema 2: `substrate:k8s-attach`, `pins` = image digests + k8s
+   context/namespace + repo SHA = code-identity, `artifacts` provenance:`harness` + sha256 + exit
+   codes = receipts, `lyric-qa/scripts/lyric-mongo.sh` = out-of-band Mongo tap, tri-state verdict).
+   So the work = UNIFY those with the honesty core (verdict/mint/seal/recipe), NOT build from zero.
+   Extend the recipe: `conjure.mode: k8s-attach` (ATTACH to a BYOC lyriclet — Lyric doesn't
+   compose locally; reuse `lyric-devops`/`lyric-local-dev`), `store_tap.engine: mongo` (kubectl/
+   port-forward via lyric-qa scripts) + clickhouse/redis, `drive: note-lifecycle` (reuse `lyric-qa`
+   12-op flow, not a browser). **Multi-repo + dev-package code-identity:** the fingerprint binds ALL
+   7 branch SHAs + the dev-wheel versions (`lyric-runner-py X.Y.Z.dev17397`, `mds-sdk 1.7.3.dev17397`)
+   — the thesis's coordinated-change identity. **Discriminating claim (a real DNW):** a blocking
+   stage-control on a terminal execution must transition to terminal + fire the user-action email +
+   proceed on ack — the stuck-`queued` auth-scoping bug (`diagnosis-stuck-queued-controls.md`) means
+   it FALSIFIES → DOES_NOT_WORK. NOTE: the OLD pb v0.1.0 (0prodigy/proofbench) already produced the
+   schema-2 evidence; this brings the NEW product-v1 honesty core to the same case. Fable-plan the
+   detail when we reach it. NOT before the OSS pipeline is proven end-to-end (M5/M6).
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
 (the open-ended part — CONJURE is "never proven complete, only progressively hardened"),
