@@ -1,0 +1,27 @@
+{
+  "name": "M1 Form Trigger Spike",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "M1 Spike Form",
+        "formDescription": "proofbench conjure probe",
+        "formFields": {
+          "values": [
+            { "fieldLabel": "Your name", "fieldType": "text", "requiredField": true }
+          ]
+        },
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "94f60ad3-fb09-448c-9b1e-3aee4d1afa07",
+      "name": "n8n Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 1,
+      "position": [260, 300],
+      "webhookId": "0670a18c-86aa-4a59-aa17-4a3dae803334"
+    }
+  ],
+  "connections": {},
+  "settings": {},
+  "active": false
+}

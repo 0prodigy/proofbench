@@ -1,0 +1,64 @@
+{
+  "kind": "pb-recipe-v1",
+  "name": "n8n Form Trigger (PR #7130)",
+  "notes": "front_door.url_template's {webhook_id} is the webhookId UUID minted into workflow.json's Form Trigger node — the node's webhookId IS the URL base (n8n 1.12 has no /form/ endpoint; the form serves at /webhook/<webhookId>/n8n-form). The runner reads that webhookId out of workflow.json and substitutes it for {webhook_id}. code_identity: the merge SHA 3ddc176d self-reports version 1.11.0 (version_label); the first shipped release containing #7130 is 1.12.0 (use mode:pinned_image with image_ref docker.n8n.io/n8nio/n8n:1.12.0 for the label-clean path).",
+  "code_identity": {
+    "mode": "from_tree",
+    "repo": "https://github.com/n8n-io/n8n.git",
+    "sha": "3ddc176dfa2d3d99a328a29a3a8613e35ff456a0",
+    "dockerfile": "docker/images/n8n-custom/Dockerfile",
+    "context": ".",
+    "build_overlay": [
+      "npm install -g corepack@latest",
+      "ENV COREPACK_INTEGRITY_KEYS=0"
+    ],
+    "version_label": "1.11.0"
+  },
+  "conjure": {
+    "env": {
+      "DB_TYPE": "sqlite",
+      "N8N_SECURE_COOKIE": "false",
+      "N8N_DIAGNOSTICS_ENABLED": "false"
+    },
+    "container_port": 5678,
+    "published_port": 5678,
+    "ready_signal": { "path": "/healthz", "expect_status": 200 },
+    "setup_overlay": ["apk add --no-cache sqlite"]
+  },
+  "fresh_world": { "strategy": "recreate" },
+  "auth_preflight": { "method": "GET", "path": "/rest/login" },
+  "setup": [
+    {
+      "id": "owner",
+      "method": "POST",
+      "path": "/rest/owner/setup",
+      "body_file": "owner.json"
+    },
+    {
+      "id": "workflow",
+      "method": "POST",
+      "path": "/rest/workflows",
+      "body_file": "workflow.json",
+      "capture": { "workflow_id": "$.data.id" }
+    },
+    {
+      "id": "activate",
+      "method": "PATCH",
+      "path": "/rest/workflows/{workflow_id}",
+      "body": { "active": true }
+    }
+  ],
+  "front_door": {
+    "url_template": "/webhook/{webhook_id}/n8n-form",
+    "serves": "the server-rendered Form Trigger page (GET) and the multipart form submit (POST -> {status:200})"
+  },
+  "store_tap": {
+    "engine": "sqlite",
+    "db_path": "/home/node/.n8n/database.sqlite",
+    "busy_timeout_ms": 3000,
+    "queries": {
+      "executions": "SELECT id, workflowId, status, finished FROM execution_entity ORDER BY id;"
+    },
+    "transient_lock_is_expected": true
+  }
+}
