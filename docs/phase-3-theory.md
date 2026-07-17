@@ -10,6 +10,10 @@ Standard for this project (binding): a false WORKS is the cardinal sin. Every li
 add serves the property below or it does not ship. Abstractions do not ship until a real run
 flows through them.
 
+**Revised after Battle-test #1** (`docs/battle-test-01-calcom-webhooks.md`, Cal.com org-scoped
+webhooks): egress effect checks (§1.5), quantifier lint (§1.4), and mutation-attribution
+calibration (§1.2) are now day-one; new false-WORKS vectors FW-11/FW-12/FW-14 are in §2.
+
 ---
 
 ## 0. The property — corrected
@@ -30,12 +34,16 @@ provenance is worthless if the agent aims the camera.
 >   injection, no deep links.
 > - **(b) Effect confirmed on ground truth.** ≥1 effect check, **bound to a harness-observed
 >   persisted-state delta** that occurred **inside a user-action window**, confirmed on *both*
->   the persisted leg (store handle) *and* a fresh-session user surface.
+>   the persisted leg (store handle) *and* a fresh-session user surface. **Egress effects** (the
+>   essence is an outbound call to a *user-configured* destination — webhooks/callbacks): the
+>   check binds to the sealed-room **egress ledger** with payload content-bound to a
+>   same-window persisted entity, and **content-binding replaces the fresh-session leg** (§1.5).
 > - **(c) Discriminating, complete claims.** Every pre-registered claim CONFIRMED and every
 >   hostile-repertoire class SURVIVED or mechanically-justified-N/A; **NOT-EXECUTED counts as
 >   untested → CND**, never as pass.
-> - **(d) Stability.** The effect held across a receipted settle window; and either the walk
->   reproduced k/N, or the WORKS confession discloses *"single walk; intermittence unprobed."*
+> - **(d) Stability + reproduction.** The effect held across a receipted settle window, **and
+>   the walk reproduced k/N from a fresh world each time** — a single clean walk is never a
+>   WORKS (FW-6, decided).
 >
 > — all derived by **deterministic rule from sealed, harness-collected receipts the driving
 > agent could neither write nor aim.**
@@ -53,7 +61,7 @@ An honesty product must publish this, SLSA-style, and never overclaim past it.
 | Claims are discriminating | **bounded by corpus** — kill-condition *quality* is not mechanizable | claim adequacy → corpus-gated, false-WORKS = 0 release-blocking |
 | Verdict is about the change's code | **by construction** — "pb built it or refuses to bind" (§1.3, FW-4) | non-reproducible builds → chronic CND → a policy decision, not a loophole |
 | Effect is final, not transient | **bounded** — settle policy, empirically calibrated (E5) | long-horizon finality (sagas, async) → `notCovered` |
-| Not intermittent | **decision (FW-6)** — either k/N for WORKS, or disclose single-walk | residual disclosed in the confession |
+| Not intermittent | **by policy** — WORKS requires k/N identical walks from a fresh world (FW-6 decided) | intermittence beyond N → `notCovered`; cost: clean-path wall-clock ×~k |
 
 The gap between the old P and P′ *is* the product's honest edge. We ship P′ and say exactly
 what it does not cover.
@@ -91,9 +99,12 @@ point the harness at a hypothesized column that the bug happens to write.
    without `evaluate`, that is a **CND**, not an exception.
 2. **The cross-exam HTTP driver is physically read-only** — a method allowlist enforced at the
    tap; any non-GET from the driver is dropped and receipted as a harness violation.
-3. **Mutation attribution** — every persisted delta must fall inside a browser-originated action
-   window. A delta with no attributable user-shaped cause **contaminates the run → CND**
-   ("state changed outside the walk"). Same snapshot machinery as §1.1, second dividend.
+3. **Mutation attribution (calibrated — R4).** A persisted delta to a **claim-relevant** table
+   with no attributable user-shaped cause **contaminates the run → CND**. Attribution subtracts
+   an **idle baseline** (ambient churn: sessions, cron, queue heartbeats) and follows **causal
+   chains** (queue/scheduled rows inherit their originating window via FK) — so a real app is not
+   false-CND'd by background writes; only unexplained writes to tables a claim *reads* are fatal.
+   (The naive "any delta → CND" rule breaks every real app — Battle-test #1, B4.)
 4. **Navigation provenance** — each navigation records its cause (clicked element / typed entry
    URL). The entry URL is the front door; any *other* typed URL is a deep link → the "reach"
    claim is not confirmed.
@@ -109,6 +120,30 @@ green through):
   (e.g. "no form element present," proven from the DOM). Agent-declared N/A is not a green.
 - **NOT-EXECUTED ≡ untested → CND**, naming the probe. A probe that errored is never "survived."
 
+### 1.4 Quantifier lint (closes FW-11: owner-shadow / quantifier collapse)
+
+An intent with a universal quantifier (any / all / every / whole-X) is **not satisfiable by the
+configuring actor's own scope.** At **verdict time** (like `effectChecks ≥ 1`), WORKS requires
+**≥2 distinct in-scope instantiations that are not the configuring actor**, plus **≥1 out-of-scope
+negative**. A plural event class ("booking/meeting events") forces **one claim per selected
+trigger**, or an explicit `Assumed:` narrowing sealed into the echo. Without this, a walk that only
+exercises the owner's own CREATED event passes every other mechanism while never testing the
+feature — a false WORKS on a real feature (Battle-test #1, FW-11).
+
+### 1.5 Egress effect check (closes B1: the outbound-delivery class)
+
+Many real features' essence is an **outbound call to a user-configured destination** (webhooks,
+callbacks, notifications): no persisted delta, no fresh-session surface, so `P′(b)` read literally
+CNDs the whole class. Resolution: the sealed-room **egress ledger** and a **pb-controlled receiver**
+are first-class observed stores. An egress effect check is admissible iff (i) the POST **leaves the
+app container inside a settle-extended user-action window**, (ii) its payload **content-binds** to
+an entity the same window persisted (booking uid / walk-minted nonce), (iii) optionally matches the
+front-door-configured secret. For egress claims, **content-binding replaces the fresh-session leg.**
+Carve-out: **a destination the user configures through the front door is user data — aiming it at a
+controlled surface is a *walk*, not a stub.** Fixed-vendor destinations (calendar sync) remain CND.
+Corollary strength: the sealed room makes **negatives provable** ("no cross-tenant delivery" = zero
+egress to the receiver in-window) — stronger than any conventional suite.
+
 ---
 
 ## 2. The false-WORKS kill list (ranked; status per vector)
@@ -122,11 +157,14 @@ Status = **closed** (by a §1 mechanism), **bounded** (corpus-gated), or **open*
 | FW-3 | Vacuous claim set (tautologies, N/A, empty checks) | HIGH·HIGH | §1.3 verdict-side minimums | **closed** on structure; kill-condition *quality* **bounded** |
 | FW-4 | Wrong-bytes binding (stale image labeled with new SHA) | MED·HIGH | "pb built it from the tree, or refuses to bind"; labels/`/version` are hearsay; prebuilt → CND floor | **closed**; non-reproducible builds → **open** policy |
 | FW-5 | Transient state (effect held at T, gone at T+finality) | MED·HIGH | typed settle policy: re-read persisted leg at two spaced points + fresh-session surface; long-horizon → `notCovered` | **open** — calibrate empirically (E5) |
-| FW-6 | Single-walk green over an intermittent bug | MED·HIGH | **decision:** WORKS requires k/N walks, OR P drops "reproduced" for green and every WORKS discloses "single walk" | **open decision — pick before build** |
+| FW-6 | Single-walk green over an intermittent bug | MED·HIGH | **WORKS requires k/N identical walks from a fresh world** (decided) | **closed** (cost: clean-path wall-clock ×~k) |
 | FW-7 | LLM misreads pixels → confirms the surface leg | MED·MED | **zero purely-perceptual confirmations** on verdict-bearing claims; surface leg = deterministic DOM-text; pixels corroborate narration only | **closed** |
 | FW-8 | Attach mode: a concurrent write satisfies your check | LOW(v1)·HIGH | reserve now: run-scoped nonce entities, or effect claims cap at CND; receipts name primary-vs-replica | **reserved** (v1 is conjure-only) |
 | FW-9 | Human retry-to-green, forwards the lucky file | HIGH-over-time·MED | at mint, scan output dir for sibling case files (same promise+fingerprint), stamp "3rd run; siblings: CND, DNW" | **open** (product-level; cheap mitigation) |
 | FW-10 | Permissive doubles acquit a broken integration | MED·MED | a double must validate against the vendor schema and be decline-capable; a double that can't reject can't ship | **closed by rule** |
+| FW-11 | Owner-shadow / quantifier collapse — walk tests only the configuring actor's own scope | HIGH·FATAL | §1.4 quantifier lint (≥2 non-actor in-scope + ≥1 negative, at verdict) | **closed** on quantifiers; general adequacy **bounded** |
+| FW-12 | Fixture-world divergence — verdict rests on fixture-shaped rows prod may not produce | MED·HIGH | worldProvenance tier + world-shape receipt (R3) | **open — boundable by disclosure** |
+| FW-14 | Sandbox config/flags ≠ customer prod config | MED·MED | a WORKS speaks about *code*; stays silent about config divergence, in every confession | **open — boundable by disclosure** |
 
 ---
 
