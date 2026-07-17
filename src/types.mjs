@@ -124,6 +124,7 @@ export const ClaimKind = Object.freeze({
  * @typedef {Object} Reproduce
  * @property {number} k successful reproductions from a fresh world
  * @property {number} n attempts (WORKS requires k >= 2; a single walk is never WORKS, FW-6)
+ * @property {number} [kFail] successful REPRODUCTIONS of the observed FAILURE (rule 2 convicts only when kFail >= 2; a lone failure is "observed once, could not reproduce")
  */
 
 /**

@@ -7,7 +7,8 @@
  * docs/phase-3-theory.md §0-§2/§7 in the exact order below:
  *
  *   1. Only tool|harness receipts satisfy a claim; agent receipts corroborate only.
- *   2. Any FALSIFIED claim => DOES_NOT_WORK.
+ *   2. A FALSIFIED claim => DOES_NOT_WORK only if the failure REPRODUCED from a fresh world
+ *      (reproduce.kFail >= 2); a lone failure is CND ("observed once, could not reproduce").
  *   3. An effect claim is CONFIRMED only if its EffectCheck binds a delta receipt
  *      that is harness-provenance AND not sourcePR (M3) AND has a content-bound confirm
  *      leg (a fresh-session re-observation consistent with the delta, or an egress
@@ -421,11 +422,24 @@ export function verdict(bundle) {
     }
   }
 
-  // Rule 2: any FALSIFIED claim => DOES_NOT_WORK.
+  // Rule 2: a FALSIFIED claim convicts as DOES_NOT_WORK only if the failure REPRODUCED from a
+  // fresh, identical world (kFail >= 2, mirroring the WORKS k>=2 threshold, §0/FW-6). A single
+  // unreproduced failure is "observed once, could not reproduce" — a CND, never a verdict. The
+  // FALSIFIED scoreboard entries survive either way, so the decisive moment stays visible.
   const falsified = scoreboard.filter((s) => s.state === ClaimState.FALSIFIED);
   if (falsified.length > 0) {
     for (const s of falsified) reasons.push(`FALSIFIED ${s.claimId} (${s.kind}): ${s.detail}`);
-    return { state: Verdict.DOES_NOT_WORK, reasons, scoreboard };
+    const kFail = (bundle && bundle.reproduce && bundle.reproduce.kFail) || 0;
+    if (kFail >= 2) {
+      return { state: Verdict.DOES_NOT_WORK, reasons, scoreboard };
+    }
+    const nFail = (bundle && bundle.reproduce && bundle.reproduce.n) || 0;
+    for (const s of falsified) {
+      reasons.push(
+        `COULD_NOT_DETERMINE: claim ${s.claimId} FALSIFIED but the failure reproduced only kFail=${kFail}/${nFail} (a single unreproduced failure is "observed once, could not reproduce"; conviction needs kFail>=2).`
+      );
+    }
+    return { state: Verdict.COULD_NOT_DETERMINE, reasons, scoreboard };
   }
 
   // Rule 6: WORKS.

@@ -70,11 +70,43 @@ test('rule 2 — a FALSIFIED claim yields DOES_NOT_WORK', () => {
       { id: 'd', kind: 'delta', provenance: 'harness', data: { entity: 'row', before: 1, after: 1 } },
       { id: 'f', kind: 'fresh-session', provenance: 'harness', data: { observed: 1 } },
     ].map(mint),
-    reproduce: { k: 2, n: 2 },
+    reproduce: { k: 2, n: 2, kFail: 2 },
   });
   const v = verdict(b);
   assert.equal(stateOf(v.scoreboard, 'e'), ClaimState.FALSIFIED);
   assert.equal(v.state, Verdict.DOES_NOT_WORK);
+});
+
+test('rule 2 — a FALSIFIED claim that reproduced only once (kFail=1) is CND, not DNW', () => {
+  const b = newBundle({
+    intent: 'x',
+    actorIdentity: 'owner',
+    claims: [
+      {
+        id: 'e',
+        kind: 'effect',
+        scope: 'user',
+        effectCheck: {
+          entity: 'row',
+          beforeValue: 1,
+          expectedAfterRelation: { op: 'increased' },
+          deltaReceiptId: 'd',
+          confirmLegReceiptId: 'f',
+        },
+        receiptIds: ['d', 'f'],
+      },
+    ],
+    receipts: [
+      { id: 'd', kind: 'delta', provenance: 'harness', data: { entity: 'row', before: 1, after: 1 } },
+      { id: 'f', kind: 'fresh-session', provenance: 'harness', data: { observed: 1 } },
+    ].map(mint),
+    reproduce: { k: 0, n: 2, kFail: 1 },
+  });
+  const v = verdict(b);
+  // The decisive moment survives on the scoreboard — the claim is still FALSIFIED...
+  assert.equal(stateOf(v.scoreboard, 'e'), ClaimState.FALSIFIED);
+  // ...but a single unreproduced failure is "observed once, could not reproduce" => CND, not DNW.
+  assert.equal(v.state, Verdict.COULD_NOT_DETERMINE);
 });
 
 test('rule 3 — effect confirmed only with a harness, non-sourcePR delta + a valid confirm leg', () => {

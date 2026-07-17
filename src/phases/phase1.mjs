@@ -219,6 +219,10 @@ export async function runPhase1(repoDir) {
   // A real run: delta = run 1 (persisted leg), confirm leg = run 2 (a fresh process
   // re-observation). reproduce.k = runs that genuinely passed (exit 0, no failures).
   const k = runs.filter((r) => r.exitCode === 0 && (r.failed == null || r.failed === 0) && r.testsRan !== 0).length;
+  // reproduce.kFail = runs where the suite FAILED (the effect did not hold) — the failure
+  // REPRODUCED from a fresh process. Rule 2 convicts DOES_NOT_WORK only when kFail >= 2; a lone
+  // failure is "observed once, could not reproduce" => CND (§0/FW-6).
+  const kFail = runs.filter((r) => r.exitCode !== 0 || (r.failed != null && r.failed > 0)).length;
   const receipts = [
     {
       id: 'run-1',
@@ -256,5 +260,5 @@ export async function runPhase1(repoDir) {
   } else {
     diagnosis.push(`phase1: ${cmd} failed (exit ${first.exitCode}${first.failed ? `, ${first.failed} failing` : ''}).`);
   }
-  return finalize(newBundle({ intent, actorIdentity: 'ci', claims, receipts, reproduce: { k, n: RUNS } }), diagnosis);
+  return finalize(newBundle({ intent, actorIdentity: 'ci', claims, receipts, reproduce: { k, n: RUNS, kFail } }), diagnosis);
 }

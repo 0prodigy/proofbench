@@ -289,6 +289,9 @@ export async function runPhase3(opts = {}) {
   // reproduce.k: fresh-world iterations where the discount actually persisted AND held stable
   // across the settle window (a transient/rolled-back effect does not count, FW-5).
   const k = iterations.filter((it) => it.stable && it.persisted === it.quoted.total).length;
+  // reproduce.kFail: fresh-world iterations where the promised effect did NOT hold — the failure
+  // REPRODUCED (the discount did not stick). Rule 2 convicts DOES_NOT_WORK only when kFail >= 2.
+  const kFail = iterations.filter((it) => it.persisted !== it.quoted.total).length;
 
   /** @type {import('../types.mjs').Receipt[]} */
   const receipts = [
@@ -414,5 +417,5 @@ export async function runPhase3(opts = {}) {
     );
   }
 
-  return finalize(newBundle({ intent, actorIdentity: 'pb-operator', claims, receipts, reproduce: { k, n: REPRODUCTIONS } }), diagnosis);
+  return finalize(newBundle({ intent, actorIdentity: 'pb-operator', claims, receipts, reproduce: { k, n: REPRODUCTIONS, kFail } }), diagnosis);
 }
