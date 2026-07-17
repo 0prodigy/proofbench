@@ -128,14 +128,18 @@ not defects — point the editor at the workspace TypeScript/types to silence th
      front-door URL. The **walk stays agent-proposed** (never recipe data — avoids the Gherkin grave).
 4. **Real-repo Catch roadmap (M1→M7).** First target **n8n #7130** (single-process, plain-DOM Form
    Trigger, SQLite store; merge SHA `3ddc176dfa2d3d99a328a29a3a8613e35ff456a0`, n8n@1.12.0);
-   cal.com is the evidence-picked fallback if conjure is infeasible. **M1 conjure spike — IN FLIGHT**
-   (scratchpad `m1-n8n/`, no pb code: build+up+form-serves+`docker exec sqlite3` taps executions).
-   Then M2 recipe loader (`src/recipe.mjs`) → M3 conjure runner + **code-identity fingerprint**
-   (P3-1 lands here) → M4 store-tap runner → M5 browser drive (**owner-shadow becomes *testable***
-   here) → M6 the n8n Catch end-to-end (blind→EXECUTED; differential merge-SHA=WORKS vs
-   parent-SHA≠WORKS) → M7 adversarial extension. **Latent fixes land WITH their surface:** seal-
-   stripping @ the M6/persist surface; mint-boundary isolation + P1 `quantified` marking @ the M7
-   proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive primitives — generality earned per case.
+   cal.com is the evidence-picked fallback if conjure is infeasible. **Progress:** M1 spike ✅
+   CONJURE FEASIBLE (`m1-n8n/RECIPE-FACTS.md`) · **M2 ✅ `870ffb8`** (`src/recipe.mjs` loader +
+   `recipes/n8n-form-trigger-pr7130/`) · **M3 ✅ `fcd2d4d`, hand-verified** (`src/conjure.mjs` +
+   `pb conjure`: builds real n8n from-tree, mints code-identity fingerprint = P3-1 landed, form
+   serves; note from-tree build is NOT bit-reproducible → git SHA is the stable identity,
+   image_digest is a per-build attestation) · **M4 store-tap — IN FLIGHT** (`src/storetap.mjs`:
+   `docker exec sqlite3` out-of-band delta, mints the persisted leg). Then → M5 browser drive
+   (containerized selenium + W3C WebDriver via fetch; **owner-shadow becomes *testable***) → M6 the
+   n8n Catch end-to-end (blind→EXECUTED; differential merge-SHA=WORKS vs parent-SHA≠WORKS) → M7
+   adversarial. **Latent fixes land WITH their surface:** seal-stripping @ M6/persist; mint-boundary
+   isolation + P1 `quantified` @ M7 proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive
+   primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
