@@ -14,6 +14,11 @@ flows through them.
 webhooks): egress effect checks (§1.5), quantifier lint (§1.4), and mutation-attribution
 calibration (§1.2) are now day-one; new false-WORKS vectors FW-11/FW-12/FW-14 are in §2.
 
+**Revised after the Sonnet battle-test campaign** (12 blind PRs, 2 very-big;
+`docs/battle-test-campaign-summary.md`): honesty held 12/12 (no false-WORKS), but the theory's
+*procedure* proved genius-dependent — see **§7** for the six mandatory mechanizations (M1–M6,
+vectors FW-15…FW-20) that must land before the E1 gate, and the revised readiness call.
+
 ---
 
 ## 0. The property — corrected
@@ -165,6 +170,12 @@ Status = **closed** (by a §1 mechanism), **bounded** (corpus-gated), or **open*
 | FW-11 | Owner-shadow / quantifier collapse — walk tests only the configuring actor's own scope | HIGH·FATAL | §1.4 quantifier lint (≥2 non-actor in-scope + ≥1 negative, at verdict) | **closed** on quantifiers; general adequacy **bounded** |
 | FW-12 | Fixture-world divergence — verdict rests on fixture-shaped rows prod may not produce | MED·HIGH | worldProvenance tier + world-shape receipt (R3) | **open — boundable by disclosure** |
 | FW-14 | Sandbox config/flags ≠ customer prod config | MED·MED | a WORKS speaks about *code*; stays silent about config divergence, in every confession | **open — boundable by disclosure** |
+| FW-15 | Vacuous negative claim — a null delta is identical for "blocked" vs "never tried" | HIGH | M1 attempted-action receipt (§7) | **closed by spec**, impl pending |
+| FW-16 | Owner-shadow via auth/session conflation; and on non-quantified claims | HIGH | M2 auth-context receipt + generalized guard (§7) | **closed by spec**, impl pending |
+| FW-17 | Store-shape-naive diffing (CRDT / collapsing-MergeTree / sparse-wide-column) | HIGH | M4 per-engine diff adapters (§7) | **closed by spec**, per-engine impl pending |
+| FW-18 | Front-door vocabulary collapse (drag / observer-scroll / canvas / bare-URL / API-only) | HIGH | M5 vocabulary decision table (§7) | **closed by spec**, impl pending |
+| FW-19 | PR-authored test/verification code used as the effect-check oracle | HIGH | M3 oracle-provenance disqualification (§7) | **closed by spec**, impl pending |
+| FW-20 | Load-bearing state/behavior lives off-diff, missed by a diff-only scope | HIGH | M6 mandatory off-diff dependency scan (§7) | **closed by spec**, impl pending |
 
 ---
 
@@ -299,3 +310,76 @@ gated by E7 (false-WORKS = 0) and E1 (no malicious driver reaches WORKS).**
 and E0–E7 came from an adversarial theory pass (Fable) against the first draft of this design —
 the point of proving on paper first. What it caught (the agent aiming the oracle and staging
 state) would have been a shipped false-WORKS had we gone straight to code.*
+
+---
+
+## 7. Revisions from the Sonnet battle-test campaign (mandatory before E1)
+
+*12 blind, Sonnet-driven battle-tests across a wide PR range (2 very-big: PostHog, Sentry) —
+full report `docs/battle-test-campaign-summary.md`. Result: honesty held **12/12** (no
+false-WORKS; 7 CND / 4 WORKS / 1 DNW), and the theory even predicted a real DNW (Supabase
+offset-pagination bug) from first principles — so it discriminates, it doesn't just hedge. But
+the campaign's central finding is about the production driver: the theory is **not
+philosophically genius-dependent, but its current *procedure* is.** Sonnet stayed honest only by
+doing heavy **unmechanized discovery** (off-diff dependency hunts, oracle-provenance skepticism,
+diff-archaeology) that a production Sonnet under tool-budget pressure will skip. The six items
+below must be **mechanized — made pipeline steps, not agent diligence** — before the E1 gate is
+meaningful; they are the cheapest tricks a hostile driver probes first.*
+
+- **M1 — Attempted-action receipt for negative/blocking claims (closes FW-15).** A null delta is
+  identical for "correctly blocked" and "the agent never tried." A negative claim now requires,
+  besides the null delta, a captured **attempted-mutation receipt** (the request + the app's
+  rejection response); passive network observation of the driving browser is blessed as a
+  legitimate, non-forging oracle input. No attempt receipt → NOT-EXECUTED → CND.
+- **M2 — Auth-context receipt + generalized owner-shadow guard (extends 1.4; closes FW-16).**
+  Require an **independent runtime receipt** (distinct session id / auth cookie) that the
+  "not-the-configuring-actor" leg genuinely ran under a different identity, and fire the guard on
+  **single-instantiation** claims too whenever the only reachable front door is a same-session
+  test/preview affordance (the n8n "Test Step" trap).
+- **M3 — Oracle-provenance disqualification (closes FW-19).** Any effect-check source that is
+  **code shipped by the PR under test** (its own test helpers, a privileged `COUNT(*)`, an
+  internal verification endpoint) is **disqualified as a front-door oracle by rule** — not by
+  agent vigilance (the rudder-server trap).
+- **M4 — Per-storage-engine diff adapters (extends 1.1; closes FW-17).** CONJURE onboarding
+  **classifies the storage engine** and requires an engine-aware read (argMax/FINAL for
+  collapsing MergeTree, CRDT-decode for documents, key-presence for sparse-wide-column) before an
+  effect check on that store can be EXECUTED; absence is an explicit CND reason code.
+- **M5 — Vocabulary decision table (extends 1.2; closes FW-18).** Replace ad-hoc "is this a walk"
+  calls with an explicit **per-interaction-class table** (native input-pipeline drag; native
+  wheel/touch, not `scrollTo`; documented public API/SDK as front-door for API-first products),
+  and **flag — never silently resolve — navigate≡forge** cases (bare-URL ingress).
+- **M6 — Mandatory off-diff dependency scan (closes FW-20).** Before any promise compiles, the
+  pipeline **scans the target repo + declared cross-repo devservices for the actual
+  persistence/execution primitive** — never trusting the diff's file list as complete scope
+  (AppFlowy's `collab-folder` crate, Sentry's separate Rust repo via Kafka, PostHog's
+  capability-gated worker). A pipeline step, not agent initiative.
+
+**Why mandatory, not hardening:** M1–M3 are the cheapest tricks to fake a WORKS; M4–M6 are where a
+budget-pressured Sonnet silently under-delivers. All six were caught only because Sonnet
+over-worked; the checklist alone misses them. They convert the theory from genius-dependent to
+**Sonnet-executable** — the property that matters, since Sonnet is the production driver.
+
+**Hardening (ship alongside E1; each degrades to a disclosed CND, never a false WORKS):**
+structural-no-front-door-read CND category; egress destination third category (operator-singleton
+sink) + destination-bound-to-credential allowlist (SSRF guard); FW-14 split into
+precondition-async / two-phase-verdict / cross-cycle sub-cases with an execution-status-**event**
+window-close signal (never a sleep); known-stub-component registry; twin-implementation coverage
+rule; synthetic-write construction for read/projection-only features; capability-gated topology
+discovery + cross-repo SHA pinning; receipts-pointer on the verdict artifact; harness-bug-vs-
+code-bug CND distinction.
+
+**Genuinely open (disclosure-bounded only):** O1 UI-pending backend slice (temporal false-CND vs
+the exact-fingerprint rule); O2 cross-repo topology discovery has an unbounded engineering tail
+(CONJURE is never "proven complete," only progressively hardened); O3 the native-interaction vs
+programmatic-shortcut boundary for canvas/observer UIs is a policy tradeoff; O4 whether API/SDK
+calls count as "front door" for API-first products is a product-category choice.
+
+## 8. Readiness gate (revised by the campaign)
+
+**NOT ready to build the E1 malicious-driver gate as specified** — but the gap is bounded and
+fixable in one pass, not a rethink. Fold **M1–M6** into the day-one mechanism spec, then run a
+**second, narrower, ACTUALLY-EXECUTED battle-test** (3–5 PRs adversarially chosen to hit M1–M3,
+with a real harness — every one of the 12 campaign verdicts was a blind *prediction*, never an
+executed run) before green-lighting E1. The hardening list lands incrementally alongside E1
+without blocking it. The philosophy is validated (12/12); the *procedure* needs this one
+mechanization pass to be safe in the hands of the production driver.
