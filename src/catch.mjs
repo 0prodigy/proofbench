@@ -242,9 +242,28 @@ function cssAttrValue(value) {
 }
 
 /**
- * The AGENT-PROPOSED walk of the n8n Form Trigger front door: introspect the rendered form to find
+ * Find the first element matching any selector, tried in PRIORITY order (a CSS list returns the
+ * first in DOM order, not selector order — so the most-specific selector must be tried first).
+ * Throws (naming the tried selectors) when none match.
+ * @param {import('./browserdrive.mjs').BrowserClient} client
+ * @param {string[]} selectors
+ * @returns {Promise<string>}
+ */
+async function findFirst(client, selectors) {
+  for (const sel of selectors) {
+    try {
+      return await client.find(sel);
+    } catch {
+      /* try the next selector */
+    }
+  }
+  throw new Error(`catch: no element matched any of [${selectors.join(', ')}]`);
+}
+
+/**
+ * The AGENT-PROPOSED walk of the n8n Form Trigger front door: introspect the rendered page to find
  * its fillable field (never a recipe-baked selector — avoids the Gherkin grave), type the nonce,
- * and submit. Returns the confirmation text observed (informational). Throws if the form has no
+ * and submit. Returns the confirmation text observed (informational). Throws if the page has no
  * fillable field (parent: the trigger node does not exist → the form 404s / renders nothing) — the
  * caller catches it as a could-not-execute (feature-absent → CND).
  * @param {import('./browserdrive.mjs').BrowserClient} client
@@ -254,19 +273,22 @@ function cssAttrValue(value) {
  */
 async function driveForm(client, frontDoorUrl, nonce) {
   await client.navigate(frontDoorUrl);
-  // Introspect: the agent looks at the rendered form and enumerates its inputs.
+  // Introspect: the agent looks at the rendered page and enumerates its inputs (page-wide — the
+  // inputs are not assumed to sit inside a literal <form>).
   const fields = await client.execute(
-    "return Array.from(document.querySelectorAll('form input, form textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() }))"
+    "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() }))"
   );
   const skip = new Set(['submit', 'button', 'checkbox', 'radio', 'file', 'hidden', 'reset', 'image']);
-  const field = (Array.isArray(fields) ? fields : []).find((f) => f && f.name && (f.tag === 'textarea' || !skip.has(f.type)));
+  const field = (Array.isArray(fields) ? fields : []).find((f) => f && (f.tag === 'textarea' || !skip.has(f.type)));
   if (!field) {
     throw new Error(`catch: the front door served no fillable form field (introspected: ${JSON.stringify(fields)}) — the Form Trigger is absent at this SHA`);
   }
-  const selector = `${field.tag}[name="${cssAttrValue(field.name)}"]`;
-  const input = await client.find(selector);
+  // Prefer a name-bound selector; fall back to a positional one if the field carries no name.
+  const input = field.name
+    ? await client.find(`${field.tag}[name="${cssAttrValue(field.name)}"]`)
+    : await findFirst(client, ['input:not([type="hidden"]):not([type="submit"]):not([type="button"])', 'textarea']);
   await client.type(input, nonce);
-  const submit = await client.find('button[type="submit"], form button, [type="submit"]');
+  const submit = await findFirst(client, ['button[type="submit"]', 'input[type="submit"]', '[type="submit"]', 'form button', 'button']);
   await client.click(submit);
   // Best-effort: let the confirmation render, then read the page text (informational only — the
   // load-bearing signal is the out-of-band store delta, not this DOM read).
