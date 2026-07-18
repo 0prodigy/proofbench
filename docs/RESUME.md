@@ -141,12 +141,16 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `pb conjure`: builds real n8n from-tree, mints code-identity fingerprint = P3-1 landed, form
    serves; note from-tree build is NOT bit-reproducible → git SHA is the stable identity,
    image_digest is a per-build attestation) · **M4 ✅ `0538fa3`** (`src/storetap.mjs`: `docker exec
-   sqlite3` out-of-band delta, mints the persisted leg; engine-guarded to sqlite). **Reshape (anti-
-   overfit, §3):** before M5, GROW THE POOL + RANDOMIZE. In flight: **documenso + medusa conjure
-   spikes** (Postgres/compose — force the psql tap adapter + compose conjure + a 2nd/3rd recipe).
-   Near-term: **M4b psql tap adapter** (the engine-guard's psql branch, from the spikes' facts) ·
-   **more recipes** (`recipes/<repo>/`) · **random-pick verification harness** (pick a corpus recipe
-   each run). Then → M5 browser drive
+   sqlite3` out-of-band delta, mints the persisted leg). **ANTI-OVERFIT UNIT ✅ COMPLETE + PROVEN
+   LIVE (§3):** pool = **n8n (run/sqlite/http-drive) + documenso (compose/postgres/canvas-drive-
+   deferred)**, both conjure LIVE, hand-verified. Slice A ✅ `41c6dca` (recipe contract + psql tap
+   generalized off n8n: conjure.mode run|compose, engine-discriminated store_tap sqlite|postgres,
+   drive descriptor; documenso recipe) · Slice B ✅ `2d2771e` (`conjure.mjs` mode-aware: `docker
+   compose up` for the Postgres class; documenso up live, /api/health 200, psql tap Field=0
+   out-of-band) · random-pick ✅ `5c7d799` (`src/pool.mjs` listRecipes/pickRandom + `pb conjure
+   --random`). documenso's Konva-canvas drive honestly CNDs. **medusa spike** (3rd repo, Postgres+
+   Redis) was still building/paused at pause-time — bonus, not a blocker; fold in if it lands.
+   NEXT → M5 browser drive
    (containerized selenium + W3C WebDriver via fetch, repo-agnostic; **owner-shadow becomes
    *testable***) → M6 the Catch end-to-end on a RANDOM repo (blind→EXECUTED; differential
    merge-SHA=WORKS vs parent-SHA≠WORKS) → M7
