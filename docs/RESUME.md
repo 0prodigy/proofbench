@@ -159,9 +159,17 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    **owner-shadow now *testable***. Hand-proven LIVE end-to-end: real chromium → conjured n8n rendered Form
    Trigger → typed+submitted THROUGH the browser → out-of-band sqlite tap showed `execution_entity` 0→1
    status=`success` (row workflowId == conjure's captured workflow_id) → minted tool attempt → clean
-   teardown (no orphans, port freed). 76/76 tests + gate PASS + typecheck clean. NEXT → M6 the Catch
-   end-to-end on a RANDOM repo (blind→EXECUTED; differential
-   merge-SHA=WORKS vs parent-SHA≠WORKS; **M6 TARGET GROUNDED (2026-07-18 via gh):** n8n #7130 =
+   teardown (no orphans, port freed). 76/76 tests + gate PASS + typecheck clean. **M6 ✅ DONE + PROVEN LIVE — the first EXECUTED differential Catch** (`src/catch.mjs` + `pb prove`;
+   commits `e35f056` conjure buildSha override + recipe parent_sha · `7392314` Catch harness · `ee75f6a`
+   differential runner · `30387b7` walk hardening). `node src/cli.mjs prove recipes/n8n-form-trigger-pr7130`
+   → **DIFFERENTIAL: PASS** — merge `3ddc176d`→WORKS (k=2 fresh worlds, each persisted an execution + a
+   genuinely FRESH REST confirm leg re-observed the same id) vs parent `869b8f14`→CND whose reason NAMES the
+   feature-absent cause (`Node not found: n8n-nodes-base.formTrigger` → workflow won't activate), NOT a
+   harness artifact. **catch.mjs honesty (hand-verified):** a feature-absent reproduction (conjure/drive
+   throws) → `executed:false` → counts toward NEITHER k nor kFail → CND, never a false DNW; merge-WORKS is
+   no tautology (`op:'increased'` on the execution id needs a real non-null delta + a content-bound fresh
+   leg + k≥2). 82/82 tests + gate PASS + typecheck clean; honesty core FROZEN (git-confirmed). Deferred to
+   M7: the negative claim + quantifier/owner-shadow. **M6 TARGET (grounded 2026-07-18 via gh):** n8n #7130 =
    `feat(n8n Form Trigger Node): New node` — merge `3ddc176d` HAS the node (form serves → browser-drive
    submit persists an `execution_entity` row → WORKS) vs its SINGLE parent
    `869b8f14caaf334f011bcd87d3928dc8ab41f62e` where the FormTrigger node type does NOT exist → the
@@ -203,10 +211,15 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    DNW probes. **BIGGEST RISK = the BYOC substrate itself:** base-skew (known-failures F3) + reconcile-revert
    (F2) can manufacture a FALSE `DOES_NOT_WORK` before pb's logic runs — de-risk FIRST via a `lyric-devops`
    base-coherence preflight (hard L3 gate) + re-read the deployed image digest AT DRIVE TIME and seal THAT,
-   not the pre-run pin. **Code-identity: derive the fingerprint from FILES not prose** (`branches.json` +
-   `metadata-service/sdk-versions.json` `mds-sdk 1.8.1.dev17397` + `lyric-runner-py/.../lyric_py_version.py`
-   `LYRIC_PY 1.3.39.dev17398`, runner `2.0.2.dev17397`) — RESUME/prose versions disagree; `branches.json`
-   lists db-migrations NOT ui-monorepo. **TWO HUMAN DECISIONS before the phase starts:** (1) reproduce model
+   not the pre-run pin. **Code-identity: derive the fingerprint from FILES not prose — and the FILES have
+   traps (build step (a) DONE — draft resolved them: `docs/lyric-eng17397-recipe-draft.md`, committed
+   `8b57440`):** `branches.json` holds branch NAMES not SHAs (resolve the 7 real SHAs via `git rev-parse`
+   on the ticket worktrees); the MAIN-worktree wheel versions are STALE (`mds-sdk 1.8.1.dev17397`,
+   `lyric_py 1.3.39.dev17398`) — bind the coherent TICKET-worktree values (`lyric_py 1.3.40.dev17398`,
+   `mds-sdk 2.0.4.dev17399`, co-located with the SHAs); cluster ctx/ns is operator-supplied (prose
+   `redcat/redcat` vs manifest `akashpathak/delta`); `branches.json` lists db-migrations NOT ui-monorepo.
+   The draft also enumerated the 6 `recipe.mjs` growth items (multi-repo code-identity, k8s-attach conjure,
+   mongo tap, new-note-per-iteration fresh-world, operator-env setup, REST front-door). **TWO HUMAN DECISIONS before the phase starts:** (1) reproduce model
    on a shared cluster — new note/exec per iteration (rec: preserves k≥2) vs relaxed-k; (2) drive surface —
    appservice API + mongo (rec: matches today's assets) vs adding the ui-monorepo end-user leg (not built/
    fingerprinted today). **Cheapest-failure-first order (cluster-free steps do NOT need M5/M6):** (a) paper
