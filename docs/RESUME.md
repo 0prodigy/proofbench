@@ -152,7 +152,13 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `clickAt`/`pointer` coordinate capability in `browserdrive.mjs` placed a Field on the real Konva canvas →
    psql tap `"Field"` 0→1 = a 2nd EXECUTABLE Catch target, genuinely NOT n8n-shaped; runCatch wiring
    [cookie-inject + `NEXT_PUBLIC_WEBAPP_URL=host.docker.internal` env + a two-psql-tap addFields walk + flip
-   `drive.mode:browser`] is the documented follow-up in `docs/documenso-canvas-spike.md`). **medusa spike** (3rd repo, Postgres+
+   `drive.mode:browser`] is the documented follow-up in `docs/documenso-canvas-spike.md`). **DIFFERENTIAL GROUNDING (2026-07-18
+   via gh) — documenso #3031 is NOT a simple-walk differential:** it = `feat: add field multiselect` (touches
+   only the field renderer + e2e tests), so the Field infra PRE-EXISTS at parent `977d0733` → a place-a-Field
+   walk persists a Field at BOTH merge+parent (non-discriminating = a fake Catch). So documenso is a proven
+   CAPABILITY / 2nd-engine target (postgres+canvas, anti-overfit value banked) but a real documenso
+   DIFFERENTIAL needs the multiselect-specific walk OR a different discriminating documenso PR — do NOT force
+   a non-discriminating Catch. **medusa spike** (3rd repo, Postgres+
    Redis) was still building/paused at pause-time — bonus, not a blocker; fold in if it lands.
    **M5 ✅ DONE + PROVEN LIVE** (`src/browserdrive.mjs` + `test/browserdrive.test.mjs`): containerized
    `selenium/standalone-chromium:4.27.0` sidecar driven over W3C WebDriver as JSON over `fetch` (ZERO pb
