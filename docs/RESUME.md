@@ -193,9 +193,21 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `catch-*` adversarial drivers mirroring the real Catch shape (each cheats one leg: forged-harness delta,
    app-read-as-delta, null-delta tautology on the id, stale confirm leg) — all held ≠WORKS in `pb gate`
    (now 14 malicious), `da82fc2`. 96/96 tests + gate PASS + typecheck clean + live differential RE-CONFIRMED on the sealed `runCatch` path
-   (`pb prove` → merge WORKS ∧ parent CND, sealed receipts persisted to disk); honesty core FROZEN. **Still
-   deferred (need the proposer surface, not this one):** mint-boundary isolation + P1 `quantified`/owner-
-   shadow. Ponytail: one recipe, ≤2 store adapters, 3 drive
+   (`pb prove` → merge WORKS ∧ parent CND, sealed receipts persisted to disk); honesty core FROZEN. **P1 ✅ FIRST CUT DONE — the walk is now AGENT-PROPOSED** (`src/proposer.mjs` +
+   `runCatch` wiring, commit `445a601`; Fable-architected): a Sonnet agent reads the intent + a HARNESS-run
+   introspection snapshot → proposes a validated `{walk, claim}` (Anthropic Messages API over `fetch`, NO
+   SDK, forced `propose_walk` tool; injectable `llmFn` seam) → the harness executes / taps / assembles-with-
+   the-PROPOSED-claim / seals / verdicts. **mint-boundary landed WITH its surface:** `proposer.mjs` imports
+   NEITHER `mint` NOR `sealBundle` (pure data); the proposed claim can only POINT at harness-minted receipts.
+   Honesty proven by ADVERSARIAL mock proposals: FW-P1-A tautology + FW-P1-B static-diff → null-delta guard →
+   CND; FW-P1-D `execute`/`navigate` → validator rejects → CND; FW-P1-E quantifier-dodge → ADD-only intent-
+   lint → rule 5 → CND (FW-P1-C claim-substitution bounded to ∅ for n8n's single-observable recipe). Mock
+   end-to-end differential PASS (merge=WORKS ∧ parent=CND, claim FROM the proposal) — INDEPENDENTLY
+   RE-CONFIRMED live (fresh workflowIds, k=2, docker clean). 114/114 tests, gate PASS,
+   typecheck clean, honesty core FROZEN. **STILL DEFERRED:** owner-shadow INSTANTIATION capture (≥2 distinct
+   non-actor sessions + a confirmed negative — capture-side, NOT a verdict floor); an adaptive re-propose loop
+   (must reset the world per retry); and **M5 = the real-Sonnet capability live proof (needs `ANTHROPIC_API_KEY`
+   — UNSET in env; egress to api.anthropic.com works [HTTP 401]; the `defaultLlmFn` seam is ready).** Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
