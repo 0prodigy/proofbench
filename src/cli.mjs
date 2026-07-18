@@ -3,10 +3,11 @@
 /**
  * pb — the CLI dispatcher.
  *
- * Wires `pb gate` to the E1 malicious-driver gate, and `pb phase1|phase2|phase3` to
- * the three phase runners (each produces harness receipts + claims and calls the pure
- * verdict; exit 0 only on WORKS). `prove` remains an honest placeholder until the full
- * conjure→drive→seal pipeline is stitched.
+ * Wires `pb gate` to the E1 malicious-driver gate, `pb phase1|phase2|phase3` to the three
+ * phase runners, and `pb prove <recipeDir>` to the DIFFERENTIAL Catch — the same user walk run
+ * at the merge SHA and its parent SHA, proving merge=WORKS ∧ parent≠WORKS (the PR IS why it
+ * works). Every command produces harness receipts + claims and calls the pure verdict; exit 0
+ * only on WORKS / differential PASS.
  */
 
 import { resolve } from 'node:path';
@@ -16,9 +17,9 @@ import { runPhase1 } from './phases/phase1.mjs';
 import { runPhase2 } from './phases/phase2.mjs';
 import { runPhase3 } from './phases/phase3.mjs';
 import { listRecipes, pickRandom } from './pool.mjs';
+import { loadRecipe } from './recipe.mjs';
+import { runCatch } from './catch.mjs';
 import { Verdict } from './types.mjs';
-
-const NOT_BUILT_YET = new Set(['prove']);
 
 function usage() {
   return [
@@ -32,10 +33,10 @@ function usage() {
     '  phase2 <dir>    bring up docker-compose + prove the front door serves → READY/CND',
     '  phase3 <dir> [--intent "..."]   HTTP-drive a fixture app + confirm the effect persists',
     '  conjure <recipeDir>|--random [--keep]   bring up a real SUT from a pb-recipe-v1 (--random: pick one from the pool) + mint its code-identity fingerprint',
-    '  prove           [stage 2] conjure + drive a real feature — not built yet',
+    '  prove <recipeDir>   run the differential Catch at the merge SHA and the parent SHA → PASS iff merge=WORKS ∧ parent≠WORKS',
     '  help            show this help',
     '',
-    'Phase commands exit 0 only on WORKS.',
+    'Phase commands exit 0 only on WORKS; prove exits 0 only on differential PASS.',
   ].join('\n');
 }
 
@@ -129,6 +130,53 @@ function renderConjure(handle, proof, keep) {
   return lines.join('\n');
 }
 
+/**
+ * Render one leg of the differential Catch (a full Catch verdict at one SHA) with its notes + reasons.
+ * @param {string} label 'MERGE' | 'PARENT'
+ * @param {string} sha the SHA actually built
+ * @param {import('./catch.mjs').CatchResult} result
+ * @returns {string}
+ */
+function renderCatch(label, sha, result) {
+  const lines = [`pb prove — ${label} ${sha.slice(0, 12)} → ${result.verdict.state}`, ''];
+  if (result.diagnosis.length) {
+    lines.push('  notes:');
+    for (const n of result.diagnosis) lines.push(`    - ${n}`);
+  }
+  lines.push('  reasons:');
+  for (const r of result.verdict.reasons) lines.push(`    - ${r}`);
+  return lines.join('\n');
+}
+
+/**
+ * Render the DIFFERENTIAL result: PASS iff merge=WORKS ∧ parent≠WORKS (the anti-tautology — the
+ * PR IS why it works). A non-pass names WHY: merge didn't verify, or the parent worked too (the
+ * target did not discriminate — a real finding, not a forced fit).
+ * @param {import('./catch.mjs').CatchResult} merge
+ * @param {import('./catch.mjs').CatchResult} parent
+ * @param {boolean} pass
+ * @returns {string}
+ */
+function renderDifferential(merge, parent, pass) {
+  const lines = [
+    '',
+    'pb prove — DIFFERENTIAL (the PR IS why it works)',
+    `  merge  ${merge.sha.slice(0, 12)}: ${merge.verdict.state}`,
+    `  parent ${parent.sha.slice(0, 12)}: ${parent.verdict.state}`,
+    '',
+    `  DIFFERENTIAL: ${pass ? 'PASS' : 'FAIL'}  (PASS iff merge=WORKS ∧ parent≠WORKS)`,
+  ];
+  if (!pass) {
+    if (merge.verdict.state !== Verdict.WORKS) {
+      lines.push(`    - merge is ${merge.verdict.state}, not WORKS — the feature did not verify at the PR SHA (see the MERGE notes above).`);
+    }
+    if (parent.verdict.state === Verdict.WORKS) {
+      lines.push('    - parent is WORKS too — the target did NOT discriminate (the change is not why it works; report it and pick another corpus PR).');
+    }
+  }
+  return lines.join('\n');
+}
+
 async function main() {
   const cmd = process.argv[2];
 
@@ -194,14 +242,35 @@ async function main() {
     process.exit(code);
   }
 
+  if (cmd === 'prove') {
+    const dir = process.argv[3];
+    if (!dir || dir.startsWith('--')) {
+      process.stderr.write(`pb prove: missing <recipeDir>\n\n${usage()}\n`);
+      process.exit(2);
+    }
+    const abs = resolve(dir);
+    const recipe = loadRecipe(abs);
+    const ci = recipe.code_identity;
+    if (ci.mode !== 'from_tree' || !ci.parent_sha) {
+      process.stdout.write(
+        'pb prove: the differential Catch needs a from_tree code_identity with a parent_sha (the disclosed baseline); ' +
+          'this recipe has none, so the anti-tautology (merge=WORKS ∧ parent≠WORKS) cannot be proven.\n'
+      );
+      process.exit(2);
+    }
+    // The SAME agent-proposed walk at BOTH SHAs: the merge (the PR) and its single parent (baseline).
+    const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha });
+    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha });
+    process.stdout.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
+    process.stdout.write(renderCatch('PARENT', parent.sha, parent) + '\n');
+    const pass = merge.verdict.state === Verdict.WORKS && parent.verdict.state !== Verdict.WORKS;
+    process.stdout.write(renderDifferential(merge, parent, pass) + '\n');
+    process.exit(pass ? 0 : 1);
+  }
+
   if (cmd === undefined || cmd === 'help' || cmd === '--help' || cmd === '-h') {
     process.stdout.write(usage() + '\n');
     process.exit(cmd === undefined ? 2 : 0);
-  }
-
-  if (NOT_BUILT_YET.has(cmd)) {
-    process.stdout.write(`pb ${cmd}: not built yet — the conjure/drive pipeline lands in stage 2.\n`);
-    process.exit(2);
   }
 
   process.stderr.write(`pb: unknown command '${cmd}'\n\n${usage()}\n`);
