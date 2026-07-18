@@ -15,9 +15,12 @@
  *   teardown                    → reap the browser sidecar + the SUT (no orphans)
  *
  * It then assembles a bundle MIRRORING phase3 (store-delta harness · fresh-session confirm leg ·
- * browser attempt · one non-quantified effect claim) and calls the FROZEN verdict — it NEVER
- * writes the tri-state. The differential PROPERTY (merge==WORKS ∧ parent!=WORKS) is decided by the
- * runner (cli.mjs), not here.
+ * browser attempt · one non-quantified effect claim), SEALS it (ed25519 via evidence.mjs) and
+ * PERSISTS the sealed evidence to a run dir; the verdict is computed by RE-READING that on-disk
+ * artifact through the FROZEN verdict, so the judgement is bound to tamper-evident evidence (a
+ * receipt mutated after sealing → UNVERIFIED), never a loose in-memory object — and it NEVER
+ * writes the tri-state itself. The differential PROPERTY (merge==WORKS ∧ parent!=WORKS) is decided
+ * by the runner (cli.mjs), not here.
  *
  * assembleCatchBundle is PURE (unit-tested docker-free with hand-built iterations); the live
  * conjure→drive→tap plumbing in runCatch is proven by `pb prove`. Zero runtime deps: docker via
@@ -30,10 +33,13 @@ import { tapStore, mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
-import { newBundle } from './evidence.mjs';
+import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
 import { verdict } from './verdict.mjs';
-import { existsSync, readFileSync } from 'node:fs';
+import { Verdict } from './types.mjs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { generateKeyPairSync } from 'node:crypto';
 
 const REPRODUCTIONS = 2;
 const EXECUTION_SETTLE_MS = 12000; // how long to watch the store for the submitted execution (a beat, not a bare sleep)
@@ -75,9 +81,10 @@ const VISITOR_IDENTITY = 'form-visitor';
  * @typedef {Object} CatchResult
  * @property {string} phase always 'catch'
  * @property {string} sha the SHA actually built (merge or parent)
- * @property {import('./types.mjs').VerdictResult} verdict
+ * @property {import('./types.mjs').VerdictResult} verdict computed from the SEALED, persisted evidence (UNVERIFIED if the seal was broken)
  * @property {string[]} diagnosis runner-computed deterministic notes (never the tri-state itself)
- * @property {import('./types.mjs').EvidenceBundle} bundle
+ * @property {import('./types.mjs').EvidenceBundle} bundle the sealed evidence, re-read from disk (the artifact the verdict was computed from)
+ * @property {string} receiptPath the on-disk sealed receipt (durable, replayable)
  */
 
 // ---------------------------------------------------------------------------
@@ -225,6 +232,48 @@ export function assembleCatchBundle({ intent, iterations, actorIdentity = ACTOR_
   const k = its.filter((it) => it.effectHeld).length;
   const kFail = its.filter((it) => it.executed && !it.effectHeld).length;
   return newBundle({ intent, actorIdentity, claims, receipts, reproduce: { k, n: its.length, kFail } });
+}
+
+// ---------------------------------------------------------------------------
+// Seal · persist · judge — the verdict is bound to tamper-evident evidence
+// ---------------------------------------------------------------------------
+
+/**
+ * The verdict BOUND to the seal: a sealed bundle whose seal does NOT verify (any receipt/claim/
+ * intent mutated after sealing) is UNVERIFIED — its contents are not judged on their merits at
+ * all (mirrors the E1 gate's effective verdict). A sealed bundle whose seal holds, or an unsealed
+ * bundle, is disposed by the FROZEN pure verdict. This is how a tampered receipt can never green.
+ * @param {import('./types.mjs').EvidenceBundle} bundle
+ * @returns {import('./types.mjs').VerdictResult}
+ */
+export function sealedVerdict(bundle) {
+  if (bundle && bundle.seal && !verifySeal(bundle, bundle.seal.publicKey)) {
+    return {
+      state: Verdict.UNVERIFIED,
+      reasons: [
+        'UNVERIFIED: the ed25519 evidence seal did not verify — a receipt/claim was mutated after sealing, so the contents are not trusted (tamper-evident, not judged on merit).',
+      ],
+      scoreboard: [],
+    };
+  }
+  return verdict(bundle);
+}
+
+/**
+ * Persist the SEALED Catch bundle to a run directory as the durable, replayable receipt of
+ * record. runCatch re-reads THIS artifact to compute the verdict, so the judgement is bound to
+ * tamper-evident evidence on disk — not a loose in-memory object. The filename carries the built
+ * SHA so the differential's merge and parent legs never clobber each other.
+ * @param {string} runDir
+ * @param {string} sha the built SHA (merge or parent)
+ * @param {import('./types.mjs').EvidenceBundle} sealed a bundle carrying an ed25519 seal
+ * @returns {string} the receipt path
+ */
+export function persistCatchReceipt(runDir, sha, sealed) {
+  mkdirSync(runDir, { recursive: true });
+  const receiptPath = join(runDir, `catch-${(sha || 'unknown').slice(0, 12)}.receipt.json`);
+  writeFileSync(receiptPath, JSON.stringify(sealed, null, 2));
+  return receiptPath;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +483,7 @@ function readOwnerCreds(recipeDir, recipe) {
  * @param {typeof openBrowser} [opts.openBrowserFn]
  * @param {(handle:any, queryName:string) => Promise<any[]>} [opts.tapStoreFn]
  * @param {typeof fetch} [opts.fetchFn]
+ * @param {string} [opts.runDir] directory to persist the sealed receipt into (default: a fresh pb-catch- tmpdir)
  * @returns {Promise<CatchResult>}
  */
 export async function runCatch(opts) {
@@ -442,6 +492,7 @@ export async function runCatch(opts) {
   const openBrowserFn = opts.openBrowserFn || openBrowser;
   const tapStoreFn = opts.tapStoreFn || tapStore;
   const fetchFn = opts.fetchFn || /** @type {typeof fetch} */ (fetch);
+  const runDir = opts.runDir || mkdtempSync(join(tmpdir(), 'pb-catch-'));
 
   const recipe = loadRecipe(recipeDir);
   const sha = buildSha || /** @type {import('./recipe.mjs').FromTreeIdentity} */ (recipe.code_identity).sha || '';
@@ -532,5 +583,11 @@ export async function runCatch(opts) {
   }
 
   const bundle = assembleCatchBundle({ intent, iterations, actorIdentity: ACTOR_IDENTITY, identity: VISITOR_IDENTITY });
-  return { phase: 'catch', sha, verdict: verdict(bundle), diagnosis, bundle };
+  // Seal (ed25519) → persist to the run dir → RE-READ the persisted artifact → judge THAT. The
+  // verdict is bound to tamper-evident evidence ON DISK, never a loose in-memory object: a receipt
+  // mutated after sealing fails verifySeal → UNVERIFIED (the contents are not trusted at all).
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
+  const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
+  return { phase: 'catch', sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath };
 }

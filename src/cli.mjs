@@ -139,6 +139,7 @@ function renderConjure(handle, proof, keep) {
  */
 function renderCatch(label, sha, result) {
   const lines = [`pb prove — ${label} ${sha.slice(0, 12)} → ${result.verdict.state}`, ''];
+  if (result.receiptPath) lines.push(`  sealed receipt:  ${result.receiptPath}`);
   if (result.diagnosis.length) {
     lines.push('  notes:');
     for (const n of result.diagnosis) lines.push(`    - ${n}`);

@@ -13,10 +13,22 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleCatchBundle, maxId, rowById, executionIdFrom } from '../src/catch.mjs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { generateKeyPairSync } from 'node:crypto';
+import { assembleCatchBundle, maxId, rowById, executionIdFrom, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
+import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
 import { mint, isMinted } from '../src/harness.mjs';
+
+/** @param {any} x @returns {any} */
+const asAny = (x) => x;
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const N8N_RECIPE = join(ROOT, 'recipes', 'n8n-form-trigger-pr7130');
 
 /**
  * A minted harness code-identity fingerprint (as conjure would produce), for a given sha.
@@ -184,4 +196,102 @@ test('catch assembly: a fresh re-read that DISAGREES with the store cannot confi
   const fresh = bundle.receipts.find((r) => r.id === 'fresh-execution');
   assert.ok(fresh && fresh.data.observed !== bundle.receipts.find((r) => r.id === 'store-delta')?.data.after, 'confirm leg disagrees with the delta');
   assert.match(v.reasons.join(' '), /confirm leg|fresh-session/i);
+});
+
+// ── M7 slice 1: seal + persist — the verdict is bound to tamper-evident evidence ──────
+//
+// After assembly the Catch bundle is SEALED (ed25519) and PERSISTED to a run dir; the verdict is
+// computed by RE-READING that on-disk artifact through sealedVerdict. A receipt mutated after
+// sealing fails verifySeal → UNVERIFIED (contents not trusted), so a tamper can never green.
+
+test('sealedVerdict: an unsealed bundle is disposed by the pure verdict (transparent passthrough)', () => {
+  const bundle = assembleCatchBundle({ intent: 'x', iterations: [heldIteration(0), heldIteration(1)] });
+  assert.equal(bundle.seal, undefined);
+  assert.equal(sealedVerdict(bundle).state, verdict(bundle).state); // WORKS, unchanged
+});
+
+test('persistCatchReceipt: writes the sealed bundle to disk; re-read verifies and judges identically', () => {
+  const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
+  try {
+    const bundle = assembleCatchBundle({ intent: 'form submit persists an execution', iterations: [heldIteration(0), heldIteration(1)] });
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const receiptPath = persistCatchReceipt(runDir, 'deadbeefcafef00d', sealBundle(bundle, privateKey));
+    assert.ok(existsSync(receiptPath), 'sealed receipt written to disk');
+    assert.match(receiptPath, /catch-deadbeefcafe\.receipt\.json$/); // sha-tagged filename (no merge/parent clobber)
+    const persisted = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    assert.equal(persisted.seal.algorithm, 'ed25519');
+    assert.equal(verifySeal(persisted, persisted.seal.publicKey), true, 'persisted seal verifies after a JSON round-trip');
+    assert.equal(sealedVerdict(persisted).state, Verdict.WORKS, 'the on-disk artifact judges to WORKS');
+  } finally {
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+test('sealedVerdict: a receipt tampered AFTER sealing => UNVERIFIED (not judged on merit)', () => {
+  const bundle = assembleCatchBundle({ intent: 'x', iterations: [heldIteration(0), heldIteration(1)] });
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const sealed = sealBundle(bundle, privateKey);
+  assert.equal(sealedVerdict(sealed).state, Verdict.WORKS, 'intact seal → the honest WORKS');
+  // Mutate the persisted delta's `after` the seal already committed to (a doctored receipt).
+  const idx = sealed.receipts.findIndex((r) => r.id === 'store-delta');
+  const tampered = { ...sealed, receipts: sealed.receipts.map((r, i) => (i === idx ? { ...r, data: { ...r.data, after: 999 } } : r)) };
+  assert.ok(tampered.seal);
+  assert.equal(verifySeal(tampered, tampered.seal.publicKey), false, 'the seal no longer verifies');
+  assert.equal(sealedVerdict(tampered).state, Verdict.UNVERIFIED, 'a tampered receipt is UNVERIFIED, never WORKS');
+});
+
+/**
+ * Docker-free seams that simulate a live n8n Catch: the store grows by one execution per browser
+ * submit, and the fresh REST re-read echoes the requested id (so the confirm leg content-binds).
+ */
+function catchSeams() {
+  let count = 0;
+  const conjureFn = asAny(async () => ({
+    recipe: {},
+    containerName: 'pb-sut-test',
+    baseUrl: 'http://localhost:5678',
+    frontDoorUrl: 'http://localhost:5678/webhook/abc/n8n-form',
+    captures: {},
+    _cloneDir: null,
+    _compose: null,
+    receipts: [mint({ id: 'fingerprint', kind: 'fingerprint', provenance: 'harness', data: { mode: 'from_tree', sha: 'MERGE', container: 'pb-sut-test' } })],
+    teardown: async () => {},
+  }));
+  const openBrowserFn = asAny(async () => ({
+    steps: [{ op: 'navigate', url: 'http://host.docker.internal:5678/webhook/abc/n8n-form' }],
+    navigate: async () => {},
+    execute: async (/** @type {string} */ js) =>
+      js.includes('querySelectorAll') ? [{ name: 'field', type: 'text', tag: 'input' }] : 'Your response has been recorded',
+    find: async () => 'el-1',
+    type: async () => {},
+    click: async () => {
+      count += 1; // the submit persists one execution
+    },
+    teardown: async () => {},
+  }));
+  const tapStoreFn = asAny(async () => Array.from({ length: count }, (_, i) => ({ id: i + 1, workflowId: 'wf-7130', status: 'success', finished: 1 })));
+  const fetchFn = asAny(async (/** @type {string} */ url) => {
+    if (url.endsWith('/rest/login')) {
+      return { status: 200, headers: { getSetCookie: () => ['n8n-auth=tok'], get: () => null }, text: async () => '{}' };
+    }
+    const m = url.match(/\/rest\/executions\/(\d+)/); // echo the requested id (a fresh honest re-read)
+    return { status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify({ data: { id: m ? Number(m[1]) : 0 } }) };
+  });
+  return { conjureFn, openBrowserFn, tapStoreFn, fetchFn };
+}
+
+test('runCatch: seals + persists the Catch bundle and computes the verdict from the on-disk sealed evidence', async () => {
+  const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
+  try {
+    const result = await runCatch({ recipeDir: N8N_RECIPE, runDir, ...catchSeams() });
+    assert.ok(result.receiptPath && existsSync(result.receiptPath), 'the sealed receipt was persisted to the run dir');
+    const persisted = JSON.parse(readFileSync(result.receiptPath, 'utf8'));
+    assert.equal(persisted.seal.algorithm, 'ed25519', 'the persisted evidence carries an ed25519 seal');
+    assert.equal(verifySeal(persisted, persisted.seal.publicKey), true, 'the persisted seal verifies');
+    assert.ok(result.bundle.seal);
+    assert.equal(result.bundle.seal.digest, persisted.seal.digest, 'the returned bundle IS the re-read on-disk artifact');
+    assert.equal(result.verdict.state, Verdict.WORKS, result.verdict.reasons.join(' | ')); // k=2 fresh worlds, each confirmed
+  } finally {
+    rmSync(runDir, { recursive: true, force: true });
+  }
 });
