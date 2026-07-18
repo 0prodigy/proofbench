@@ -38,6 +38,7 @@
  */
 
 import { conjure } from './conjure.mjs';
+import { registerReap, deregisterReap } from './reaper.mjs';
 import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
 import { mintWorkflowAttempt, stampManifest, digestBinds, nonceFromRows } from './argoworkflows.mjs';
@@ -565,6 +566,7 @@ export async function runCatch(opts) {
   for (let i = 0; i < REPRODUCTIONS; i++) {
     /** @type {import('./conjure.mjs').SutHandle|null} */ let handle = null;
     /** @type {import('./browserdrive.mjs').BrowserClient|null} */ let client = null;
+    /** @type {(() => (void|Promise<void>))|null} */ let browserReap = null;
     try {
       handle = await conjureFn(recipeDir, buildSha ? { buildSha } : {});
       const beforeRows = await tapStoreFn(handle, queryName);
@@ -572,6 +574,10 @@ export async function runCatch(opts) {
       const beforeId = maxId(beforeRows);
 
       client = await openBrowserFn({ hostPort: 4444 + i });
+      // Reap the browser sidecar on interrupt too: a SIGINT/SIGTERM bypasses the finally below and
+      // leaks pb-chromium-*. Register a best-effort teardown (de-registered on normal teardown) — the
+      // same register-on-bring-up / drop-on-teardown pattern conjure uses for the SUT. See reaper.mjs.
+      browserReap = registerReap(async () => { try { await client?.teardown(); } catch { /* sidecar already gone */ } });
       // The HARNESS reaches the front door and reads it; the agent neither navigates nor runs the read.
       await client.navigate(handle.frontDoorUrl);
       const introspection = await introspect(client);
@@ -647,6 +653,7 @@ export async function runCatch(opts) {
           /* sidecar already gone */
         }
       }
+      if (browserReap) deregisterReap(browserReap); // normal teardown ran → drop the interrupt-reap (no double-reap)
       if (handle) {
         try {
           await handle.teardown();
@@ -861,6 +868,7 @@ async function runArgoCatch(opts, recipe, runDir) {
   for (let i = 0; i < REPRODUCTIONS; i++) {
     const nonce = randomUUID(); // fresh, globally-unique, harness-minted per iteration (P2/P7 uniqueness)
     /** @type {import('./argoworkflows.mjs').WorkflowRunClient|null} */ let client = null;
+    /** @type {(() => (void|Promise<void>))|null} */ let workflowReap = null;
     try {
       // Freeze the agent proposal ONCE (mirrors runCatch): a one-op 'trigger' + the effect claim,
       // proposed against DISCLOSED data (the manifest's templates/container), replayed verbatim.
@@ -873,6 +881,8 @@ async function runArgoCatch(opts, recipe, runDir) {
       if (!proposal) throw new Error('the agent seam produced no valid trigger+claim (frozen as unavailable) — could-not-execute');
 
       client = await argoRunFn({ namespace: argo.namespace, kubectl: opts.kubectl });
+      // Reap the workflow run (by its nonce label) on interrupt too; de-registered on normal teardown.
+      workflowReap = registerReap(async () => { try { await client?.teardown(nonce); } catch { /* already reaped */ } });
       const name = await client.submit(stampManifest(manifest, { nonceParameter: argo.nonce_parameter, nonce }));
 
       // GUARDRAIL 1 — SINGLE-RUN PINNING (P3): observe EXACTLY the submitted run.
@@ -938,6 +948,7 @@ async function runArgoCatch(opts, recipe, runDir) {
           /* already reaped */
         }
       }
+      if (workflowReap) deregisterReap(workflowReap); // normal teardown ran → drop the interrupt-reap (no double-reap)
     }
   }
 

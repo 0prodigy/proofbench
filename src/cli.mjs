@@ -34,7 +34,7 @@ function usage() {
     '  phase2 <dir>    bring up docker-compose + prove the front door serves → READY/CND',
     '  phase3 <dir> [--intent "..."]   HTTP-drive a fixture app + confirm the effect persists',
     '  conjure <recipeDir>|--random [--keep]   bring up a real SUT from a pb-recipe-v1 (--random: pick one from the pool) + mint its code-identity fingerprint',
-    '  prove <recipeDir>   run the differential Catch at the merge SHA and the parent SHA → PASS iff merge=WORKS ∧ parent≠WORKS',
+    '  prove <recipeDir>|--random   run the differential Catch at the merge SHA and the parent SHA (--random: pick one from the pool) → PASS iff merge=WORKS ∧ parent≠WORKS',
     '  help            show this help',
     '',
     'Phase commands exit 0 only on WORKS; prove exits 0 only on differential PASS.',
@@ -257,8 +257,18 @@ async function main() {
   }
 
   if (cmd === 'prove') {
-    const dir = process.argv[3];
-    if (!dir || dir.startsWith('--')) {
+    let dir = process.argv[3];
+    if (process.argv.includes('--random')) {
+      // Anti-overfit: pick a recipe from the pool each run — pb must not always prove n8n.
+      const pool = listRecipes();
+      if (pool.length === 0) {
+        process.stderr.write('pb prove --random: no loadable recipes in the pool (recipes/)\n');
+        process.exit(1);
+      }
+      const picked = pickRandom(pool);
+      process.stdout.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
+      dir = picked.dir;
+    } else if (!dir || dir.startsWith('--')) {
       process.stderr.write(`pb prove: missing <recipeDir>\n\n${usage()}\n`);
       process.exit(2);
     }

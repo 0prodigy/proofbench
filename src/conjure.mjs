@@ -27,6 +27,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
+import { registerReap, deregisterReap } from './reaper.mjs';
 
 const READY_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
@@ -55,6 +56,7 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * @property {import('./types.mjs').Receipt[]} receipts [fingerprint, bringup] — harness provenance
  * @property {string|null} _cloneDir temp from-tree checkout to reap on teardown (null otherwise)
  * @property {ComposeInfo|null} _compose compose project + -f files to `down -v` on teardown (null for run mode)
+ * @property {() => (void|Promise<void>)} [_reap] the interrupt-reap registered with the signal reaper (de-registered on normal teardown)
  * @property {() => Promise<void>} teardown
  */
 
@@ -537,6 +539,12 @@ export async function conjure(recipeDir, opts = {}) {
   /** @type {string|null} */ let cloneDir = null;
   /** @type {ComposeInfo|null} */ let composeInfo = null;
   let success = false;
+  // Reap on interrupt too: the `finally` below reaps a thrown-error bring-up, but a Ctrl-C (SIGINT) /
+  // orchestrator kill (SIGTERM) bypasses it and leaks the SUT. Register a best-effort reap of the
+  // CURRENT bring-up state — the closure reads the live locals at signal time, so it reaps whatever is
+  // up (partial or complete) — and de-register it on normal teardown. See reaper.mjs.
+  const reap = () => cleanup(docker, containerName, cloneDir, composeInfo);
+  registerReap(reap);
   try {
     /** @type {string} */ let image;
     /** @type {string|undefined} */ let imageDigest;
@@ -653,12 +661,19 @@ export async function conjure(recipeDir, opts = {}) {
       receipts: [fingerprint, bringup],
       _cloneDir: cloneDir,
       _compose: composeInfo,
+      _reap: reap,
       teardown: () => teardownSut(handle),
     };
     success = true;
     return handle;
   } finally {
-    if (!success) await cleanup(docker, containerName, cloneDir, composeInfo);
+    // Success keeps `reap` registered (a later signal during the drive still reaps this SUT); normal
+    // teardown de-registers it via handle._reap. A failed bring-up reaps here AND de-registers, so the
+    // signal handler never re-runs it.
+    if (!success) {
+      deregisterReap(reap);
+      await cleanup(docker, containerName, cloneDir, composeInfo);
+    }
   }
 }
 
@@ -670,6 +685,9 @@ export async function conjure(recipeDir, opts = {}) {
  */
 export async function teardownSut(handle) {
   if (!handle) return;
+  // Normal teardown: drop the interrupt-reap first so the signal handler cannot re-run it (cleanup is
+  // idempotent, so a race is harmless either way), then reap.
+  if (handle._reap) deregisterReap(handle._reap);
   await cleanup(detectDocker(), handle.containerName, handle._cloneDir, handle._compose);
 }
 
