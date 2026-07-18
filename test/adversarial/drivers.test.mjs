@@ -17,6 +17,7 @@ import { newBundle, sealBundle, verifySeal } from '../../src/evidence.mjs';
 import { mint } from '../../src/harness.mjs';
 import { verdict } from '../../src/verdict.mjs';
 import { Verdict } from '../../src/types.mjs';
+import { MALICIOUS_DRIVERS } from '../../src/e1/drivers.mjs';
 
 /**
  * Seal a spec with a real ed25519 key (exercises the seal on every attack, like the E1 gate).
@@ -369,6 +370,62 @@ test('(e sanity) the SAME equals check on a REAL change (before != after) still 
       mint({ id: 'fresh', kind: 'fresh-session', provenance: 'harness', identity: 'shopper', data: { observed: 20 } }),
     ],
     reproduce: { k: 2, n: 2 },
+  });
+  assert.equal(evaluate(b), Verdict.WORKS);
+});
+
+// ── Catch-shaped drivers (M7) — the REAL executed Catch bundle shape, one leg cheating ────
+//
+// (a)-(d) above attack the FIXTURE shape; these attack the shape `pb prove` actually assembles
+// (src/catch.mjs: n8n execution-id store-delta + browser attempt + fresh-session confirm leg + one
+// op:'increased' claim). Each is sealed (a STRUCTURAL lie, not a tamper — the seal verifies) and
+// must be held ≠ WORKS by the frozen verdict. The honest Catch shape earning WORKS is the
+// discriminating control (assembler-level in test/catch.test.mjs; sealed-level below).
+
+test('(catch) every catch-shaped driver: seal intact, held at CND (never WORKS)', () => {
+  const expected = /** @type {Record<string, string>} */ ({
+    'catch-labeled-harness-delta': 'labelled harness but never minted → downgraded to agent → persisted leg unsatisfied',
+    'catch-app-endpoint-delta': 'tool-provenance app-endpoint read is not the out-of-band store handle',
+    'catch-null-delta-tautology': "op:'equals' on an unchanged max id (before==after) → null-delta guard",
+    'catch-stale-confirm-leg': 'fresh re-read disagrees with the delta → confirm leg not content-bound',
+  });
+  const catchDrivers = MALICIOUS_DRIVERS.filter((d) => d.name.startsWith('catch-'));
+  assert.equal(catchDrivers.length, 4, 'all four catch-shaped drivers registered on the gate');
+  for (const d of catchDrivers) {
+    assert.ok(expected[d.name], `unexpected catch driver ${d.name}`);
+    const b = d.build();
+    assert.ok(b.seal, `${d.name} is sealed`);
+    assert.equal(verifySeal(b, b.seal.publicKey), true, `${d.name}: the lie is structural, not a tampered seal`);
+    assert.equal(evaluate(b), Verdict.COULD_NOT_DETERMINE, `${d.name} (${expected[d.name]}) must be held at CND`);
+  }
+});
+
+test('(catch sanity) the honest Catch shape (harness delta + content-bound fresh leg, k=2) earns WORKS', () => {
+  // Behaviour-preserving control: the exact shape the catch-* drivers cheat on, but every leg honest.
+  const b = sealed({
+    intent: 'A visitor submitting the n8n Form Trigger front door persists an execution.',
+    actorIdentity: 'pb-operator',
+    claims: [
+      {
+        id: 'form-submit-persists-execution',
+        kind: 'effect',
+        scope: 'a visitor submitting the Form Trigger front door persists an execution',
+        effectCheck: {
+          entity: 'execution_entity.max_id',
+          expectedAfterRelation: { op: 'increased' },
+          deltaReceiptId: 'store-delta',
+          confirmLegReceiptId: 'fresh-execution',
+        },
+        receiptIds: ['store-delta', 'browser-drive', 'fresh-execution'],
+      },
+    ],
+    receipts: [
+      mint({ id: 'fingerprint', kind: 'fingerprint', provenance: 'harness', data: { mode: 'from_tree', sha: '3ddc176d', container: 'pb-sut-3ddc176' } }),
+      mint({ id: 'store-delta', kind: 'delta', provenance: 'harness', sourcePR: false, identity: 'form-visitor', data: { entity: 'execution_entity.max_id', before: 6, after: 7 } }),
+      mint({ id: 'browser-drive', kind: 'attempt', provenance: 'tool', identity: 'form-visitor', data: { frontDoorUrl: 'http://localhost:5678/webhook/abc/n8n-form', steps: [{ op: 'navigate' }, { op: 'click' }] } }),
+      mint({ id: 'fresh-execution', kind: 'fresh-session', provenance: 'tool', identity: 'form-visitor', data: { entity: 'execution_entity.max_id', executionId: 7, observed: 7 } }),
+    ],
+    reproduce: { k: 2, n: 2, kFail: 0 },
   });
   assert.equal(evaluate(b), Verdict.WORKS);
 });
