@@ -75,8 +75,9 @@ const DIRECTIVE =
 
 /**
  * Inject the disclosed build_overlay just before the corepack line (M1's 2026-corepack-vs-
- * 2023-tree signature fix). A bare shell line is RUN-prefixed; a line that already begins
- * with a Dockerfile directive (e.g. `ENV ...`) is emitted verbatim.
+ * 2023-tree signature fix) — or, when the tree ships no corepack line, before the first
+ * package-manager install RUN in each build stage. A bare shell line is RUN-prefixed; a line
+ * that already begins with a Dockerfile directive (e.g. `ENV ...`) is emitted verbatim.
  * @param {string} text the original Dockerfile
  * @param {string[]} [overlayLines]
  * @returns {string}
@@ -84,11 +85,39 @@ const DIRECTIVE =
 export function overlayDockerfile(text, overlayLines) {
   if (!overlayLines || overlayLines.length === 0) return text;
   const lines = text.split('\n');
+  const injected = overlayLines.map((l) => (DIRECTIVE.test(l) ? l : `RUN ${l}`));
+
+  // First choice: a single injection before the corepack line (byte-identical to the original).
   let at = lines.findIndex((l) => /corepack\s+enable/.test(l));
   if (at === -1) at = lines.findIndex((l) => /corepack/.test(l));
-  if (at === -1) throw new Error('conjure: build_overlay is set but no corepack line was found to anchor the overlay');
-  const injected = overlayLines.map((l) => (DIRECTIVE.test(l) ? l : `RUN ${l}`));
-  return [...lines.slice(0, at), ...injected, ...lines.slice(at)].join('\n');
+  if (at !== -1) return [...lines.slice(0, at), ...injected, ...lines.slice(at)].join('\n');
+
+  // ponytail: no corepack line to anchor on (some trees never invoke corepack) — fall back to the
+  // first package-manager install RUN in EACH build stage. corepack's `ENV`/global `npm install -g`
+  // do NOT cross a `FROM` boundary, so a multi-stage tree (n8n-custom: builder + runtime, both
+  // invoke pnpm) needs the fix re-applied per stage. We walk `FROM` boundaries and, for a RUN whose
+  // block (the `RUN` line plus its `\`-continuation lines) mentions pnpm/yarn/npm, inject before the
+  // `RUN` line — so a multi-LINE `RUN \` / `pnpm rebuild …` step (n8n stage 2) is caught too.
+  /** @type {string[]} */ const out = [];
+  let injectedInStage = false;
+  let anyInjected = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s*FROM\b/i.test(l)) injectedInStage = false;
+    if (!injectedInStage && /^\s*RUN\b/.test(l)) {
+      // Extend across `\`-continuation lines so a multi-line RUN block is matched as a whole.
+      let end = i;
+      while (end < lines.length - 1 && /\\\s*$/.test(lines[end])) end++;
+      if (/\b(pnpm|yarn|npm)\b/.test(lines.slice(i, end + 1).join('\n'))) {
+        out.push(...injected);
+        injectedInStage = true;
+        anyInjected = true;
+      }
+    }
+    out.push(l);
+  }
+  if (!anyInjected) throw new Error('conjure: build_overlay is set but no anchor was found — neither a corepack line nor a package-manager (pnpm/yarn/npm) install RUN line exists to anchor the overlay');
+  return out.join('\n');
 }
 
 /**

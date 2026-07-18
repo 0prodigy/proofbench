@@ -30,6 +30,114 @@ test('conjure: overlayDockerfile throws when overlay is set but there is no core
   assert.throws(() => overlayDockerfile('FROM x\nRUN echo hi', ['ENV A=1']), /corepack/);
 });
 
+test('conjure: overlayDockerfile still anchors on the corepack line when a pnpm-install RUN also exists (byte-identical regression guard)', () => {
+  const df = [
+    'FROM n8nio/base:18',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN corepack enable && corepack prepare --activate',
+    'RUN pnpm install --frozen-lockfile',
+  ].join('\n');
+  const out = overlayDockerfile(df, ['npm install -g corepack@latest', 'ENV COREPACK_INTEGRITY_KEYS=0']);
+  const expected = [
+    'FROM n8nio/base:18',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN npm install -g corepack@latest',
+    'ENV COREPACK_INTEGRITY_KEYS=0',
+    'RUN corepack enable && corepack prepare --activate',
+    'RUN pnpm install --frozen-lockfile',
+  ].join('\n');
+  assert.equal(out, expected); // corepack wins over the pnpm-install fallback — anchor byte-identical to before
+});
+
+test('conjure: overlayDockerfile falls back to the first package-manager install RUN when no corepack line exists', () => {
+  const df = [
+    'FROM n8nio/base:18',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN pnpm install --frozen-lockfile',
+    'RUN pnpm build',
+  ].join('\n');
+  const out = overlayDockerfile(df, ['npm install -g corepack@latest', 'ENV COREPACK_INTEGRITY_KEYS=0']);
+  const expected = [
+    'FROM n8nio/base:18',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN npm install -g corepack@latest',
+    'ENV COREPACK_INTEGRITY_KEYS=0',
+    'RUN pnpm install --frozen-lockfile',
+    'RUN pnpm build',
+  ].join('\n');
+  assert.equal(out, expected); // injected immediately before the FIRST pnpm-install RUN, in the same stage
+  assert.equal(out.split('\n').filter((l) => /corepack@latest/.test(l)).length, 1); // injected exactly once
+});
+
+test('conjure: overlayDockerfile fallback injects the overlay per build stage in a multi-stage Dockerfile with no corepack line', () => {
+  const df = [
+    'FROM n8nio/base:18 as builder',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN pnpm install --frozen-lockfile',
+    'RUN pnpm build',
+    'FROM n8nio/base:18',
+    'WORKDIR /app',
+    'RUN pnpm rebuild --dir /app sqlite3',
+    'CMD ["node", "dist/main.js"]',
+  ].join('\n');
+  const out = overlayDockerfile(df, ['npm install -g corepack@latest', 'ENV COREPACK_INTEGRITY_KEYS=0']);
+  const expected = [
+    'FROM n8nio/base:18 as builder',
+    'WORKDIR /src',
+    'COPY . .',
+    'RUN npm install -g corepack@latest',
+    'ENV COREPACK_INTEGRITY_KEYS=0',
+    'RUN pnpm install --frozen-lockfile',
+    'RUN pnpm build',
+    'FROM n8nio/base:18',
+    'WORKDIR /app',
+    'RUN npm install -g corepack@latest',
+    'ENV COREPACK_INTEGRITY_KEYS=0',
+    'RUN pnpm rebuild --dir /app sqlite3',
+    'CMD ["node", "dist/main.js"]',
+  ].join('\n');
+  assert.equal(out, expected); // each stage's first pnpm RUN gets its own corepack fix (ENV/npm -g don't cross FROM)
+  assert.equal(out.split('\n').filter((l) => /corepack@latest/.test(l)).length, 2); // injected once per stage
+});
+
+test('conjure: overlayDockerfile fallback anchors before a MULTI-LINE RUN block whose continuation lines invoke pnpm', () => {
+  const df = [
+    'FROM n8nio/base:18',
+    'WORKDIR /app',
+    'RUN \\',
+    '\tpnpm rebuild --dir /usr/local/lib/node_modules/n8n sqlite3 && \\',
+    '\tln -s /usr/local/lib/node_modules/n8n /usr/local/bin/n8n && \\',
+    '\tmkdir -p /home/node/.n8n',
+    'CMD ["node", "dist/main.js"]',
+  ].join('\n');
+  const out = overlayDockerfile(df, ['npm install -g corepack@latest', 'ENV COREPACK_INTEGRITY_KEYS=0']);
+  const expected = [
+    'FROM n8nio/base:18',
+    'WORKDIR /app',
+    'RUN npm install -g corepack@latest',
+    'ENV COREPACK_INTEGRITY_KEYS=0',
+    'RUN \\',
+    '\tpnpm rebuild --dir /usr/local/lib/node_modules/n8n sqlite3 && \\',
+    '\tln -s /usr/local/lib/node_modules/n8n /usr/local/bin/n8n && \\',
+    '\tmkdir -p /home/node/.n8n',
+    'CMD ["node", "dist/main.js"]',
+  ].join('\n');
+  assert.equal(out, expected); // overlay lands immediately before the `RUN \` line; the multi-line block stays intact
+  assert.equal(out.split('\n').filter((l) => /corepack@latest/.test(l)).length, 1); // injected once (single stage, single block)
+});
+
+test('conjure: overlayDockerfile throws naming both anchors when neither a corepack nor a pnpm/yarn/npm RUN exists', () => {
+  assert.throws(
+    () => overlayDockerfile(['FROM alpine', 'RUN echo hi', 'CMD ["sh"]'].join('\n'), ['ENV A=1']),
+    (/** @type {Error} */ err) => /corepack/.test(err.message) && /pnpm|package-manager/.test(err.message)
+  );
+});
+
 test('conjure: resolvePlaceholders fills {name} from the lookup and throws (naming it) on an unresolved one', () => {
   assert.equal(
     resolvePlaceholders('/webhook/{webhook_id}/n8n-form', (n) => (n === 'webhook_id' ? 'abc' : undefined)),
