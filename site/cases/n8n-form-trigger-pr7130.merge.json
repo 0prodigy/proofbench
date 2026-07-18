@@ -1,0 +1,139 @@
+{
+  "intent": "A visitor submitting the n8n Form Trigger (PR #7130) front door persists an execution, reproduced across fresh worlds (SHA 3ddc176).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "a visitor submitting the n8n Form Trigger front-door form",
+      "effectCheck": {
+        "entity": "execution_entity.max_id",
+        "expectedAfterRelation": {
+          "op": "increased"
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": [
+        "store-delta",
+        "browser-drive",
+        "fresh-execution"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "id": "fingerprint",
+      "kind": "fingerprint",
+      "provenance": "harness",
+      "data": {
+        "mode": "from_tree",
+        "sha": "3ddc176dfa2d3d99a328a29a3a8613e35ff456a0",
+        "image_digest": "sha256:bcf698a7ef125bdb6fe12343d286edb45ea0e56486feb987478001b223549285",
+        "version_label": "1.11.0",
+        "image_ref_or_tag": "pb-sut-n8n-form-trigger-pr-7130-3ddc176",
+        "container": "pb-sut-n8n-form-trigger-pr-7130-mrqeacwg"
+      },
+      "sha256": "17894febea87f8c345849f5a4673504e612527b3434c08e649f2f0d11ff6b97c"
+    },
+    {
+      "id": "store-delta",
+      "kind": "delta",
+      "provenance": "harness",
+      "identity": "form-visitor",
+      "sourcePR": false,
+      "data": {
+        "entity": "execution_entity.max_id",
+        "before": 0,
+        "after": 1,
+        "countBefore": 0,
+        "countAfter": 1,
+        "workflowId": "Th5u3EuTCFkQ4abX",
+        "status": "success"
+      },
+      "sha256": "457dd672c113afdfc23def9eedadb8d2cacad895bf3f23403667961a294711d8"
+    },
+    {
+      "id": "browser-drive",
+      "kind": "attempt",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "request": "browser-drive http://localhost:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form",
+        "frontDoorUrl": "http://localhost:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form",
+        "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form"
+          },
+          {
+            "op": "execute",
+            "script": "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerC…",
+            "value": [
+              {
+                "name": "field-0",
+                "tag": "input",
+                "type": "text"
+              }
+            ]
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2"
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2"
+          },
+          {
+            "op": "type",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2",
+            "text": "Test User"
+          },
+          {
+            "op": "find",
+            "css": "button[type=\"submit\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.7"
+          },
+          {
+            "op": "click",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.7"
+          },
+          {
+            "op": "execute",
+            "script": "return document.body ? document.body.innerText : \"\"",
+            "value": "Form Submited\n\nYour response has been recorded\n\nForm automated with "
+          }
+        ],
+        "observed": "Form Submited\n\nYour response has been recorded\n\nForm automated with ",
+        "executionId": 1
+      },
+      "sha256": "8af59814a9dbee4f83282de36c87585399eec4f7bd854efe19796b99d8a000aa"
+    },
+    {
+      "id": "fresh-execution",
+      "kind": "fresh-session",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "entity": "execution_entity.max_id",
+        "executionId": 1,
+        "observed": 1
+      },
+      "sha256": "283e9ce4d6f17b9cb6a305af8e583f3f1c597ad3e77bcc2c5948f9f734a62917"
+    }
+  ],
+  "reproduce": {
+    "k": 2,
+    "n": 2,
+    "kFail": 0
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "1a9c3f527254d3a672503185457af20edf9e8a1f1e29b40159cfafc0f8ddc04d",
+    "signature": "21diebO2VlZyhm0kOYH5uj9/togz/1GolbMsELc43ucdt56+GKjfz7x7P6PrOqlQUJualj9mJNccN4eqYQAeDg==",
+    "publicKey": "MCowBQYDK2VwAyEAecpzECxIPp0EwTwb80zryd91s46e0YsPQniXV9GaEI8="
+  }
+}

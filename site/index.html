@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Proofbench — Your agents say it works. Proofbench proves it.</title>
+<meta name="description" content="Proofbench is an open-source harness that proves an AI agent's change actually works for a real user — a tri-state verdict the agent cannot fake, bound to the exact code that ran, with sealed replayable receipts." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="assets/site.css" />
+<script>
+  document.documentElement.classList.add("js");
+  try {
+    var t = localStorage.getItem("pb-theme");
+    if (t) document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="#pipeline">How it works</a>
+      <a href="#catch">The Catch</a>
+      <a href="case.html">Case file</a>
+      <a href="https://github.com/0prodigy/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="case.html">See a real case file</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ HERO — the verification record filling itself in ============ -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-copy">
+        <p class="eyebrow">open-source · agent-verification harness</p>
+        <h1>Your agents say it works. <span class="accent">Proofbench proves it.</span></h1>
+        <p class="hero-sub">The agent only ever <em>proposes</em>. A deterministic harness <em>disposes</em> — it brings your whole system to life, drives it like a hostile first user, taps the store out of the agent's reach, and returns one of three verdicts bound to the exact code that ran. The agent cannot write the verdict, fabricate the evidence, or touch the seal.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#catch">See The Catch</a>
+          <a class="btn btn-ghost" href="https://github.com/0prodigy/proofbench">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <div class="hero-install code-frame">
+          <code>node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</code>
+          <button class="copy-btn" type="button" data-copy-target aria-label="Copy prove command">Copy</button>
+        </div>
+      </div>
+
+      <!-- Certificate: filled state is the accessible, no-JS, reduced-motion default. -->
+      <div class="cert" id="cert">
+        <div class="cert-head">
+          <h3 class="cert-title">Verification Record</h3>
+          <span class="cert-serial">Case pb-3ddc176</span>
+        </div>
+        <dl class="cert-fields">
+          <div class="cert-field"><dt>Target</dt><dd data-field="target" data-value="n8n #7130">n8n #7130</dd></div>
+          <div class="cert-field"><dt>Merge</dt><dd data-field="merge" data-value="3ddc176">3ddc176</dd></div>
+          <div class="cert-field"><dt>Parent</dt><dd data-field="parent" data-value="869b8f14">869b8f14</dd></div>
+          <div class="cert-field"><dt>Verdict</dt><dd data-field="verdict" data-value="WORKS">WORKS</dd></div>
+          <div class="cert-field"><dt>Diff</dt><dd data-field="diff" data-value="PASS">PASS</dd></div>
+        </dl>
+        <div class="cert-seal-slot" id="cert-seal" aria-hidden="true">
+          <svg class="seal-svg" viewBox="0 0 100 100" role="img" aria-label="Proofbench seal, verdict WORKS, differential PASS">
+            <defs><path id="seal-arc" d="M 50,50 m -37,0 a 37,37 0 1,1 74,0 a 37,37 0 1,1 -74,0" /></defs>
+            <circle cx="50" cy="50" r="46" />
+            <circle cx="50" cy="50" r="33" />
+            <text><textPath href="#seal-arc" startOffset="2">PROOFBENCH · WORKS · SEALED ·</textPath></text>
+            <text x="50" y="54" text-anchor="middle" font-size="11" font-weight="600">PASS</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Terminal slab: replays the real `pb prove` differential, verbatim. -->
+      <div class="term" id="term-demo">
+        <div class="term-chrome">
+          <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
+          <span class="term-title">pb prove · n8n-form-trigger-pr7130</span>
+        </div>
+        <div class="term-body" id="term-body"><div class="term-line t-cmd">node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</div><div class="term-line t-out">pb prove — MERGE 3ddc176dfa2d → WORKS</div><div class="term-line t-pass">  WORKS: 1 confirmed effect claim, reproduced k=2</div><div class="term-line t-out">pb prove — PARENT 869b8f14caaf → COULD_NOT_DETERMINE</div><div class="term-line t-notrun">  note: Node not found: n8n-nodes-base.formTrigger</div><div class="term-line t-out">pb prove — DIFFERENTIAL (the PR IS why it works)</div><div class="term-line t-out">  merge  3ddc176dfa2d: WORKS</div><div class="term-line t-out">  parent 869b8f14caaf: COULD_NOT_DETERMINE</div><div class="term-line t-pass">  DIFFERENTIAL: PASS  (merge=WORKS ∧ parent≠WORKS)</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HONESTY THESIS ============ -->
+  <section id="thesis" class="contrast">
+    <div class="container">
+      <p class="eyebrow">agent proposes · harness disposes</p>
+      <h2>The asymmetry is the whole game.</h2>
+      <p style="margin-top:var(--space-2);max-width:64ch;">An agent's unreliability can only ever <strong>cost you a WORKS</strong> — it degrades to <span class="tabular">COULD NOT DETERMINE</span>. It can <strong>never manufacture a false WORKS.</strong> That is the one property Proofbench is built to hold.</p>
+      <div class="grid-3" style="margin-top:var(--space-4);">
+        <div class="card">
+          <h3>The agent proposes</h3>
+          <p>Fallible and revisable: how to read the sentence, which user actions to try, the narration. Proposed once, then frozen before the walk runs.</p>
+        </div>
+        <div class="card">
+          <h3>The harness disposes</h3>
+          <p>Authoritative: it executes the walk, records ground truth <em>out of the agent's reach</em>, seals the evidence with a real ed25519 key, and computes the verdict by fixed rules.</p>
+        </div>
+        <div class="card">
+          <h3>Uncertainty is CND</h3>
+          <p>Never rounded up to green. A failure must reproduce (kFail ≥ 2) to convict; a one-off is "observed once, could not reproduce" — recorded, never a verdict.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LEDGER PIPELINE ============ -->
+  <section id="pipeline">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">the pipeline is the argument</p>
+        <h2>Five entries. One real sequence.</h2>
+        <p>Every run passes through the same ledger. The seam phases run on your infra; the trust phases — seal and verdict — are ours, and not swappable, because a swappable seal would just relocate the lie.</p>
+      </div>
+      <div class="ledger">
+        <div class="ledger-row">
+          <span class="ledger-num">№1</span>
+          <div class="ledger-body">
+            <h3>Recipe → Promise</h3>
+            <p>A <code>recipe.json</code> names the code identity (merge + parent SHA), how to bring the system up, and the front door. The agent compiles the intent into a promise, then it is frozen.</p>
+          </div>
+          <pre class="ledger-artifact"><code>{
+  "intent": "a visitor submitting the form
+             persists an execution",
+  "code_identity": { "merge": "3ddc176",
+                     "parent": "869b8f14" }
+}</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№2</span>
+          <div class="ledger-body">
+            <h3>Conjure a fresh world</h3>
+            <p>The harness builds the system from the pinned tree and brings it up hermetically — a disposable world per leg, torn down by a deadman's switch whatever happens.</p>
+          </div>
+          <pre class="ledger-artifact"><code>fingerprint (harness):
+  sha:          3ddc176dfa2d…
+  image_digest: sha256:bcf698a7…
+  version:      1.11.0</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№3</span>
+          <div class="ledger-body">
+            <h3>Drive the front door</h3>
+            <p>The agent-proposed walk goes in as a stranger — no deep links. It reads the page, types, submits. Every DOM step is captured as a <code>tool</code>-provenance receipt.</p>
+          </div>
+          <pre class="ledger-artifact"><code>browser-drive (tool):
+  navigate → introspect → type
+  → click submit → observe
+  "Form Submited / Your response
+   has been recorded"</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№4</span>
+          <div class="ledger-body">
+            <h3>Tap the store · seal</h3>
+            <p>Out of the agent's reach, the harness reads the store of record before and after, then a fresh session re-reads the same id. Everything is content-addressed and sealed.</p>
+          </div>
+          <pre class="ledger-artifact"><code>store-delta (harness):
+  execution_entity.max_id 0 → 1
+fresh-execution (tool, fresh session):
+  observed id 1  (binds the delta)
+EVIDENCE SEALED ed25519</code></pre>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-num">№5</span>
+          <div class="ledger-body">
+            <h3>Verdict, set last</h3>
+            <p>A deterministic truth-table judges the sealed receipts — never the agent's narration. Only <code>tool</code>|<code>harness</code> receipts can satisfy a claim; a WORKS needs a confirmed effect reproduced k ≥ 2.</p>
+          </div>
+          <pre class="ledger-artifact"><code>verdict: WORKS
+  1 confirmed effect claim
+  all claims satisfied
+  reproduced k=2</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE CATCH (the magic moment) ============ -->
+  <section id="catch" class="contrast">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">the magic moment</p>
+        <h2>The Catch: the PR <em>is</em> why it works.</h2>
+        <p>A single WORKS proves nothing — the feature might have worked before your change. So Proofbench runs the same user walk on both the merge and its parent and reports the <strong>differential</strong>. It passes only when the merge WORKS and the parent does not.</p>
+      </div>
+
+      <div class="diff-grid">
+        <div class="diff-leg is-primary">
+          <span class="diff-leg-label">merge · 3ddc176</span>
+          <span class="badge badge-works">WORKS</span>
+          <span class="diff-leg-note">Submit → <code>execution_entity.max_id</code> 0 → 1, confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</span>
+        </div>
+        <div class="diff-op">
+          <span class="diff-verb">∧</span>
+          <span>merge WORKS<br/>parent ≠ WORKS</span>
+        </div>
+        <div class="diff-leg">
+          <span class="diff-leg-label">parent · 869b8f14</span>
+          <span class="badge badge-cnd">COULD NOT DETERMINE</span>
+          <span class="diff-leg-note">The Form Trigger node does not exist yet at the parent SHA — the workflow will not activate. Absent code is never convicted; the honest answer is CND.</span>
+        </div>
+      </div>
+
+      <div class="diff-result">
+        <span>DIFFERENTIAL:</span> <span class="pass">PASS</span>
+        <span style="color:var(--ink-3);">— the change is why the feature works, not the environment.</span>
+      </div>
+
+      <div class="hero-cta" style="margin-top:var(--space-4);">
+        <a class="btn btn-primary" href="case.html">Open the sealed case file</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TRI-STATE VERDICT ============ -->
+  <section id="verdict">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">three answers, never two</p>
+        <h2>WORKS is earned. The other two are honest.</h2>
+        <p>A binary pass/fail forces a lie whenever the truth is "I couldn't tell." The tri-state is the scope valve — it always says which, always with the receipt.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <span class="badge badge-works">WORKS</span>
+          <p style="margin-top:var(--space-2);">A confirmed effect on the store of record, bound to a fresh out-of-band re-read, reproduced across ≥ 2 fresh worlds. Never from a single walk.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-dnw">DOES NOT WORK</span>
+          <p style="margin-top:var(--space-2);">The walk ran and the promised effect went missing — and the failure reproduced (kFail ≥ 2). A defect in the change, shown as the broken moment.</p>
+        </div>
+        <div class="card">
+          <span class="badge badge-cnd">COULD NOT DETERMINE</span>
+          <p style="margin-top:var(--space-2);">The harness couldn't bring the system up, reach the state, or bind the code identity — so it will not say WORKS. Names what blocked it, and the fix.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SEALED RECEIPTS / PROVENANCE ============ -->
+  <section id="receipts" class="contrast">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">every claim carries its receipt</p>
+        <h2>Provenance is ranked. Only the harness can satisfy.</h2>
+        <p>Each receipt is stamped with who produced it. A receipt the agent handed in is forced to <code>agent</code> provenance and content-addressed on the way in — it can corroborate, but it can never satisfy a claim on its own.</p>
+      </div>
+      <div class="prov-legend">
+        <span class="item"><span class="badge badge-prov badge-harness">harness</span> store taps, seals — out of the agent's reach</span>
+        <span class="item"><span class="badge badge-prov badge-tool">tool</span> the browser drive, fresh-session reads</span>
+        <span class="item"><span class="badge badge-prov badge-agent">agent</span> narration — corroborates only, never satisfies</span>
+      </div>
+      <pre class="ledger-artifact" style="margin-top:var(--space-3);max-width:680px;"><code>{
+  "id": "store-delta", "kind": "delta",
+  "provenance": "harness",
+  "sha256": "457dd672c113afdf…",
+  "data": { "entity": "execution_entity.max_id",
+            "before": 0, "after": 1, "status": "success" }
+}</code></pre>
+      <p style="margin-top:var(--space-3);max-width:64ch;">The whole bundle is signed with a real ed25519 key over a canonical digest of intent + claims + receipts + verdict. Edit one byte anywhere and the seal breaks. The case file re-derives all of it in your browser, offline — no server, no network.</p>
+    </div>
+  </section>
+
+  <!-- ============ QUICKSTART ============ -->
+  <section id="quickstart">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">run it at the moment of maximum doubt</p>
+        <h2>One command in. A sealed case file out.</h2>
+      </div>
+      <div class="tabs" id="quickstart-tabs">
+        <div class="tab-list" role="tablist" aria-label="Quickstart commands">
+          <button class="tab-btn" role="tab" type="button" aria-selected="true" id="tab-prove" aria-controls="panel-prove">prove (differential)</button>
+          <button class="tab-btn" role="tab" type="button" aria-selected="false" id="tab-gate" aria-controls="panel-gate" tabindex="-1">gate (honesty core)</button>
+          <button class="tab-btn" role="tab" type="button" aria-selected="false" id="tab-verify" aria-controls="panel-verify" tabindex="-1">self-verify</button>
+        </div>
+        <div class="tab-panel is-active" id="panel-prove" role="tabpanel" aria-labelledby="tab-prove">
+          <div class="code-frame"><pre><code>git clone https://github.com/0prodigy/proofbench
+cd proofbench
+
+# run the same user walk on merge and parent, report the differential
+node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">merge 3ddc176: WORKS · parent 869b8f14: COULD_NOT_DETERMINE · DIFFERENTIAL: PASS</p>
+        </div>
+        <div class="tab-panel" id="panel-gate" role="tabpanel" aria-labelledby="tab-gate">
+          <div class="code-frame"><pre><code># the malicious-driver gate: proves a lying agent cannot manufacture a WORKS
+node src/cli.mjs gate</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">The honesty core, adversarially held: false-WORKS = 0 is release-blocking.</p>
+        </div>
+        <div class="tab-panel" id="panel-verify" role="tabpanel" aria-labelledby="tab-verify">
+          <div class="code-frame"><pre><code># open any sealed case file in a browser — it self-verifies offline
+open site/case.html          # or double-click the .html file</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">Re-derives the verdict and every receipt hash client-side. Edit a byte → TAMPERED.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPARISON ============ -->
+  <section id="compare">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">not another reviewer</p>
+        <h2>Reading the diff isn't running the product.</h2>
+      </div>
+      <table class="compare-table">
+        <thead><tr><th scope="col"></th><th scope="col">LLM code review</th><th scope="col">Proofbench</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Method</th><td>Reads the diff</td><td>Runs your product, drives the front door</td></tr>
+          <tr><th scope="row">Output</th><td>Prose findings</td><td>Tri-state verdict + sealed receipts</td></tr>
+          <tr><th scope="row">Verdict set by</th><td>The model</td><td>A deterministic truth-table, last</td></tr>
+          <tr><th scope="row">Can the agent fake it?</th><td>Yes — it writes the answer</td><td>No — it can only cost a WORKS</td></tr>
+          <tr><th scope="row">Is the change why?</th><td>Unknown</td><td>Differential: merge vs parent</td></tr>
+          <tr><th scope="row">Evidence</th><td>Quoted code</td><td>Sealed, replayable, offline-verifiable</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section id="faq">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">before you point it at a PR</p>
+        <h2>Questions worth answering upfront.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>How can the agent not just fake a WORKS?</summary>
+          <p>The agent only proposes the walk and the narration — both frozen before execution. The harness executes, taps the store of record out of the agent's reach, and computes the verdict by fixed rules. Receipts the agent hands in are forced to <code>agent</code> provenance, and only <code>tool</code>|<code>harness</code> receipts can satisfy a claim. Structurally, the worst the agent can do is downgrade a WORKS to COULD NOT DETERMINE.</p>
+        </details>
+        <details>
+          <summary>Why run the parent commit too?</summary>
+          <p>Because a WORKS on the merge alone doesn't prove your change is <em>why</em> it works — the feature might predate it. The differential re-runs the identical walk on the parent SHA. It only passes when the merge WORKS and the parent doesn't, so the PR's diff is the thing being credited.</p>
+        </details>
+        <details>
+          <summary>What does the seal actually prove?</summary>
+          <p>It is tamper-<em>evident</em>: a real ed25519 signature over a canonical digest of the bundle, so any post-seal edit is detectable and the case file self-verifies offline. It is not tamper-<em>resistant</em> — on your own machine the key and run live on hardware you control, so a box owner can forge at rest. Every case file states this ceiling in its honesty panel.</p>
+        </details>
+        <details>
+          <summary>Does it need my API key or credentials?</summary>
+          <p>The proposer runs on the customer's own agent. By default it shells out to the locally installed <code>claude</code> binary and inherits whatever subscription auth is already there — no API key required, and credentials never pass through Proofbench.</p>
+        </details>
+        <details>
+          <summary>What's the license?</summary>
+          <p>Apache-2.0. The evidence bundle format is open — the case file is one self-contained HTML file you can archive and re-verify forever.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section class="final-cta">
+    <div class="container">
+      <p class="eyebrow">get proof, not its word</p>
+      <h2>Stop trusting the narration. Start trusting the seal.</h2>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="case.html">Open a real case file</a>
+        <a class="btn btn-ghost" href="https://github.com/0prodigy/proofbench">Read the code</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>Proof-of-work for AI change. The agent proposes; the harness disposes. Apache-2.0, built by 0prodigy.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="#pipeline">How it works</a>
+        <a href="#catch">The Catch</a>
+        <a href="case.html">Case file</a>
+        <a href="https://github.com/0prodigy/proofbench">GitHub</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 0prodigy. Apache-2.0 licensed.</span>
+    <span>Every number on this page is from a real run in this repo's history.</span>
+  </div>
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

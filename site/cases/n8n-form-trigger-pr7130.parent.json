@@ -1,0 +1,32 @@
+{
+  "intent": "A visitor submitting the n8n Form Trigger (PR #7130) front door persists an execution, reproduced across fresh worlds (SHA 869b8f1).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "a visitor submitting the n8n Form Trigger front-door form",
+      "effectCheck": {
+        "entity": "execution_entity.max_id",
+        "expectedAfterRelation": {
+          "op": "increased"
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": []
+    }
+  ],
+  "receipts": [],
+  "reproduce": {
+    "k": 0,
+    "n": 2,
+    "kFail": 0
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "225e90bf46eec1fa3816e3ae3ebb50dcf29160b909ffd08a50cabef9f364c1ab",
+    "signature": "NfW2Ragdc7TanVUQF8V+YfJ8xipvDd9AnsE95eF5Chy9wI/w3T+NbozLsU5dT+BED0PWNvysrHHqJdC26fw0DA==",
+    "publicKey": "MCowBQYDK2VwAyEA8KzQLc9qLgdqYXXQYtg6OEbhkc9SmNqVepv3nCQp7Fc="
+  }
+}

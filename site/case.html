@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Case pb-3ddc176 — n8n Form Trigger #7130 · Proofbench</title>
+<meta name="description" content="A sealed Proofbench case file: the differential Catch on n8n Form Trigger PR #7130 — merge WORKS, parent COULD NOT DETERMINE. Re-derives its own verdict and verifies its own seal in your browser, offline." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="assets/site.css" />
+<script>
+  document.documentElement.classList.add("js");
+  try { var t = localStorage.getItem("pb-theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="nav-logo" href="index.html" aria-label="Proofbench home">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+        <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      proofbench
+    </a>
+    <nav class="nav-links">
+      <a href="index.html#pipeline">How it works</a>
+      <a href="index.html#catch">The Catch</a>
+      <a href="case.html" class="active">Case file</a>
+      <a href="https://github.com/0prodigy/proofbench">GitHub</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="btn-icon theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19v2.5M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19 12h2.5M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.7 6.7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <button class="btn-verify" type="button" id="btn-verify">Re-verify seal</button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="container">
+
+  <!-- ===== case header ===== -->
+  <div class="case-head">
+    <span class="case-serial">Case pb-3ddc176 · sealed ed25519 · n8n Form Trigger #7130</span>
+    <h1 class="case-intent" id="case-intent">A visitor submitting the n8n Form Trigger front door persists an execution.</h1>
+    <p class="case-sub">Proofbench ran the same agent-proposed user walk on the merge commit and on its parent, tapped the store of record out of the agent's reach, and sealed the evidence. This page re-derives the verdict and verifies the seal <strong>in your browser, offline</strong> — no server.</p>
+    <div id="verdict-block" class="verdict-block"></div>
+  </div>
+
+  <!-- ===== differential ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">the catch — the PR is why it works</p><h2>Differential: merge vs parent</h2></div>
+    <div class="diff-grid" id="diff-grid"></div>
+    <div class="diff-result" id="diff-result"></div>
+  </section>
+
+  <!-- ===== the decisive moment ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">the decisive moment</p><h2>What the store said, beside what the visitor saw.</h2></div>
+    <div class="moment" id="moment"></div>
+  </section>
+
+  <!-- ===== claim scoreboard ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">the scoreboard</p><h2>Every claim, and why it landed where it did.</h2>
+      <p>Computed last, from the sealed receipts — re-derived here by the same rules as <code>src/verdict.mjs</code>.</p></div>
+    <table class="scoreboard" id="scoreboard"></table>
+  </section>
+
+  <!-- ===== receipt ledger ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">the probe ledger</p><h2>Receipts, ranked by who produced them.</h2>
+      <div class="prov-legend">
+        <span class="item"><span class="badge badge-prov badge-harness">harness</span> out of the agent's reach — can satisfy</span>
+        <span class="item"><span class="badge badge-prov badge-tool">tool</span> the browser drive &amp; fresh reads — can satisfy</span>
+        <span class="item"><span class="badge badge-prov badge-agent">agent</span> corroborates only</span>
+      </div>
+    </div>
+    <div class="receipts" id="receipts"></div>
+  </section>
+
+  <!-- ===== touched-surface manifest ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">touched-surface manifest</p><h2>Bound to the exact code that ran.</h2></div>
+    <dl class="manifest-grid" id="manifest"></dl>
+  </section>
+
+  <!-- ===== self-verify ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">one-click offline self-verification</p><h2>Does this file still match its seal?</h2></div>
+    <div class="selfverify">
+      <div class="sv-row">
+        <span class="sv-status pending" id="sv-status">checking…</span>
+        <span class="sv-detail" id="sv-detail"></span>
+      </div>
+      <ul class="sv-list" id="sv-list"></ul>
+      <div class="sv-row">
+        <button class="btn-verify" type="button" id="btn-verify-2" onclick="document.getElementById('btn-verify').click()">Re-verify now</button>
+        <button class="btn-verify" type="button" id="btn-tamper" style="border-color:var(--fail);color:var(--fail)">Tamper-test (flip one byte)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== honesty panel ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">the honesty panel</p><h2>What this seal proves — and what it cannot.</h2></div>
+    <div class="honesty">
+      <div class="honesty-col proves">
+        <h4>What it proves</h4>
+        <ul>
+          <li>The merge WORKS: a real store delta (<code>execution_entity.max_id</code> 0→1), confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</li>
+          <li>The change is why: the identical walk on the parent could not determine — the feature is absent there.</li>
+          <li>The verdict was set last, by fixed rules over receipts — the agent could not write it.</li>
+          <li>Tamper-evidence: every receipt is content-addressed and the whole bundle is signed. Edit one byte → the digest no longer matches.</li>
+        </ul>
+      </div>
+      <div class="honesty-col cannot">
+        <h4>What it cannot prove</h4>
+        <ul>
+          <li>Tamper-<em>resistance</em>: on the box owner's own machine the key and run live on hardware they control — they can forge at rest. This is the honest local tier.</li>
+          <li>The in-browser check verifies content addresses and the manifest digest; the ed25519 <em>signature</em> over that digest is verified by <code>verifySeal</code> in Node.</li>
+          <li>Whether the parent predates a different regression — CND means feature-absent, not "known-good before."</li>
+          <li>Anything outside the walked surface — the case file scopes itself to exactly what was exercised.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== machine-readable + re-run ===== -->
+  <section class="case-section">
+    <div class="section-head"><p class="eyebrow">machine-readable verdict block</p><h2>A future ledger is a pure fold over these.</h2></div>
+    <pre class="manifest-grid" style="display:block" id="machine"></pre>
+    <div class="rerun code-frame">
+      <code id="rerun-cmd">node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</code>
+      <button class="copy-btn" type="button" data-copy-target aria-label="Copy re-run command" style="position:static;margin-left:auto">Copy</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand">
+      <a class="nav-logo" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z" stroke="var(--proof)" stroke-width="1.4" />
+          <path d="M7.4 12.2 10.4 15.2 16.6 8.8" stroke="var(--proof)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        proofbench
+      </a>
+      <p>This case file is one self-contained HTML document. Save it, email it, open it offline in ten years — it still verifies itself.</p>
+    </div>
+    <div class="footer-links">
+      <div class="footer-links-col">
+        <h4>Project</h4>
+        <a href="index.html">Home</a>
+        <a href="index.html#catch">The Catch</a>
+        <a href="https://github.com/0prodigy/proofbench">GitHub</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 0prodigy. Apache-2.0 licensed.</span>
+    <span>Sealed receipt: catch-3ddc176dfa2d.receipt.json</span>
+  </div>
+</footer>
+
+<script type="application/json" id="bundle-merge">
+{
+  "intent": "A visitor submitting the n8n Form Trigger (PR #7130) front door persists an execution, reproduced across fresh worlds (SHA 3ddc176).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "a visitor submitting the n8n Form Trigger front-door form",
+      "effectCheck": {
+        "entity": "execution_entity.max_id",
+        "expectedAfterRelation": {
+          "op": "increased"
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": [
+        "store-delta",
+        "browser-drive",
+        "fresh-execution"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "id": "fingerprint",
+      "kind": "fingerprint",
+      "provenance": "harness",
+      "data": {
+        "mode": "from_tree",
+        "sha": "3ddc176dfa2d3d99a328a29a3a8613e35ff456a0",
+        "image_digest": "sha256:bcf698a7ef125bdb6fe12343d286edb45ea0e56486feb987478001b223549285",
+        "version_label": "1.11.0",
+        "image_ref_or_tag": "pb-sut-n8n-form-trigger-pr-7130-3ddc176",
+        "container": "pb-sut-n8n-form-trigger-pr-7130-mrqeacwg"
+      },
+      "sha256": "17894febea87f8c345849f5a4673504e612527b3434c08e649f2f0d11ff6b97c"
+    },
+    {
+      "id": "store-delta",
+      "kind": "delta",
+      "provenance": "harness",
+      "identity": "form-visitor",
+      "sourcePR": false,
+      "data": {
+        "entity": "execution_entity.max_id",
+        "before": 0,
+        "after": 1,
+        "countBefore": 0,
+        "countAfter": 1,
+        "workflowId": "Th5u3EuTCFkQ4abX",
+        "status": "success"
+      },
+      "sha256": "457dd672c113afdfc23def9eedadb8d2cacad895bf3f23403667961a294711d8"
+    },
+    {
+      "id": "browser-drive",
+      "kind": "attempt",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "request": "browser-drive http://localhost:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form",
+        "frontDoorUrl": "http://localhost:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form",
+        "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:5678/webhook/0670a18c-86aa-4a59-aa17-4a3dae803334/n8n-form"
+          },
+          {
+            "op": "execute",
+            "script": "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerC…",
+            "value": [
+              {
+                "name": "field-0",
+                "tag": "input",
+                "type": "text"
+              }
+            ]
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2"
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2"
+          },
+          {
+            "op": "type",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.2",
+            "text": "Test User"
+          },
+          {
+            "op": "find",
+            "css": "button[type=\"submit\"]",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.7"
+          },
+          {
+            "op": "click",
+            "elementId": "f.4EFFF7E6ACE9E54C237971BF1B939F51.d.D7F7889F72E2684E9348E63AABA79A68.e.7"
+          },
+          {
+            "op": "execute",
+            "script": "return document.body ? document.body.innerText : \"\"",
+            "value": "Form Submited\n\nYour response has been recorded\n\nForm automated with "
+          }
+        ],
+        "observed": "Form Submited\n\nYour response has been recorded\n\nForm automated with ",
+        "executionId": 1
+      },
+      "sha256": "8af59814a9dbee4f83282de36c87585399eec4f7bd854efe19796b99d8a000aa"
+    },
+    {
+      "id": "fresh-execution",
+      "kind": "fresh-session",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "entity": "execution_entity.max_id",
+        "executionId": 1,
+        "observed": 1
+      },
+      "sha256": "283e9ce4d6f17b9cb6a305af8e583f3f1c597ad3e77bcc2c5948f9f734a62917"
+    }
+  ],
+  "reproduce": {
+    "k": 2,
+    "n": 2,
+    "kFail": 0
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "1a9c3f527254d3a672503185457af20edf9e8a1f1e29b40159cfafc0f8ddc04d",
+    "signature": "21diebO2VlZyhm0kOYH5uj9/togz/1GolbMsELc43ucdt56+GKjfz7x7P6PrOqlQUJualj9mJNccN4eqYQAeDg==",
+    "publicKey": "MCowBQYDK2VwAyEAecpzECxIPp0EwTwb80zryd91s46e0YsPQniXV9GaEI8="
+  }
+}
+</script>
+<script type="application/json" id="bundle-parent">
+{
+  "intent": "A visitor submitting the n8n Form Trigger (PR #7130) front door persists an execution, reproduced across fresh worlds (SHA 869b8f1).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "a visitor submitting the n8n Form Trigger front-door form",
+      "effectCheck": {
+        "entity": "execution_entity.max_id",
+        "expectedAfterRelation": {
+          "op": "increased"
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": []
+    }
+  ],
+  "receipts": [],
+  "reproduce": {
+    "k": 0,
+    "n": 2,
+    "kFail": 0
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "225e90bf46eec1fa3816e3ae3ebb50dcf29160b909ffd08a50cabef9f364c1ab",
+    "signature": "NfW2Ragdc7TanVUQF8V+YfJ8xipvDd9AnsE95eF5Chy9wI/w3T+NbozLsU5dT+BED0PWNvysrHHqJdC26fw0DA==",
+    "publicKey": "MCowBQYDK2VwAyEA8KzQLc9qLgdqYXXQYtg6OEbhkc9SmNqVepv3nCQp7Fc="
+  }
+}
+</script>
+<script src="assets/site.js"></script>
+<script src="assets/case.js"></script>
+</body>
+</html>
