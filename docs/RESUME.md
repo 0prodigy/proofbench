@@ -148,7 +148,11 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    drive descriptor; documenso recipe) · Slice B ✅ `2d2771e` (`conjure.mjs` mode-aware: `docker
    compose up` for the Postgres class; documenso up live, /api/health 200, psql tap Field=0
    out-of-band) · random-pick ✅ `5c7d799` (`src/pool.mjs` listRecipes/pickRandom + `pb conjure
-   --random`). documenso's Konva-canvas drive honestly CNDs. **medusa spike** (3rd repo, Postgres+
+   --random`). documenso's Konva-canvas drive was CND-deferred, now **✅ FEASIBLE** (spike `5bd6ed8`: a W3C-Actions
+   `clickAt`/`pointer` coordinate capability in `browserdrive.mjs` placed a Field on the real Konva canvas →
+   psql tap `"Field"` 0→1 = a 2nd EXECUTABLE Catch target, genuinely NOT n8n-shaped; runCatch wiring
+   [cookie-inject + `NEXT_PUBLIC_WEBAPP_URL=host.docker.internal` env + a two-psql-tap addFields walk + flip
+   `drive.mode:browser`] is the documented follow-up in `docs/documenso-canvas-spike.md`). **medusa spike** (3rd repo, Postgres+
    Redis) was still building/paused at pause-time — bonus, not a blocker; fold in if it lands.
    **M5 ✅ DONE + PROVEN LIVE** (`src/browserdrive.mjs` + `test/browserdrive.test.mjs`): containerized
    `selenium/standalone-chromium:4.27.0` sidecar driven over W3C WebDriver as JSON over `fetch` (ZERO pb
@@ -176,9 +180,16 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    recipe's workflow.json fails to activate / the form 404s → the SAME walk cannot execute → CND ≠ WORKS
    = clean anti-tautology (the PR IS why it works). M6 needs a small `conjure` SHA-override to build the
    parent from-tree; the differential is MEASURED, and if a target ever fails to discriminate, honest-CND
-   and pick another corpus PR.) → M7
-   adversarial. **Latent fixes land WITH their surface:** seal-stripping @ M6/persist; mint-boundary
-   isolation + P1 `quantified` @ M7 proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive
+   and pick another corpus PR.) **M7 ✅ DONE (hardening the executed Catch):** `runCatch` now SEALS the
+   assembled bundle (ed25519) + PERSISTS it to a run dir + RE-READS that on-disk artifact through a new
+   `sealedVerdict` gate → the judgement is bound to tamper-evident evidence (mutate a persisted receipt →
+   UNVERIFIED, proven live) — the seal-stripping latent fix, landed WITH its surface (`7fb6717`). Plus 4
+   `catch-*` adversarial drivers mirroring the real Catch shape (each cheats one leg: forged-harness delta,
+   app-read-as-delta, null-delta tautology on the id, stale confirm leg) — all held ≠WORKS in `pb gate`
+   (now 14 malicious), `da82fc2`. 96/96 tests + gate PASS + typecheck clean + live differential RE-CONFIRMED on the sealed `runCatch` path
+   (`pb prove` → merge WORKS ∧ parent CND, sealed receipts persisted to disk); honesty core FROZEN. **Still
+   deferred (need the proposer surface, not this one):** mint-boundary isolation + P1 `quantified`/owner-
+   shadow. Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
@@ -222,12 +233,15 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    mongo tap, new-note-per-iteration fresh-world, operator-env setup, REST front-door). **TWO HUMAN DECISIONS before the phase starts:** (1) reproduce model
    on a shared cluster — new note/exec per iteration (rec: preserves k≥2) vs relaxed-k; (2) drive surface —
    appservice API + mongo (rec: matches today's assets) vs adding the ui-monorepo end-user leg (not built/
-   fingerprinted today). **Cheapest-failure-first order (cluster-free steps do NOT need M5/M6):** (a) paper
-   translate `ready.yaml`→`pb-recipe-v1` JSON [small]; (b) adapter schema-2 artifacts → minted+sealed
-   receipts, proven on ONE existing manifest, no cluster [small — but land it WITH the M6-proven receipt
-   pattern to avoid rework]; (c) `k8s-attach` conjure + `mongo` engine [medium]; (d) operator-supervised
-   live `pb verify --ratify` on a base-coherent cluster [medium, destructive-gated]. NOT before the OSS
-   pipeline is proven end-to-end (M5/M6).
+   fingerprinted today). **Cheapest-failure-first order:** (a) ✅ DONE — paper `ready.yaml`→`pb-recipe-v1` draft (`8b57440`);
+   (b) ✅ DONE — schema-2 manifest → minted+sealed receipts adapter (`src/lyric/manifest-adapter.mjs`,
+   `f50d02b`): on a REAL ENG-17397 manifest → honest **CND** (L3-health/not-run, no write-set delta), and
+   **anti-laundering PROVEN** (a declared-`harness` app-curl caps to tool; a plain relabel floors to agent —
+   only `mint()` yields harness; a real `lyric-mongo.sh` out-of-band read correctly stays harness) → "unify
+   the evidence semantics on real Lyric data" HOLDS, no cluster needed. **NEXT (cluster-GATED — needs
+   `lyric-devops` + a base-coherent BYOC lyriclet, CANNOT run from here):** (c) `k8s-attach` conjure +
+   `mongo` store engine [medium]; (d) operator-supervised live `pb verify --ratify` [medium, destructive-
+   gated] — with the F3/F2 base-coherence preflight FIRST.
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
 (the open-ended part — CONJURE is "never proven complete, only progressively hardened"),
