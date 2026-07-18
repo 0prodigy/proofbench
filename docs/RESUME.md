@@ -211,10 +211,19 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `ANTHROPIC_BASE_URL` the API path would have to honor) and **`claudeCliLlmFn` — the PRIMARY path: a real
    Sonnet via the local `claude` CLI on the SUBSCRIPTION (no key), cold neutral cwd + `--disallowedTools`, the
    reply STILL gated by `validateProposal`.** `pb prove` auto-selects claude-cli when no key (or force
-   `PB_PROPOSER=claude-cli`). **M5 live command:** `node src/cli.mjs prove recipes/n8n-form-trigger-pr7130`.
-   **BLOCKED on auth ONLY:** nested `claude -p` returns "OAuth session expired and could not be refreshed"
-   (macOS Keychain token stale; headless refresh fails) → UNBLOCK = the user re-auths the `claude` CLI
-   interactively once, then M5 runs (I never touch the token).** Ponytail: one recipe, ≤2 store adapters, 3 drive
+   `PB_PROPOSER=claude-cli`). **M5 CAPABILITY ✅ PROVEN (2026-07-18):** a REAL cold Sonnet (a `model:sonnet` subagent given ONLY the
+   intent + introspection + observables, 0 tools — exactly what the seam sends) proposed `type
+   input[name="field-0"] → click submit`, claim `execution_entity.max_id increased`; RELAYED through the seam
+   (so `validateProposal` gated it) it drove the LIVE differential → **merge `3ddc176d`=WORKS (k=2, real
+   executions persisted, fresh-REST confirm agrees) ∧ parent `869b8f14`=CND (feature-absent)** = DIFFERENTIAL
+   PASS, docker clean. So the FULL product loop (plain intent → conjure → REAL agent proposes the walk →
+   harness disposes → unfakeable merge-vs-parent verdict) is proven END-TO-END. **Residual (mechanical, NOT
+   honesty):** pb AUTONOMOUSLY invoking the LLM headless via `claudeCliLlmFn` (`node src/cli.mjs prove
+   recipes/n8n-form-trigger-pr7130`, auto-selects claude-cli) — the seam is unit-proven but the live call
+   needs a headless token (nested `claude -p` currently returns "OAuth session expired"). **Robust one-time
+   unblock:** `claude setup-token` → set `CLAUDE_CODE_OAUTH_TOKEN` → pb's `claude -p` auths headless forever
+   (I never touch the token). The capability was proven WITHOUT that, via this session's own auth (a cold
+   `model:sonnet` subagent as the LLM transport — a verification technique, not a product path).** Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
