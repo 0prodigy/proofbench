@@ -150,10 +150,25 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    out-of-band) · random-pick ✅ `5c7d799` (`src/pool.mjs` listRecipes/pickRandom + `pb conjure
    --random`). documenso's Konva-canvas drive honestly CNDs. **medusa spike** (3rd repo, Postgres+
    Redis) was still building/paused at pause-time — bonus, not a blocker; fold in if it lands.
-   NEXT → M5 browser drive
-   (containerized selenium + W3C WebDriver via fetch, repo-agnostic; **owner-shadow becomes
-   *testable***) → M6 the Catch end-to-end on a RANDOM repo (blind→EXECUTED; differential
-   merge-SHA=WORKS vs parent-SHA≠WORKS) → M7
+   **M5 ✅ DONE + PROVEN LIVE** (`src/browserdrive.mjs` + `test/browserdrive.test.mjs`): containerized
+   `selenium/standalone-chromium:4.27.0` sidecar driven over W3C WebDriver as JSON over `fetch` (ZERO pb
+   browser dep — Playwright-as-dep stays rejected), repo-agnostic primitive-op client (navigate/find/
+   click/type/text/execute/teardown) whose WALK is caller-scripted (agent-proposed, never recipe-baked —
+   avoids the Gherkin grave), `localhost`→`host.docker.internal` rewrite so the container reaches the
+   host-published SUT, TOOL-provenance minted attempt receipt (ground truth stays the harness store tap).
+   **owner-shadow now *testable***. Hand-proven LIVE end-to-end: real chromium → conjured n8n rendered Form
+   Trigger → typed+submitted THROUGH the browser → out-of-band sqlite tap showed `execution_entity` 0→1
+   status=`success` (row workflowId == conjure's captured workflow_id) → minted tool attempt → clean
+   teardown (no orphans, port freed). 76/76 tests + gate PASS + typecheck clean. NEXT → M6 the Catch
+   end-to-end on a RANDOM repo (blind→EXECUTED; differential
+   merge-SHA=WORKS vs parent-SHA≠WORKS; **M6 TARGET GROUNDED (2026-07-18 via gh):** n8n #7130 =
+   `feat(n8n Form Trigger Node): New node` — merge `3ddc176d` HAS the node (form serves → browser-drive
+   submit persists an `execution_entity` row → WORKS) vs its SINGLE parent
+   `869b8f14caaf334f011bcd87d3928dc8ab41f62e` where the FormTrigger node type does NOT exist → the
+   recipe's workflow.json fails to activate / the form 404s → the SAME walk cannot execute → CND ≠ WORKS
+   = clean anti-tautology (the PR IS why it works). M6 needs a small `conjure` SHA-override to build the
+   parent from-tree; the differential is MEASURED, and if a target ever fails to discriminate, honest-CND
+   and pick another corpus PR.) → M7
    adversarial. **Latent fixes land WITH their surface:** seal-stripping @ M6/persist; mint-boundary
    isolation + P1 `quantified` @ M7 proposer. Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
@@ -165,22 +180,41 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    `ENG-17398` dev-pinned wheels, ui-monorepo) + db-migrations + Nuclio functions (see
    `~/lyric/.tickets/ENG-17397/branches.json`). This is the FIRST **Lyric class** (k8s-attach
    substrate), complementing the OSS docker-compose class — same `pb-recipe-v1` contract, new modes.
-   **Huge leverage — the Lyric side ALREADY has pb-shaped primitives** (`~/lyric/.tickets/ENG-17397/
-   evidence/*/manifest.json` schema 2: `substrate:k8s-attach`, `pins` = image digests + k8s
-   context/namespace + repo SHA = code-identity, `artifacts` provenance:`harness` + sha256 + exit
-   codes = receipts, `lyric-qa/scripts/lyric-mongo.sh` = out-of-band Mongo tap, tri-state verdict).
-   So the work = UNIFY those with the honesty core (verdict/mint/seal/recipe), NOT build from zero.
-   Extend the recipe: `conjure.mode: k8s-attach` (ATTACH to a BYOC lyriclet — Lyric doesn't
-   compose locally; reuse `lyric-devops`/`lyric-local-dev`), `store_tap.engine: mongo` (kubectl/
-   port-forward via lyric-qa scripts) + clickhouse/redis, `drive: note-lifecycle` (reuse `lyric-qa`
-   12-op flow, not a browser). **Multi-repo + dev-package code-identity:** the fingerprint binds ALL
-   7 branch SHAs + the dev-wheel versions (`lyric-runner-py X.Y.Z.dev17397`, `mds-sdk 1.7.3.dev17397`)
-   — the thesis's coordinated-change identity. **Discriminating claim (a real DNW):** a blocking
-   stage-control on a terminal execution must transition to terminal + fire the user-action email +
-   proceed on ack — the stuck-`queued` auth-scoping bug (`diagnosis-stuck-queued-controls.md`) means
-   it FALSIFIES → DOES_NOT_WORK. NOTE: the OLD pb v0.1.0 (0prodigy/proofbench) already produced the
-   schema-2 evidence; this brings the NEW product-v1 honesty core to the same case. Fable-plan the
-   detail when we reach it. NOT before the OSS pipeline is proven end-to-end (M5/M6).
+   **GAP RECON DONE (2026-07-18, architect vs the real tree) — framing CORRECTED:** the Lyric side
+   has pb-shaped *shape* (recipe-equivalent `~/lyric/.tickets/ENG-17397/appservice/ready.yaml` with
+   attach targets + drive verbs + L3–L5 checks + honest not-run; `lyric-devops/scripts/lyric-mongo.sh`
+   = genuine out-of-band Mongo tap; `evidence/*/manifest.json` schema-2 `substrate:k8s-attach` + `pins`
+   image-digest/k8s-ctx/repo-SHA + `artifacts` provenance/sha256/exitCode; the `lyric-qa` 12-op drive).
+   BUT it is **UNIFY the contract + evidence semantics, REBUILD the execution against the new core** —
+   NOT "unify, not build from zero." Because: (i) the schema-2 emitter / k8s-attach substrate exists
+   NOWHERE in `~/lyric` source — it is the **external OLD pb v0.1.0**, zero shared code with product-v1;
+   (ii) every Lyric manifest is `selfAttested:true` with **NO seal**, provenance a plain string = exactly
+   the forgery the new core downgrades to `agent` (`evidence.mjs:78-83,107-113`); (iii) NO L4/L5
+   behavioral verdict has EVER executed (all 7 recorded runs are L3-health / phase-1 / cluster-unreachable);
+   (iv) `k8s-attach` conjure + `mongo`(+clickhouse/redis) store engine are NEW recipe surface (`recipe.mjs`
+   is `from_tree|pinned_image` / `run|compose` / `sqlite|postgres`); `drive:note-lifecycle` is already in
+   the enum (EXTENDS, not new); (v) `fresh_world:recreate` + reproduce-k≥2 do NOT map to a shared BYOC
+   cluster. **DNW CONFIRMED SOUND + a clean differential (static-verified):** `expireStageControls`
+   (`appservice/.../executions.helper.ts:441`) does an unscoped `.filter({executionId,status in
+   [queued,running]})`; `metadata-service/.../stage-control.schema.ts` has NO `@AuthValidation` (the
+   diagnosis's primary fix LANDED on-branch) → merge-SHA=WORKS (controls expire on terminal + user-action
+   email + ack-proceed), parent-SHA=stuck-`queued` DNW. Target the natural-completion terminal path for the
+   WORKS leg; cancel-path (parent-vs-note id, `executions.service.ts:478`) + executor-`ack` are SEPARATE
+   DNW probes. **BIGGEST RISK = the BYOC substrate itself:** base-skew (known-failures F3) + reconcile-revert
+   (F2) can manufacture a FALSE `DOES_NOT_WORK` before pb's logic runs — de-risk FIRST via a `lyric-devops`
+   base-coherence preflight (hard L3 gate) + re-read the deployed image digest AT DRIVE TIME and seal THAT,
+   not the pre-run pin. **Code-identity: derive the fingerprint from FILES not prose** (`branches.json` +
+   `metadata-service/sdk-versions.json` `mds-sdk 1.8.1.dev17397` + `lyric-runner-py/.../lyric_py_version.py`
+   `LYRIC_PY 1.3.39.dev17398`, runner `2.0.2.dev17397`) — RESUME/prose versions disagree; `branches.json`
+   lists db-migrations NOT ui-monorepo. **TWO HUMAN DECISIONS before the phase starts:** (1) reproduce model
+   on a shared cluster — new note/exec per iteration (rec: preserves k≥2) vs relaxed-k; (2) drive surface —
+   appservice API + mongo (rec: matches today's assets) vs adding the ui-monorepo end-user leg (not built/
+   fingerprinted today). **Cheapest-failure-first order (cluster-free steps do NOT need M5/M6):** (a) paper
+   translate `ready.yaml`→`pb-recipe-v1` JSON [small]; (b) adapter schema-2 artifacts → minted+sealed
+   receipts, proven on ONE existing manifest, no cluster [small — but land it WITH the M6-proven receipt
+   pattern to avoid rework]; (c) `k8s-attach` conjure + `mongo` engine [medium]; (d) operator-supervised
+   live `pb verify --ratify` on a base-coherent cluster [medium, destructive-gated]. NOT before the OSS
+   pipeline is proven end-to-end (M5/M6).
 
 **Deferred = scale-later (honest CND until built):** universal conjure of arbitrary systems
 (the open-ended part — CONJURE is "never proven complete, only progressively hardened"),
