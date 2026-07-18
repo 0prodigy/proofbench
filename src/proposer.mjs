@@ -18,11 +18,19 @@
  * is pure data with no path to satisfying provenance. The harness (catch.mjs) alone mints receipts
  * from what it OBSERVED; the agent only ever proposes what to try and what to claim.
  *
- * llmFn is the seam (mirrors openBrowserFn/tapStoreFn/fetchFn in catch.mjs): the default calls the
+ * llmFn is the seam (mirrors openBrowserFn/tapStoreFn/fetchFn in catch.mjs): defaultLlmFn calls the
  * real Anthropic Messages API over the Node built-in global fetch — NO SDK, so pb's runtime deps
- * stay ZERO. Tests inject a mock/adversarial llmFn, so the whole validate→assemble→verdict path is
- * proven API-free (the stronger honesty test: a hostile proposal degrades to ≠WORKS).
+ * stay ZERO. A SECOND seam — claudeCliLlmFn — drives a real Sonnet via the LOCAL `claude` CLI
+ * (subscription OAuth, NO API key) by shelling out with spawnSync exactly like pb already shells to
+ * docker (browserdrive/storetap), so deps stay ZERO on either path. Tests inject a mock/adversarial
+ * llmFn (or a fake CLI exec), so the whole validate→assemble→verdict path is proven auth-free (the
+ * stronger honesty test: a hostile proposal degrades to ≠WORKS).
  */
+
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * The walk op vocabulary the browser-drive executor maps to (browserdrive.mjs's
@@ -304,6 +312,129 @@ export async function defaultLlmFn({ intent, introspection, observables }, opts 
   });
   if (!res.ok) bad(`Anthropic Messages API returned HTTP ${res.status}`);
   return extractProposal(await res.json());
+}
+
+// ---------------------------------------------------------------------------
+// The claude-CLI seam — a real Sonnet over the LOCAL CLI (subscription OAuth, NO API key)
+// ---------------------------------------------------------------------------
+
+/** The CLI model alias — Sonnet is the production driver (the API path pins claude-sonnet-5). */
+const DEFAULT_CLI_MODEL = 'sonnet';
+/** Every tool DENIED: the nested agent reasons from the prompt alone, never touching fs/network. */
+const CLI_DISALLOWED_TOOLS = 'Bash Read Edit Write Glob Grep WebFetch WebSearch Task';
+const CLI_TIMEOUT_MS = 120000;
+const CLI_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * A claude-CLI exec seam — mirrors the DockerRunner in browserdrive/storetap. Injected in tests so
+ * the whole seam runs WITHOUT the CLI or any auth; the default shells to the real `claude` in a
+ * NEUTRAL cwd so the nested agent sees only the prompt, never the pb repo (the COLD-proposal property).
+ * @typedef {Object} ClaudeRunner
+ * @property {(args:string[], cwd:string) => import('node:child_process').SpawnSyncReturns<string>} run
+ */
+
+/** @returns {ClaudeRunner} the real `claude` child_process runner (spawnSync, exactly like docker) */
+function defaultClaudeRunner() {
+  return {
+    run: (args, cwd) => spawnSync('claude', args, { cwd, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER }),
+  };
+}
+
+/** @param {string} [s] @param {number} [n] keep the TAIL of a long CLI error/output */
+function tail(s, n = 400) {
+  s = s || '';
+  return s.length > n ? s.slice(-n) : s;
+}
+
+/**
+ * Strip an optional ```json … ``` (or bare ```) markdown fence the model may wrap its JSON in; a
+ * non-fenced string is returned trimmed. `claude -p` has no forced tool, so the model may fence its reply.
+ * @param {string} s
+ * @returns {string}
+ */
+function stripFence(s) {
+  const t = (s || '').trim();
+  const m = t.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/i);
+  return m ? m[1].trim() : t;
+}
+
+/**
+ * Build the CLI prompt: the shared SYSTEM_PROMPT + the intent + the harness introspection snapshot +
+ * the disclosed observable menu + an explicit "reply with ONLY the JSON {walk, claim}" instruction
+ * that mirrors buildProposeTool's shape (the op enum, entity ∈ observables, the frozen relation-op
+ * enum). There is NO forced tool in `claude -p`, so the schema must live in the prompt; the real gate
+ * is still validateProposal on the returned raw.
+ * @param {{intent:any, introspection:any, observables:string[]}} input
+ * @returns {string}
+ */
+export function buildCliPrompt({ intent, introspection, observables }) {
+  const menu = observables || [];
+  return [
+    SYSTEM_PROMPT,
+    '',
+    `INTENT: ${intent}`,
+    '',
+    `HARNESS INTROSPECTION (the already-loaded front-door page, provided by the harness): ${JSON.stringify(introspection)}`,
+    '',
+    `DISCLOSED OBSERVABLES — the claim.entity MUST be exactly one of: ${menu.join(', ') || '(none)'}`,
+    '',
+    'This mode has NO tools available: ignore any instruction above to reply via a tool, and instead',
+    'reply with ONLY a single JSON object (no prose, no explanation, no markdown fence) of this shape:',
+    '{',
+    `  "walk": [ { "op": one of ${ALLOWED_WALK_OPS.join('|')}, "args": { ... } }, ... ],`,
+    '  "claim": {',
+    `    "entity": one of ${menu.join('|') || '(none)'},`,
+    `    "expectedAfterRelation": { "op": one of ${ALLOWED_RELATION_OPS.join('|')} },`,
+    '    "scope": a short human-readable scope string,',
+    '    "quantified": optional boolean (true only for a universal any/all/every claim)',
+    '  }',
+    '}',
+    'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
+      'clickAt → {"x":<number>,"y":<number>}; pointer → {"actions":[...],"pointerType":"..."}.',
+  ].join('\n');
+}
+
+/**
+ * A SECOND proposer seam (alongside defaultLlmFn): drive a real Sonnet via the LOCAL `claude` CLI —
+ * subscription OAuth, NO ANTHROPIC_API_KEY — by shelling out exactly like pb shells to docker, so
+ * deps stay ZERO. Runs headless + structured + cold + model-pinned:
+ *   claude -p "<prompt>" --output-format json --model sonnet --disallowedTools "<every tool off>"
+ * in a fresh NEUTRAL tmp cwd (the nested agent sees only the prompt, never the recipe/expected
+ * answer — the COLD-proposal property M5 needs). Parses the JSON envelope: a spawn failure, a
+ * non-zero exit, or is_error:true (e.g. "OAuth session expired and could not be refreshed") → throw =
+ * an honest could-not-execute → CND; otherwise the model's `.result` (fence-stripped) is JSON.parse'd
+ * to the UNTRUSTED raw proposal — validateProposal in proposeWalkAndClaim is still the gate (this
+ * never bypasses it, so a hostile CLI reply degrades to ≠WORKS exactly like the API path).
+ * @param {{intent:any, introspection:any, observables:string[]}} input
+ * @param {{runner?:ClaudeRunner, model?:string, cwd?:string}} [opts]
+ * @returns {Promise<any>} the untrusted raw proposal (validateProposal gates it)
+ */
+export async function claudeCliLlmFn({ intent, introspection, observables }, opts = {}) {
+  const runner = opts.runner || defaultClaudeRunner();
+  const model = opts.model || DEFAULT_CLI_MODEL;
+  const cwd = opts.cwd || mkdtempSync(join(tmpdir(), 'pb-proposer-'));
+  const prompt = buildCliPrompt({ intent, introspection, observables });
+  const args = ['-p', prompt, '--output-format', 'json', '--model', model, '--disallowedTools', CLI_DISALLOWED_TOOLS];
+  const res = runner.run(args, cwd);
+  if (res.error) {
+    bad(`could not run the 'claude' CLI (${res.error.message}) — is it on PATH? (set ANTHROPIC_API_KEY or inject a mock llmFn for the non-CLI paths)`);
+  }
+  /** @type {any} */
+  let envelope;
+  try {
+    envelope = JSON.parse(res.stdout || '');
+  } catch {
+    bad(`the claude CLI did not return a JSON envelope (exit ${res.status}): ${tail(res.stderr || res.stdout)}`);
+  }
+  if (res.status !== 0 || envelope.is_error) {
+    bad(`the claude CLI could not execute the proposal: ${tail(String(envelope.result || res.stderr || `exit ${res.status}`))}`);
+  }
+  const text = stripFence(String(envelope.result || ''));
+  try {
+    return JSON.parse(text);
+  } catch {
+    return bad(`the model did not return a JSON {walk, claim} object: ${tail(text)}`);
+  }
 }
 
 /**

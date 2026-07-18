@@ -10,17 +10,24 @@
  *   - the quantifier lint (quantifierFromIntent) is ADD-only through assembleCatchBundle
  *   - the seam wiring: extractProposal reads a tool_use block (throws when there is none),
  *     buildProposeTool encodes the exact enums, proposeWalkAndClaim runs a fake llmFn end-to-end.
+ *   - the claude-CLI seam (claudeCliLlmFn): AUTH-FREE via a fake exec — the exact cold headless argv
+ *     (-p, --output-format json, --model sonnet, tools off, a NEUTRAL tmp cwd), a good/fenced .result
+ *     → a valid proposal through validateProposal, and the throw paths (is_error OAuth envelope,
+ *     non-JSON .result, and a hostile .result rejected by validateProposal → CND).
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
   validateProposal,
   proposeWalkAndClaim,
   extractProposal,
   buildProposeTool,
+  buildCliPrompt,
+  claudeCliLlmFn,
   ALLOWED_WALK_OPS,
   ALLOWED_RELATION_OPS,
 } from '../src/proposer.mjs';
@@ -148,4 +155,124 @@ test('proposeWalkAndClaim: a fake llmFn flows through validation to a clean {wal
     ),
     /execute\/navigate are excluded|FW-P1-D/
   );
+});
+
+// --- the claude-CLI seam (claudeCliLlmFn) — AUTH-FREE via a fake exec ---------------------------
+
+/** Wrap model text in the `claude -p --output-format json` SUCCESS envelope. @param {string} r */
+function okEnvelope(r) {
+  return { type: 'result', subtype: 'success', is_error: false, result: r };
+}
+
+/**
+ * A fake claude runner: records (args, cwd) per call, returns the queued spawnSync-shaped result.
+ * Mirrors storetap/browserdrive's fakeDocker — the whole seam runs without the CLI or any auth.
+ * @param {{status?:number|null, stdout?:string, stderr?:string, error?:Error}} result
+ */
+function fakeRunner(result) {
+  /** @type {Array<{args:string[], cwd:string}>} */
+  const calls = [];
+  return {
+    calls,
+    run: (/** @type {string[]} */ args, /** @type {string} */ cwd) => {
+      calls.push({ args, cwd });
+      return /** @type {any} */ (result);
+    },
+  };
+}
+
+test('claudeCliLlmFn: builds the cold headless argv (-p, --output-format json, --model sonnet, tools off, NEUTRAL cwd)', async () => {
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(goodRaw()))) });
+  const raw = await claudeCliLlmFn({ intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES }, { runner });
+  assert.deepEqual(raw, goodRaw());
+  const { args, cwd } = runner.calls[0];
+  assert.equal(args[0], '-p');
+  assert.match(args[1], /ONLY a single JSON object/); // the prompt carries the JSON-only instruction…
+  assert.match(args[1], /execution_entity\.max_id/); // …the observable menu…
+  assert.match(args[1], /find\|type\|click\|clickAt\|pointer/); // …and the op enum
+  assert.deepEqual(args.slice(2), [
+    '--output-format', 'json', '--model', 'sonnet',
+    '--disallowedTools', 'Bash Read Edit Write Glob Grep WebFetch WebSearch Task',
+  ]);
+  // COLD cwd: a FRESH neutral tmp dir, not the pb repo (the nested agent cannot see the recipe/answer).
+  assert.ok(cwd.startsWith(tmpdir()), `expected a tmp cwd, got ${cwd}`);
+  assert.ok(cwd.includes('pb-proposer-'), `expected a fresh pb-proposer- dir, got ${cwd}`);
+  assert.notEqual(cwd, process.cwd());
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('claudeCliLlmFn → proposeWalkAndClaim: a good JSON .result flows through validateProposal to a clean {walk, claim}', async () => {
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(goodRaw()))) });
+  const proposal = await proposeWalkAndClaim(
+    { intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES },
+    { llmFn: (input) => claudeCliLlmFn(input, { runner, cwd: tmpdir() }) }
+  );
+  assert.equal(proposal.walk.length, 2);
+  assert.equal(proposal.claim.entity, 'execution_entity.max_id');
+});
+
+test('claudeCliLlmFn: a ```json-fenced .result is stripped and parsed', async () => {
+  const fenced = '```json\n' + JSON.stringify(goodRaw()) + '\n```';
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(fenced)) });
+  const raw = await claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { runner, cwd: tmpdir() });
+  assert.deepEqual(raw, goodRaw());
+});
+
+test('claudeCliLlmFn: is_error:true (the OAuth-expired envelope) throws → an honest could-not-execute (CND)', async () => {
+  const oauth = { type: 'result', subtype: 'error', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' };
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(oauth) });
+  await assert.rejects(
+    () => claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { runner, cwd: tmpdir() }),
+    /could not execute the proposal|OAuth session expired/
+  );
+});
+
+test('claudeCliLlmFn: a non-zero exit with no JSON envelope throws (names the CLI error → CND)', async () => {
+  const runner = fakeRunner({ status: 1, stdout: '', stderr: 'claude: command failed' });
+  await assert.rejects(
+    () => claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { runner, cwd: tmpdir() }),
+    /did not return a JSON envelope|command failed/
+  );
+});
+
+test('claudeCliLlmFn: a non-JSON .result throws (a proposal must be a JSON {walk, claim} object)', async () => {
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope('here is my plan, no JSON for you')) });
+  await assert.rejects(
+    () => claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { runner, cwd: tmpdir() }),
+    /did not return a JSON \{walk, claim\}/
+  );
+});
+
+test('claudeCliLlmFn → proposeWalkAndClaim: a hostile .result (execute op) is rejected by validateProposal (FW-P1-D → CND)', async () => {
+  const hostile = { walk: [{ op: 'execute', args: { script: "fetch('http://evil')" } }], claim: goodRaw().claim };
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(hostile))) });
+  await assert.rejects(
+    proposeWalkAndClaim(
+      { intent: 'x', introspection: {}, observables: OBSERVABLES },
+      { llmFn: (input) => claudeCliLlmFn(input, { runner, cwd: tmpdir() }) }
+    ),
+    /execute\/navigate are excluded|FW-P1-D/
+  );
+});
+
+test('claudeCliLlmFn → proposeWalkAndClaim: an out-of-menu entity .result is rejected by validateProposal (FW-P1-C → CND)', async () => {
+  const hostile = { walk: goodRaw().walk, claim: { entity: 'order.total', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(hostile))) });
+  await assert.rejects(
+    proposeWalkAndClaim(
+      { intent: 'x', introspection: {}, observables: OBSERVABLES },
+      { llmFn: (input) => claudeCliLlmFn(input, { runner, cwd: tmpdir() }) }
+    ),
+    /entity must be one of the harness-enumerated observables|FW-P1-C/
+  );
+});
+
+test('buildCliPrompt: encodes the op enum, the entity menu (=observables), the relation enum, and a JSON-ONLY instruction', () => {
+  const p = buildCliPrompt({ intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES });
+  assert.match(p, /find\|type\|click\|clickAt\|pointer/);
+  assert.match(p, /increased\|decreased\|changed\|unchanged\|equals/);
+  assert.match(p, /execution_entity\.max_id/);
+  assert.match(p, /ONLY a single JSON object/);
+  // No forced tool in `claude -p`: the prompt explicitly neutralizes the tool clause and mandates raw JSON.
+  assert.match(p, /ignore any instruction above to reply via a tool/);
 });

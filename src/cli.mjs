@@ -19,6 +19,7 @@ import { runPhase3 } from './phases/phase3.mjs';
 import { listRecipes, pickRandom } from './pool.mjs';
 import { loadRecipe } from './recipe.mjs';
 import { runCatch } from './catch.mjs';
+import { claudeCliLlmFn } from './proposer.mjs';
 import { Verdict } from './types.mjs';
 
 function usage() {
@@ -178,6 +179,18 @@ function renderDifferential(merge, parent, pass) {
   return lines.join('\n');
 }
 
+/**
+ * Select the proposer backend WITHOUT adding a config key: PB_PROPOSER forces it
+ * (`claude-cli` | `api`); otherwise auto — use the local `claude` CLI (subscription OAuth, no key)
+ * UNLESS ANTHROPIC_API_KEY is set, in which case use the Anthropic API path. Returns the LlmFn seam
+ * to thread into runCatch, or undefined to let runCatch fall back to its default (defaultLlmFn = API).
+ * @returns {import('./proposer.mjs').LlmFn|undefined}
+ */
+function selectLlmFn() {
+  const pick = process.env.PB_PROPOSER || (process.env.ANTHROPIC_API_KEY ? 'api' : 'claude-cli');
+  return pick === 'claude-cli' ? (input) => claudeCliLlmFn(input) : undefined;
+}
+
 async function main() {
   const cmd = process.argv[2];
 
@@ -262,8 +275,9 @@ async function main() {
     // The SAME agent-proposed walk at BOTH SHAs: propose+freeze ONCE at the merge leg, then replay
     // that identical {walk, claim} at the single parent (baseline). The differential stays
     // apples-to-apples (only the built SHA differs) and LLM non-determinism is irrelevant.
-    const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha });
-    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined });
+    const llmFn = selectLlmFn();
+    const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha, llmFn });
+    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined, llmFn });
     process.stdout.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
     process.stdout.write(renderCatch('PARENT', parent.sha, parent) + '\n');
     const pass = merge.verdict.state === Verdict.WORKS && parent.verdict.state !== Verdict.WORKS;
