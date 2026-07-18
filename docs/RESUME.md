@@ -206,8 +206,15 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    RE-CONFIRMED live (fresh workflowIds, k=2, docker clean). 114/114 tests, gate PASS,
    typecheck clean, honesty core FROZEN. **STILL DEFERRED:** owner-shadow INSTANTIATION capture (≥2 distinct
    non-actor sessions + a confirmed negative — capture-side, NOT a verdict floor); an adaptive re-propose loop
-   (must reset the world per retry); and **M5 = the real-Sonnet capability live proof (needs `ANTHROPIC_API_KEY`
-   — UNSET in env; egress to api.anthropic.com works [HTTP 401]; the `defaultLlmFn` seam is ready).** Ponytail: one recipe, ≤2 store adapters, 3 drive
+   (must reset the world per retry); and **M5 = the real-Sonnet capability live proof.** TWO proposer seams now exist (commit `63f7bd9`):
+   `defaultLlmFn` (Anthropic API — needs `ANTHROPIC_API_KEY`, UNSET; and this env sets a custom
+   `ANTHROPIC_BASE_URL` the API path would have to honor) and **`claudeCliLlmFn` — the PRIMARY path: a real
+   Sonnet via the local `claude` CLI on the SUBSCRIPTION (no key), cold neutral cwd + `--disallowedTools`, the
+   reply STILL gated by `validateProposal`.** `pb prove` auto-selects claude-cli when no key (or force
+   `PB_PROPOSER=claude-cli`). **M5 live command:** `node src/cli.mjs prove recipes/n8n-form-trigger-pr7130`.
+   **BLOCKED on auth ONLY:** nested `claude -p` returns "OAuth session expired and could not be refreshed"
+   (macOS Keychain token stale; headless refresh fails) → UNBLOCK = the user re-auths the `claude` CLI
+   interactively once, then M5 runs (I never touch the token).** Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
