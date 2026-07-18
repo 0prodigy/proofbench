@@ -15,6 +15,7 @@ import { runGate } from './e1/gate.mjs';
 import { runPhase1 } from './phases/phase1.mjs';
 import { runPhase2 } from './phases/phase2.mjs';
 import { runPhase3 } from './phases/phase3.mjs';
+import { listRecipes, pickRandom } from './pool.mjs';
 import { Verdict } from './types.mjs';
 
 const NOT_BUILT_YET = new Set(['prove']);
@@ -30,7 +31,7 @@ function usage() {
     '  phase1 <dir>    run the repo\'s own test suite → WORKS/DOES_NOT_WORK/CND',
     '  phase2 <dir>    bring up docker-compose + prove the front door serves → READY/CND',
     '  phase3 <dir> [--intent "..."]   HTTP-drive a fixture app + confirm the effect persists',
-    '  conjure <recipeDir> [--keep]    bring up a real SUT from a pb-recipe-v1 + mint its code-identity fingerprint',
+    '  conjure <recipeDir>|--random [--keep]   bring up a real SUT from a pb-recipe-v1 (--random: pick one from the pool) + mint its code-identity fingerprint',
     '  prove           [stage 2] conjure + drive a real feature — not built yet',
     '  help            show this help',
     '',
@@ -159,12 +160,22 @@ async function main() {
   }
 
   if (cmd === 'conjure') {
-    const dir = process.argv[3];
-    if (!dir || dir.startsWith('--')) {
+    const keep = process.argv.includes('--keep');
+    let dir = process.argv[3];
+    if (process.argv.includes('--random')) {
+      // Anti-overfit: pick a recipe from the pool each run — pb must not always test n8n.
+      const pool = listRecipes();
+      if (pool.length === 0) {
+        process.stderr.write('pb conjure --random: no loadable recipes in the pool (recipes/)\n');
+        process.exit(1);
+      }
+      const picked = pickRandom(pool);
+      process.stdout.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
+      dir = picked.dir;
+    } else if (!dir || dir.startsWith('--')) {
       process.stderr.write(`pb conjure: missing <recipeDir>\n\n${usage()}\n`);
       process.exit(2);
     }
-    const keep = process.argv.includes('--keep');
     const abs = resolve(dir);
     /** @type {import('./conjure.mjs').SutHandle|null} */
     let handle = null;
