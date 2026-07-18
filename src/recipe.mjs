@@ -26,6 +26,7 @@ import { join } from 'node:path';
  * @property {'from_tree'} mode build the SUT from source at an exact SHA (highest code-identity)
  * @property {string} repo git remote to clone
  * @property {string} sha exact merge/commit SHA the SUT is built from
+ * @property {string} [parent_sha] the disclosed differential baseline — the SHA the merge SHA was built ON (M6 builds this via conjure's buildSha override to prove parent!=WORKS)
  * @property {string} dockerfile path to the Dockerfile (relative to the checkout)
  * @property {string} context docker build context
  * @property {string[]} [build_overlay] disclosed build-time fixups (e.g. the corepack signature fix)
@@ -197,6 +198,7 @@ export function loadRecipe(recipeDir) {
     for (const f of ['repo', 'sha', 'dockerfile', 'context']) {
       if (typeof ci[f] !== 'string' || !ci[f]) bad(`code_identity.${f}`, "is required for mode 'from_tree'");
     }
+    if (ci.parent_sha !== undefined && (typeof ci.parent_sha !== 'string' || !ci.parent_sha)) bad('code_identity.parent_sha', 'must be a non-empty string when present (the differential baseline SHA)');
     if (ci.build_overlay !== undefined && !isStringArray(ci.build_overlay)) bad('code_identity.build_overlay', 'must be a string[]');
   } else if (ci.mode === 'pinned_image') {
     for (const f of ['image_ref', 'image_digest']) {

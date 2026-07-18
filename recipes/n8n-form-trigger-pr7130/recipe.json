@@ -1,11 +1,12 @@
 {
   "kind": "pb-recipe-v1",
   "name": "n8n Form Trigger (PR #7130)",
-  "notes": "front_door.url_template's {webhook_id} is the webhookId UUID minted into workflow.json's Form Trigger node — the node's webhookId IS the URL base (n8n 1.12 has no /form/ endpoint; the form serves at /webhook/<webhookId>/n8n-form). The runner reads that webhookId out of workflow.json and substitutes it for {webhook_id}. code_identity: the merge SHA 3ddc176d self-reports version 1.11.0 (version_label); the first shipped release containing #7130 is 1.12.0 (use mode:pinned_image with image_ref docker.n8n.io/n8nio/n8n:1.12.0 for the label-clean path).",
+  "notes": "front_door.url_template's {webhook_id} is the webhookId UUID minted into workflow.json's Form Trigger node — the node's webhookId IS the URL base (n8n 1.12 has no /form/ endpoint; the form serves at /webhook/<webhookId>/n8n-form). The runner reads that webhookId out of workflow.json and substitutes it for {webhook_id}. code_identity: the merge SHA 3ddc176d self-reports version 1.11.0 (version_label); the first shipped release containing #7130 is 1.12.0 (use mode:pinned_image with image_ref docker.n8n.io/n8nio/n8n:1.12.0 for the label-clean path). parent_sha 869b8f14 is the merge's SINGLE parent — the FormTrigger node type does not exist there, so the same walk cannot execute (workflow won't activate / form 404s); the differential Catch builds it via conjure's buildSha override to prove parent != WORKS (the PR IS why it works).",
   "code_identity": {
     "mode": "from_tree",
     "repo": "https://github.com/n8n-io/n8n.git",
     "sha": "3ddc176dfa2d3d99a328a29a3a8613e35ff456a0",
+    "parent_sha": "869b8f14caaf334f011bcd87d3928dc8ab41f62e",
     "dockerfile": "docker/images/n8n-custom/Dockerfile",
     "context": ".",
     "build_overlay": [

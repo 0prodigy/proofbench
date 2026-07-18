@@ -340,34 +340,40 @@ async function httpReq(method, url, body, jar) {
 // ---------------------------------------------------------------------------
 
 /**
- * Shallow partial-clone the from_tree repo and checkout the exact SHA into a fresh temp dir.
- * Registers the dir via onCloneDir the instant it exists, so a mid-clone failure still gets
- * reaped. Shared by resolveImage (run mode) and bringUpCompose (compose mode).
+ * Shallow partial-clone the from_tree repo and checkout the given SHA into a fresh temp dir.
+ * The checkout SHA is passed in (not read from ci) so the differential runner can build an
+ * ALTERNATE sha (the parent) from the same repo. Registers the dir via onCloneDir the instant
+ * it exists, so a mid-clone failure still gets reaped. Shared by resolveImage (run mode) and
+ * bringUpCompose (compose mode).
  * @param {import('./recipe.mjs').FromTreeIdentity} ci
+ * @param {string} sha the exact SHA to checkout (ci.sha, or an override like ci.parent_sha)
  * @param {(dir:string)=>void} onCloneDir
  * @returns {string} the checkout dir
  */
-function cloneAtSha(ci, onCloneDir) {
+function cloneAtSha(ci, sha, onCloneDir) {
   const cloneDir = mkdtempSync(join(tmpdir(), 'pb-conjure-'));
   onCloneDir(cloneDir);
   const clone = git(['clone', '--filter=blob:none', ci.repo, cloneDir], CLONE_TIMEOUT_MS);
   if (clone.status !== 0) throw new Error(`conjure: git clone ${ci.repo} failed (exit ${clone.status}): ${tail(clone.stderr || clone.stdout)}`);
-  const co = git(['-C', cloneDir, 'checkout', ci.sha], GIT_TIMEOUT_MS);
-  if (co.status !== 0) throw new Error(`conjure: git checkout ${ci.sha} failed (exit ${co.status}): ${tail(co.stderr || co.stdout)}`);
+  const co = git(['-C', cloneDir, 'checkout', sha], GIT_TIMEOUT_MS);
+  if (co.status !== 0) throw new Error(`conjure: git checkout ${sha} failed (exit ${co.status}): ${tail(co.stderr || co.stdout)}`);
   return cloneDir;
 }
 
 /**
  * Resolve the SUT image and its digest per code_identity. from_tree: shallow partial-clone
- * @SHA, overlay the Dockerfile, build (cache-skipping if the per-SHA tag already exists).
- * pinned_image: pull and verify the digest matches. cloneDir is registered via onCloneDir
- * the instant it exists, so a mid-clone failure still gets reaped.
+ * @SHA (buildSha overrides ci.sha for the differential parent build), overlay the Dockerfile,
+ * build (cache-skipping if the per-SHA tag already exists). pinned_image: pull and verify the
+ * digest matches (buildSha does not apply). cloneDir is registered via onCloneDir the instant
+ * it exists, so a mid-clone failure still gets reaped. The returned `sha` is the ACTUAL sha
+ * built, so the fingerprint records the real code-identity (merge vs parent).
  * @param {Docker} docker
  * @param {import('./recipe.mjs').Recipe} recipe
  * @param {(dir:string)=>void} onCloneDir
+ * @param {string|undefined} buildSha overrides the from_tree checkout SHA when set
  * @returns {Promise<{image:string, imageDigest:string|undefined, sha:string|undefined}>}
  */
-async function resolveImage(docker, recipe, onCloneDir) {
+async function resolveImage(docker, recipe, onCloneDir, buildSha) {
   const ci = recipe.code_identity;
 
   if (ci.mode === 'pinned_image') {
@@ -388,14 +394,15 @@ async function resolveImage(docker, recipe, onCloneDir) {
     return { image: ci.image_ref, imageDigest: ci.image_digest, sha: undefined };
   }
 
-  // from_tree
-  const tag = `pb-sut-${slug(recipe.name)}-${ci.sha.slice(0, 7)}`;
+  // from_tree — build the effective sha (buildSha overrides ci.sha for the differential parent).
+  const sha = buildSha || ci.sha;
+  const tag = `pb-sut-${slug(recipe.name)}-${sha.slice(0, 7)}`;
   const cached = docker.run(['image', 'inspect', tag], DOCKER_TIMEOUT_MS).status === 0;
   if (!cached) {
-    const cloneDir = cloneAtSha(ci, onCloneDir);
+    const cloneDir = cloneAtSha(ci, sha, onCloneDir);
 
     const dfPath = join(cloneDir, ci.dockerfile);
-    if (!existsSync(dfPath)) throw new Error(`conjure: dockerfile ${ci.dockerfile} not found in the checkout of ${ci.sha}`);
+    if (!existsSync(dfPath)) throw new Error(`conjure: dockerfile ${ci.dockerfile} not found in the checkout of ${sha}`);
     const overlaid = overlayDockerfile(readFileSync(dfPath, 'utf8'), ci.build_overlay);
     const overlayPath = join(cloneDir, 'Dockerfile.pb-overlay');
     writeFileSync(overlayPath, overlaid);
@@ -412,7 +419,7 @@ async function resolveImage(docker, recipe, onCloneDir) {
   }
   const idInsp = docker.run(['image', 'inspect', tag, '--format', '{{.Id}}'], DOCKER_TIMEOUT_MS);
   const imageDigest = (idInsp.stdout || '').trim() || undefined;
-  return { image: tag, imageDigest, sha: ci.sha };
+  return { image: tag, imageDigest, sha };
 }
 
 /**
@@ -429,16 +436,18 @@ async function resolveImage(docker, recipe, onCloneDir) {
  * @param {string} recipeDir
  * @param {(dir:string)=>void} onCloneDir
  * @param {(info:ComposeInfo)=>void} onCompose
+ * @param {string|undefined} buildSha overrides the from_tree checkout SHA when set
  * @returns {{image:string, imageDigest:string|undefined, sha:string, containerName:string}}
  */
-function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose) {
+function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose, buildSha) {
   const ci = recipe.code_identity;
   const c = recipe.conjure;
   if (ci.mode !== 'from_tree') {
     throw new Error(`conjure: mode 'compose' requires code_identity.mode 'from_tree' (the compose graph builds the SUT from the tree); got '${ci.mode}'`);
   }
   if (!c.compose_file) throw new Error("conjure: mode 'compose' requires conjure.compose_file");
-  const cloneDir = cloneAtSha(ci, onCloneDir);
+  const sha = buildSha || ci.sha;
+  const cloneDir = cloneAtSha(ci, sha, onCloneDir);
 
   // Stage the disclosed overlays where the compose graph expects them.
   const plan = overlayPlan(c.compose_overlays, ci.dockerfile);
@@ -466,7 +475,7 @@ function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose) {
   const imageName = c.service ? `${project}-${c.service}` : project;
   const idInsp = docker.run(['image', 'inspect', imageName, '--format', '{{.Id}}'], DOCKER_TIMEOUT_MS);
   const imageDigest = (idInsp.stdout || '').trim() || undefined;
-  return { image: imageName, imageDigest, sha: ci.sha, containerName };
+  return { image: imageName, imageDigest, sha, containerName };
 }
 
 // ---------------------------------------------------------------------------
@@ -476,16 +485,23 @@ function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose) {
 /**
  * Bring up a real SUT from a pb-recipe-v1 and return a live, drivable handle. A failure
  * reaps partial state; success leaves the SUT running for the caller to drive.
+ *
+ * opts.buildSha overrides the from_tree checkout SHA — the differential runner (M6) builds
+ * the SUT at BOTH code_identity.sha (merge) and code_identity.parent_sha (parent) from the
+ * same recipe, and the fingerprint records whichever sha actually built, so the merge and
+ * parent bundles carry DIFFERENT code-identity (the whole point of the differential Catch).
  * @param {string} recipeDir directory holding recipe.json (+ body files)
+ * @param {{buildSha?:string}} [opts] buildSha: an alternate from_tree SHA to build (defaults to code_identity.sha)
  * @returns {Promise<SutHandle>}
  */
-export async function conjure(recipeDir) {
+export async function conjure(recipeDir, opts = {}) {
   const recipe = loadRecipe(recipeDir);
   const docker = detectDocker();
   if (!docker) throw new Error('conjure: docker is not available (`docker version` did not respond — is the daemon running?).');
 
   const ci = recipe.code_identity;
   const c = recipe.conjure;
+  const buildSha = opts.buildSha;
   const baseUrl = `http://localhost:${c.published_port}`;
 
   /** @type {string|null} */ let containerName = null;
@@ -504,7 +520,8 @@ export async function conjure(recipeDir) {
         recipe,
         recipeDir,
         (d) => { cloneDir = d; },
-        (info) => { composeInfo = info; }
+        (info) => { composeInfo = info; },
+        buildSha
       );
       ({ image, imageDigest, sha } = bring);
       containerName = bring.containerName;
@@ -512,7 +529,7 @@ export async function conjure(recipeDir) {
       // Run class (n8n): a single container from the resolved image.
       ({ image, imageDigest, sha } = await resolveImage(docker, recipe, (d) => {
         cloneDir = d;
-      }));
+      }, buildSha));
 
       // Fresh world: a unique container name per conjure => fresh_world:recreate is a brand-new container.
       const runtag = Date.now().toString(36);

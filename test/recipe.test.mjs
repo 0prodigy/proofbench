@@ -52,6 +52,11 @@ test('recipe: the n8n Form Trigger recipe validates and its load-bearing fields 
     /** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity).sha,
     '3ddc176dfa2d3d99a328a29a3a8613e35ff456a0'
   );
+  // the differential baseline: the merge's SINGLE parent (feature-absent) that the Catch builds via conjure's buildSha override
+  assert.equal(
+    /** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity).parent_sha,
+    '869b8f14caaf334f011bcd87d3928dc8ab41f62e'
+  );
   // out-of-band store tap query present
   assert.ok(r.store_tap.queries.executions, 'store_tap.queries.executions present');
   // front door is a template carrying a minted id
@@ -147,6 +152,7 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'empty name', mutate: (o) => (o.name = '   '), match: /name/ },
     { label: 'bogus code_identity.mode', mutate: (o) => (o.code_identity = { mode: 'bogus' }), match: /code_identity\.mode/ },
     { label: 'from_tree missing sha', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', dockerfile: 'd', context: '.' }), match: /code_identity\.sha/ },
+    { label: 'from_tree empty parent_sha', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', sha: 's', dockerfile: 'd', context: '.', parent_sha: '' }), match: /code_identity\.parent_sha/ },
     { label: 'pinned_image missing digest', mutate: (o) => (o.code_identity = { mode: 'pinned_image', image_ref: 'x:1' }), match: /code_identity\.image_digest/ },
     { label: 'non-recreate fresh_world', mutate: (o) => (o.fresh_world = { strategy: 'reuse' }), match: /fresh_world\.strategy/ },
     { label: 'non-array setup', mutate: (o) => (o.setup = 'nope'), match: /setup/ },
