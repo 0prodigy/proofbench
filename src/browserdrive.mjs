@@ -16,10 +16,14 @@
  * takes NO browser dependency (Playwright-as-pb-dep was rejected); the browser deps are
  * customer-portable, containerized exactly like the SUT. openBrowser boots the sidecar,
  * polls its /status readiness, opens a headless-chrome session, and returns a small CLIENT
- * of primitive ops (navigate/find/click/type/text/execute) the CALLER SCRIPTS — the walk
- * (which selector, what text) is AGENT-PROPOSED and passed in, never read from recipe data
- * (that avoids the Gherkin grave). The recipe declares only `drive.mode:'browser'` + the
- * front-door URL (already resolved into handle.frontDoorUrl by conjure).
+ * of primitive ops (navigate/find/click/type/text/execute/clickAt/pointer) the CALLER SCRIPTS —
+ * the walk (which selector, what text, which coordinate) is AGENT-PROPOSED and passed in, never
+ * read from recipe data (that avoids the Gherkin grave). The recipe declares only
+ * `drive.mode:'browser'` + the front-door URL (already resolved into handle.frontDoorUrl by
+ * conjure). clickAt/pointer are the COORDINATE escape hatch for a <canvas> surface (Konva, a
+ * react-pdf field-placement page) that has NO per-element DOM node: they drive a REAL W3C Actions
+ * pointer at viewport coordinates the caller computes from the rendered surface — proven live
+ * driving documenso's Konva editor to place a Field (out-of-band psql tap 0→1).
  *
  * mintDriveAttempt turns the recorded walk + DOM observations into a TOOL attempt receipt
  * via the harness mint() (the only path off 'agent'); passing provenance:'tool' preserves
@@ -95,7 +99,9 @@ const SESSION_BODY = Object.freeze({
  * @property {(elementId:string)=>Promise<void>} click click a found element
  * @property {(elementId:string, text:string)=>Promise<void>} type send keys to a found element
  * @property {(elementId:string)=>Promise<string>} text read an element's rendered text
- * @property {(script:string, args?:any[])=>Promise<any>} execute run JS in the page (the canvas/escape hatch)
+ * @property {(script:string, args?:any[])=>Promise<any>} execute run JS in the page (the JS escape hatch)
+ * @property {(x:number, y:number)=>Promise<void>} clickAt left-click at VIEWPORT coords — the canvas placement gesture (move→down→up)
+ * @property {(actions:Array<Record<string,any>>, pointerType?:string)=>Promise<void>} pointer drive a raw W3C pointer-action sequence (the coordinate/canvas escape hatch)
  * @property {()=>Promise<void>} teardown DELETE the session then `docker rm -f` the sidecar (idempotent)
  */
 
@@ -293,6 +299,18 @@ export async function openBrowser(opts = {}) {
     /** @type {DriveStep[]} */
     const steps = [];
 
+    /**
+     * POST a W3C Actions pointer-input sequence to /session/{id}/actions — the coordinate drive
+     * shared by clickAt/pointer. `actions` is the raw item list (pointerMove/pointerDown/pause/
+     * pointerUp); it is wrapped in the single 'mouse' pointer input source W3C requires.
+     * @param {Array<Record<string,any>>} actions
+     * @param {string} pointerType
+     */
+    const pointerSeq = (actions, pointerType) =>
+      wd(fetchFn, 'POST', `${base}/actions`, {
+        actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType }, actions }],
+      });
+
     /** @type {BrowserClient} */
     const client = {
       containerName,
@@ -328,6 +346,25 @@ export async function openBrowser(opts = {}) {
         const value = await wd(fetchFn, 'POST', `${base}/execute/sync`, { script, args: args || [] });
         steps.push({ op: 'execute', script: head(script), value });
         return value;
+      },
+      async clickAt(x, y) {
+        // The canvas placement gesture: move the real pointer to a viewport coordinate the caller
+        // computed from the rendered surface (e.g. a .react-pdf__Page center), then press+release.
+        // Drives the app's OWN pointer path (the field-drop mouseup listener) — no per-field DOM node.
+        await pointerSeq(
+          [
+            { type: 'pointerMove', duration: 10, origin: 'viewport', x, y },
+            { type: 'pointerDown', button: 0 },
+            { type: 'pause', duration: 60 },
+            { type: 'pointerUp', button: 0 },
+          ],
+          'mouse'
+        );
+        steps.push({ op: 'clickAt', x, y });
+      },
+      async pointer(actions, pointerType = 'mouse') {
+        await pointerSeq(actions, pointerType);
+        steps.push({ op: 'pointer', pointerType, actions });
       },
       async teardown() {
         try {

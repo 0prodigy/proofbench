@@ -145,6 +145,46 @@ test('browserdrive: execute runs JS in the page and records a head-truncated scr
   assert.deepEqual(client.steps[0], { op: 'execute', script: 'return document.title', value: { title: 'M1 Spike Form' } });
 });
 
+test('browserdrive: clickAt drives a W3C Actions pointer click at viewport coords and records the step', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
+  const fetchFn = fakeFetch(happyRouter);
+  const client = await openBrowser({ docker: asAny(docker), fetchFn: asAny(fetchFn) });
+  await client.clickAt(210, 320);
+  // the coordinate/canvas escape hatch: one 'mouse' pointer source, move(viewport)→down→pause→up
+  const actions = fetchFn.calls.find((c) => c.path === '/session/sess-1/actions' && c.method === 'POST');
+  assert.deepEqual(actions?.body, {
+    actions: [
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 10, origin: 'viewport', x: 210, y: 320 },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pause', duration: 60 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(client.steps[0], { op: 'clickAt', x: 210, y: 320 });
+});
+
+test('browserdrive: pointer drives a raw W3C pointer-action sequence and records the walk verbatim', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
+  const fetchFn = fakeFetch(happyRouter);
+  const client = await openBrowser({ docker: asAny(docker), fetchFn: asAny(fetchFn) });
+  const seq = [
+    { type: 'pointerMove', duration: 0, origin: 'viewport', x: 5, y: 6 },
+    { type: 'pointerDown', button: 0 },
+    { type: 'pointerUp', button: 0 },
+  ];
+  await client.pointer(seq);
+  const actions = fetchFn.calls.find((c) => c.path === '/session/sess-1/actions' && c.method === 'POST');
+  assert.deepEqual(actions?.body, { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: seq }] });
+  assert.deepEqual(client.steps[0], { op: 'pointer', pointerType: 'mouse', actions: seq });
+});
+
 test('browserdrive: teardown DELETEs the session then `docker rm -f`s the sidecar', async () => {
   const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
   const fetchFn = fakeFetch(happyRouter);

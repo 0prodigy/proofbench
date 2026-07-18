@@ -32,7 +32,7 @@
   },
   "drive": {
     "mode": "deferred",
-    "reason": "Konva canvas front door — browser-drive of a <canvas> not built (honest CND)"
+    "reason": "Konva canvas drive PROVEN FEASIBLE (spike 2026-07-18, docs/documenso-canvas-spike.md): browserdrive.clickAt/pointer placed a Field via the rendered .react-pdf__Page and the psql tap showed \"Field\" 0->1 (type=NAME, page 1). Still 'deferred' (honest CND) because the documenso auth + envelope/PDF/recipient seed + session-cookie injection + NEXT_PUBLIC_WEBAPP_URL=host.docker.internal env + runCatch wiring is the follow-up, not built here."
   },
   "front_door": {
     "url_template": "/t/{team_url}/documents/{document_id}/edit",
