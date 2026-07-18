@@ -38,8 +38,9 @@
  */
 
 import { conjure } from './conjure.mjs';
-import { tapStore, mintStoreDelta } from './storetap.mjs';
+import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
+import { resolveCatchSeams } from './registry.mjs';
 import { proposeWalkAndClaim } from './proposer.mjs';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
@@ -530,13 +531,13 @@ function readOwnerCreds(recipeDir, recipe) {
  */
 export async function runCatch(opts) {
   const { recipeDir, buildSha } = opts;
-  const conjureFn = opts.conjureFn || conjure;
-  const openBrowserFn = opts.openBrowserFn || openBrowser;
-  const tapStoreFn = opts.tapStoreFn || tapStore;
   const fetchFn = opts.fetchFn || /** @type {typeof fetch} */ (fetch);
   const runDir = opts.runDir || mkdtempSync(join(tmpdir(), 'pb-catch-'));
 
   const recipe = loadRecipe(recipeDir);
+  // Config-keyed registry = the DEFAULT phase-seam wiring; an injected seam still WINS over it
+  // (unit tests inject mocks). See src/registry.mjs (drive stays browser-only this slice).
+  const { conjureFn, tapStoreFn, openBrowserFn } = resolveCatchSeams(opts, recipe);
   const sha = buildSha || /** @type {import('./recipe.mjs').FromTreeIdentity} */ (recipe.code_identity).sha || '';
   const queryName = Object.keys(recipe.store_tap.queries)[0];
   const creds = readOwnerCreds(recipeDir, recipe);
