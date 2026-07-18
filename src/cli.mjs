@@ -259,9 +259,11 @@ async function main() {
       );
       process.exit(2);
     }
-    // The SAME agent-proposed walk at BOTH SHAs: the merge (the PR) and its single parent (baseline).
+    // The SAME agent-proposed walk at BOTH SHAs: propose+freeze ONCE at the merge leg, then replay
+    // that identical {walk, claim} at the single parent (baseline). The differential stays
+    // apples-to-apples (only the built SHA differs) and LLM non-determinism is irrelevant.
     const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha });
-    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha });
+    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined });
     process.stdout.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
     process.stdout.write(renderCatch('PARENT', parent.sha, parent) + '\n');
     const pass = merge.verdict.state === Verdict.WORKS && parent.verdict.state !== Verdict.WORKS;

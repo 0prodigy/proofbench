@@ -3,19 +3,28 @@
  * The CATCH HARNESS — the first EXECUTED behavioral Catch, end-to-end on a real conjured SUT.
  *
  * runCatch drives ONE recipe through REPRODUCTIONS fresh worlds and, for each, executes the
- * agent-shaped user walk exactly as a visitor would, capturing evidence out of band:
+ * AGENT-PROPOSED user walk exactly as a visitor would, capturing evidence out of band:
  *   conjure(recipe,{buildSha})  → a FRESH world at the built SHA (differential: merge vs parent)
  *   storetap BEFORE             → the baseline persisted state (harness, §1.1)
- *   browser-drive the front door→ navigate → introspect the form (execute) → type a per-iteration
- *                                 nonce → submit (TOOL attempt; the app's own rendered surface)
+ *   navigate + introspect       → the HARNESS reaches the front door and reads its fillable fields
+ *                                 (the read-only snapshot the agent sees; the agent runs neither)
+ *   propose (seam, ONCE)        → the agent (proposer.mjs) returns a validated {walk, claim}; it is
+ *                                 FROZEN at the first reproduction and replayed VERBATIM thereafter
+ *   executeWalk                 → map the validated steps to browser-drive ops (find/type/click/…),
+ *                                 recording the real walk (TOOL attempt; the app's own surface)
  *   give n8n a beat             → poll the store tap until the execution persists (not a bare sleep)
  *   storetap AFTER              → the write-set-bound delta (harness ground truth)
  *   fresh REST re-read          → a genuinely FRESH session (new login) re-observes the same
  *                                 execution via the app's OWN API (TOOL confirm leg, §1.1 dual-leg)
  *   teardown                    → reap the browser sidecar + the SUT (no orphans)
  *
- * It then assembles a bundle MIRRORING phase3 (store-delta harness · fresh-session confirm leg ·
- * browser attempt · one non-quantified effect claim), SEALS it (ed25519 via evidence.mjs) and
+ * The walk + effect claim are the AGENT's judgement, entering only through the proposer seam and
+ * only as validated pure data (proposer.mjs closes FW-P1-C/-D: an in-menu entity, no execute/navigate
+ * escape). The harness owns navigation, the introspection read, the out-of-band taps, and the verdict;
+ * a proposer throw is an honest could-not-execute (→ CND), never routed around. A deterministic
+ * quantifier lint (quantifierFromIntent) can only ADD `quantified` to the claim (the agent can never
+ * clear it to dodge rule 5, FW-P1-E). It then assembles a bundle MIRRORING phase3 (store-delta harness ·
+ * fresh-session confirm leg · browser attempt · the PROPOSED effect claim), SEALS it (ed25519 via evidence.mjs) and
  * PERSISTS the sealed evidence to a run dir; the verdict is computed by RE-READING that on-disk
  * artifact through the FROZEN verdict, so the judgement is bound to tamper-evident evidence (a
  * receipt mutated after sealing → UNVERIFIED), never a loose in-memory object — and it NEVER
@@ -31,6 +40,7 @@
 import { conjure } from './conjure.mjs';
 import { tapStore, mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
+import { proposeWalkAndClaim } from './proposer.mjs';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
@@ -69,7 +79,7 @@ const VISITOR_IDENTITY = 'form-visitor';
  * @property {number} countAfter rows in execution_entity after
  * @property {string} [workflowId] the persisted execution's workflowId (should match the conjured workflow)
  * @property {string} [status] the persisted execution status (informational)
- * @property {string} [nonce] the per-iteration value typed into the form
+ * @property {string} [nonce] optional informational marker recorded on the delta/attempt (the typed value itself now lives in the frozen walk)
  * @property {import('./browserdrive.mjs').DriveStep[]} [driveSteps] the recorded browser walk
  * @property {string} [observedText] the confirmation text observed in the DOM (informational)
  * @property {string} [frontDoorUrl] the front door the walk drove
@@ -85,6 +95,7 @@ const VISITOR_IDENTITY = 'form-visitor';
  * @property {string[]} diagnosis runner-computed deterministic notes (never the tri-state itself)
  * @property {import('./types.mjs').EvidenceBundle} bundle the sealed evidence, re-read from disk (the artifact the verdict was computed from)
  * @property {string} receiptPath the on-disk sealed receipt (durable, replayable)
+ * @property {import('./proposer.mjs').Proposal|null} proposal the FROZEN agent proposal (prove passes the merge leg's proposal into the parent leg so the differential stays apples-to-apples); null when the seam produced none
  */
 
 // ---------------------------------------------------------------------------
@@ -139,14 +150,21 @@ export function executionIdFrom(body) {
  * if NO iteration executed at all (feature-absent: conjure/drive threw everywhere) NO delta is
  * emitted and the effect is NOT_EXECUTED (→ CND). k counts confirmed persists, kFail counts
  * executed-but-unheld walks; feature-absent reproductions count toward neither. verdict() disposes.
+ *
+ * The effect claim is the AGENT-PROPOSED one: its entity (in-menu, FW-P1-C), expectedAfterRelation,
+ * and scope come from `claim` — never hardcoded here. The M4 quantifier lint (quantifierFromIntent)
+ * can only ADD `quantified` (from a universal-quantifier intent OR the agent's own proposal), never
+ * clear it, so a quantified intent routes to rule 5 → CND (FW-P1-E). When no proposal was frozen
+ * (the seam produced none) there is no claim to assemble → an empty claim set → CND.
  * @param {Object} args
  * @param {any} args.intent
  * @param {CatchIteration[]} args.iterations
+ * @param {import('./proposer.mjs').ProposedClaim} [args.claim] the FROZEN agent-proposed effect claim
  * @param {string} [args.actorIdentity] the configuring actor (owner-shadow guard, §1.4)
  * @param {string} [args.identity] the walk's session identity
  * @returns {import('./types.mjs').EvidenceBundle}
  */
-export function assembleCatchBundle({ intent, iterations, actorIdentity = ACTOR_IDENTITY, identity = VISITOR_IDENTITY }) {
+export function assembleCatchBundle({ intent, iterations, claim, actorIdentity = ACTOR_IDENTITY, identity = VISITOR_IDENTITY }) {
   const its = iterations || [];
   const binding = its.find((it) => it.executed);
   const fingerprint = (its.find((it) => it.fingerprint) || {}).fingerprint;
@@ -213,21 +231,30 @@ export function assembleCatchBundle({ intent, iterations, actorIdentity = ACTOR_
     }
   }
 
+  // M4 quantifier lint (ADD-only, FW-P1-E): quantified iff the intent carries a universal
+  // quantifier OR the agent proposed it — the agent can never clear a quantified intent to dodge
+  // rule 5. A quantified claim on a single-identity Catch routes to rule 5 → NOT_EXECUTED → CND.
+  const quantified = quantifierFromIntent(intent) || !!(claim && claim.quantified);
+  // The effect claim is the PROPOSED one (entity/relation/scope threaded from the agent, not
+  // hardcoded). No proposal frozen → no claim to assemble → CND.
   /** @type {import('./types.mjs').Claim[]} */
-  const claims = [
-    {
-      id: 'form-submit-persists-execution',
-      kind: 'effect',
-      scope: 'a visitor submitting the Form Trigger front door persists an execution (execution_entity)',
-      effectCheck: {
-        entity: EFFECT_ENTITY,
-        expectedAfterRelation: { op: 'increased' },
-        deltaReceiptId: 'store-delta',
-        confirmLegReceiptId: 'fresh-execution',
-      },
-      receiptIds: effectReceiptIds,
-    },
-  ];
+  const claims = claim
+    ? [
+        {
+          id: 'form-submit-persists-execution',
+          kind: 'effect',
+          scope: claim.scope,
+          ...(quantified ? { quantified: true } : {}),
+          effectCheck: {
+            entity: claim.entity,
+            expectedAfterRelation: claim.expectedAfterRelation,
+            deltaReceiptId: 'store-delta',
+            confirmLegReceiptId: 'fresh-execution',
+          },
+          receiptIds: effectReceiptIds,
+        },
+      ]
+    : [];
 
   const k = its.filter((it) => it.effectHeld).length;
   const kFail = its.filter((it) => it.executed && !it.effectHeld).length;
@@ -285,67 +312,75 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** @param {string} value @returns {string} a CSS attribute-selector value, quotes/backslashes escaped */
-function cssAttrValue(value) {
-  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+/** The read-only page snapshot the agent proposes against — the HARNESS runs it, never the agent. */
+const INTROSPECT_JS =
+  "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() }))";
+
+/**
+ * Universal-quantifier words that make a claim quantified (§1.4/FW-11). Word-bounded so
+ * "across"/"reproduced"/"allocate" never spuriously match "all"/etc.
+ */
+const UNIVERSAL_QUANTIFIER = /\b(any|all|every|each|whole)\b/i;
+
+/**
+ * The M4 intent lint: does the intent carry a universal quantifier? Deterministic + harness-owned.
+ * assembleCatchBundle uses it ADD-only — it can turn a claim quantified but never clear it, so a
+ * quantified intent always routes to rule 5 (FW-P1-E). PURE.
+ * @param {any} intent
+ * @returns {boolean}
+ */
+export function quantifierFromIntent(intent) {
+  return typeof intent === 'string' && UNIVERSAL_QUANTIFIER.test(intent);
 }
 
 /**
- * Find the first element matching any selector, tried in PRIORITY order (a CSS list returns the
- * first in DOM order, not selector order — so the most-specific selector must be tried first).
- * Throws (naming the tried selectors) when none match.
+ * Introspect the ALREADY-NAVIGATED front door — the read-only snapshot of fillable fields the agent
+ * proposes against. This is HARNESS-owned (it runs the page read via client.execute); the agent
+ * never runs the read and never navigates, so `execute`/`navigate` stay out of the walk vocabulary
+ * (FW-P1-D). Returns the field descriptors (name/type/tag) the proposer sees.
  * @param {import('./browserdrive.mjs').BrowserClient} client
- * @param {string[]} selectors
- * @returns {Promise<string>}
+ * @returns {Promise<{fields: Array<{name:string|null, type:string, tag:string}>}>}
  */
-async function findFirst(client, selectors) {
-  for (const sel of selectors) {
-    try {
-      return await client.find(sel);
-    } catch {
-      /* try the next selector */
+export async function introspect(client) {
+  const fields = await client.execute(INTROSPECT_JS);
+  return { fields: Array.isArray(fields) ? fields : [] };
+}
+
+/**
+ * Execute a VALIDATED walk against the live browser client, mapping each step to a browser-drive op
+ * and recording the real outcome in client.steps (the harness owns the observed walk; mintDriveAttempt
+ * mints TOOL from it). type/click resolve their world-stable selector via find at execution time;
+ * a find that matches nothing throws → the caller records a could-not-execute (feature-absent → CND).
+ * navigate/execute are absent by construction (proposer.mjs excludes them, FW-P1-D).
+ * @param {import('./browserdrive.mjs').BrowserClient} client
+ * @param {import('./proposer.mjs').WalkStep[]} walk a validated walk (proposer.validateProposal)
+ * @returns {Promise<void>}
+ */
+export async function executeWalk(client, walk) {
+  for (const step of walk || []) {
+    switch (step.op) {
+      case 'find':
+        await client.find(step.args.selector);
+        break;
+      case 'type': {
+        const el = await client.find(step.args.selector);
+        await client.type(el, step.args.text);
+        break;
+      }
+      case 'click': {
+        const el = await client.find(step.args.selector);
+        await client.click(el);
+        break;
+      }
+      case 'clickAt':
+        await client.clickAt(step.args.x, step.args.y);
+        break;
+      case 'pointer':
+        await client.pointer(step.args.actions, step.args.pointerType);
+        break;
+      default:
+        throw new Error(`catch: executeWalk got an unsupported op '${step.op}' (a validated walk never contains this)`);
     }
-  }
-  throw new Error(`catch: no element matched any of [${selectors.join(', ')}]`);
-}
-
-/**
- * The AGENT-PROPOSED walk of the n8n Form Trigger front door: introspect the rendered page to find
- * its fillable field (never a recipe-baked selector — avoids the Gherkin grave), type the nonce,
- * and submit. Returns the confirmation text observed (informational). Throws if the page has no
- * fillable field (parent: the trigger node does not exist → the form 404s / renders nothing) — the
- * caller catches it as a could-not-execute (feature-absent → CND).
- * @param {import('./browserdrive.mjs').BrowserClient} client
- * @param {string} frontDoorUrl
- * @param {string} nonce
- * @returns {Promise<string>}
- */
-async function driveForm(client, frontDoorUrl, nonce) {
-  await client.navigate(frontDoorUrl);
-  // Introspect: the agent looks at the rendered page and enumerates its inputs (page-wide — the
-  // inputs are not assumed to sit inside a literal <form>).
-  const fields = await client.execute(
-    "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() }))"
-  );
-  const skip = new Set(['submit', 'button', 'checkbox', 'radio', 'file', 'hidden', 'reset', 'image']);
-  const field = (Array.isArray(fields) ? fields : []).find((f) => f && (f.tag === 'textarea' || !skip.has(f.type)));
-  if (!field) {
-    throw new Error(`catch: the front door served no fillable form field (introspected: ${JSON.stringify(fields)}) — the Form Trigger is absent at this SHA`);
-  }
-  // Prefer a name-bound selector; fall back to a positional one if the field carries no name.
-  const input = field.name
-    ? await client.find(`${field.tag}[name="${cssAttrValue(field.name)}"]`)
-    : await findFirst(client, ['input:not([type="hidden"]):not([type="submit"]):not([type="button"])', 'textarea']);
-  await client.type(input, nonce);
-  const submit = await findFirst(client, ['button[type="submit"]', 'input[type="submit"]', '[type="submit"]', 'form button', 'button']);
-  await client.click(submit);
-  // Best-effort: let the confirmation render, then read the page text (informational only — the
-  // load-bearing signal is the out-of-band store delta, not this DOM read).
-  await sleep(CONFIRM_TEXT_SETTLE_MS);
-  try {
-    return String(await client.execute('return document.body ? document.body.innerText : ""'));
-  } catch {
-    return '';
   }
 }
 
@@ -473,8 +508,13 @@ function readOwnerCreds(recipeDir, recipe) {
  * Run the Catch against a recipe across REPRODUCTIONS fresh worlds and return the verdict result.
  * buildSha selects the code-identity built (merge vs the differential parent). External effects are
  * seam-injectable so the plumbing can be exercised without docker; the default seams are the real
- * conjure/browser/tap. This computes evidence and calls the FROZEN verdict — it NEVER writes the
- * tri-state, and it NEVER decides the differential (the runner does).
+ * conjure/browser/tap and the real Anthropic proposer. This computes evidence and calls the FROZEN
+ * verdict — it NEVER writes the tri-state, and it NEVER decides the differential (the runner does).
+ *
+ * The agent proposal is FROZEN once (M3): opts.proposal reuses a pre-frozen one (prove passes the
+ * SAME merge-leg proposal into the parent leg so the differential stays apples-to-apples and LLM
+ * non-determinism is irrelevant); otherwise the proposer seam (opts.llmFn) is called EXACTLY ONCE,
+ * at the first reproduction, and the result is replayed verbatim across the rest.
  * @param {Object} opts
  * @param {string} opts.recipeDir
  * @param {string} [opts.buildSha] alternate from_tree SHA (the parent) to build; default = code_identity.sha
@@ -483,6 +523,8 @@ function readOwnerCreds(recipeDir, recipe) {
  * @param {typeof openBrowser} [opts.openBrowserFn]
  * @param {(handle:any, queryName:string) => Promise<any[]>} [opts.tapStoreFn]
  * @param {typeof fetch} [opts.fetchFn]
+ * @param {import('./proposer.mjs').LlmFn} [opts.llmFn] the proposer seam (default: the real Anthropic call)
+ * @param {import('./proposer.mjs').Proposal} [opts.proposal] a pre-frozen proposal to replay (prove reuses the merge leg's across both legs)
  * @param {string} [opts.runDir] directory to persist the sealed receipt into (default: a fresh pb-catch- tmpdir)
  * @returns {Promise<CatchResult>}
  */
@@ -499,14 +541,20 @@ export async function runCatch(opts) {
   const queryName = Object.keys(recipe.store_tap.queries)[0];
   const creds = readOwnerCreds(recipeDir, recipe);
   const intent = opts.intent || `A visitor submitting the ${recipe.name} front door persists an execution, reproduced across fresh worlds (SHA ${sha.slice(0, 7)}).`;
+  // The harness-enumerated observable menu — EXACTLY the execution/max_id reading the fresh-session
+  // confirm leg binds to. The agent's claim entity must come from here (FW-P1-C).
+  const observables = [EFFECT_ENTITY];
 
   /** @type {string[]} */
   const diagnosis = [];
   /** @type {CatchIteration[]} */
   const iterations = [];
+  // M3 propose-once-freeze: a pre-frozen proposal is replayed as-is; otherwise the seam fires ONCE.
+  /** @type {import('./proposer.mjs').Proposal|null} */
+  let proposal = opts.proposal || null;
+  let proposalFrozen = !!proposal; // true once the seam has been consulted (success OR failure)
 
   for (let i = 0; i < REPRODUCTIONS; i++) {
-    const nonce = `pb-${sha.slice(0, 7)}-r${i}-${Date.now().toString(36)}`;
     /** @type {import('./conjure.mjs').SutHandle|null} */ let handle = null;
     /** @type {import('./browserdrive.mjs').BrowserClient|null} */ let client = null;
     try {
@@ -516,7 +564,27 @@ export async function runCatch(opts) {
       const beforeId = maxId(beforeRows);
 
       client = await openBrowserFn({ hostPort: 4444 + i });
-      const observedText = await driveForm(client, handle.frontDoorUrl, nonce);
+      // The HARNESS reaches the front door and reads it; the agent neither navigates nor runs the read.
+      await client.navigate(handle.frontDoorUrl);
+      const introspection = await introspect(client);
+      // Freeze the proposal ONCE: consult the seam only at the first reproduction; a success OR a
+      // deterministic rejection is frozen, so the seam is never re-consulted this run.
+      if (!proposal && !proposalFrozen) {
+        proposalFrozen = true;
+        proposal = await proposeWalkAndClaim({ intent, introspection, observables }, { llmFn: opts.llmFn });
+        diagnosis.push(`catch: agent proposed a ${proposal.walk.length}-step walk claiming ${proposal.claim.entity} ${proposal.claim.expectedAfterRelation.op} — frozen and replayed verbatim across reproductions.`);
+      }
+      if (!proposal) throw new Error('the agent seam produced no valid walk+claim (frozen as unavailable) — could-not-execute');
+      await executeWalk(client, proposal.walk);
+      // Best-effort confirmation-text read (HARNESS-owned, informational — the load-bearing signal
+      // is the out-of-band store delta, not this DOM read).
+      await sleep(CONFIRM_TEXT_SETTLE_MS);
+      let observedText = '';
+      try {
+        observedText = String(await client.execute('return document.body ? document.body.innerText : ""'));
+      } catch {
+        /* the confirmation text is informational only */
+      }
 
       const afterRows = await settleExecutions(tapStoreFn, handle, queryName, countBefore);
       const countAfter = afterRows.length;
@@ -548,7 +616,6 @@ export async function runCatch(opts) {
         countAfter,
         workflowId: row ? row.workflowId : undefined,
         status: row ? row.status : undefined,
-        nonce,
         driveSteps: client.steps,
         observedText,
         frontDoorUrl: handle.frontDoorUrl,
@@ -582,12 +649,12 @@ export async function runCatch(opts) {
     }
   }
 
-  const bundle = assembleCatchBundle({ intent, iterations, actorIdentity: ACTOR_IDENTITY, identity: VISITOR_IDENTITY });
+  const bundle = assembleCatchBundle({ intent, iterations, claim: proposal ? proposal.claim : undefined, actorIdentity: ACTOR_IDENTITY, identity: VISITOR_IDENTITY });
   // Seal (ed25519) → persist to the run dir → RE-READ the persisted artifact → judge THAT. The
   // verdict is bound to tamper-evident evidence ON DISK, never a loose in-memory object: a receipt
   // mutated after sealing fails verifySeal → UNVERIFIED (the contents are not trusted at all).
   const { privateKey } = generateKeyPairSync('ed25519');
   const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
   const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
-  return { phase: 'catch', sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath };
+  return { phase: 'catch', sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath, proposal };
 }

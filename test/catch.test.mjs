@@ -2,13 +2,17 @@
 /**
  * Catch bundle-assembly tests — DOCKER-FREE and NETWORK-FREE. The live conjure→browser-drive→tap
  * plumbing is proven by `pb prove`; here the PURE assembler is exercised with hand-built
- * reproductions so every verdict branch is nailed without a container:
- *   - two confirmed persists (merge-shaped) → WORKS, with the exact receipt/claim shapes
+ * reproductions AND a hand-built AGENT PROPOSAL (no LLM) so every verdict branch is nailed without a
+ * container:
+ *   - two confirmed persists (merge-shaped) → WORKS, with the exact receipt/claim shapes AND the
+ *     claim entity/relation/scope threaded FROM the proposal (Unknown #2: not hardcoded)
  *   - no reproduction executed (parent-shaped, feature-absent) → no delta → CND (NOT_EXECUTED)
  *   - the walk ran but nothing persisted, reproduced → the delta FALSIFIES → DOES_NOT_WORK
  *   - a single confirmed walk (k=1) → CND (a single walk is never WORKS, FW-6)
  *   - a fresh re-read that DISAGREES with the store cannot confirm → CND (the dual-leg guard)
- * plus the pure helpers (maxId / rowById / executionIdFrom) the live path relies on.
+ * plus the pure helpers (maxId / rowById / executionIdFrom) the live path relies on, and a
+ * seam-driven runCatch (mock llmFn + docker-free seams) that seals + persists + judges the on-disk
+ * artifact.
  */
 
 import test from 'node:test';
@@ -29,6 +33,18 @@ const asAny = (x) => x;
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const N8N_RECIPE = join(ROOT, 'recipes', 'n8n-form-trigger-pr7130');
+
+/**
+ * A hand-built AGENT proposal claim (what proposer.validateProposal yields for the n8n recipe) —
+ * entity in the disclosed observable menu, the frozen relation set, and a scope. assembleCatchBundle
+ * threads THIS into the effect claim (not a hardcoded one).
+ * @type {import('../src/proposer.mjs').ProposedClaim}
+ */
+const PROPOSED_CLAIM = {
+  entity: 'execution_entity.max_id',
+  expectedAfterRelation: { op: 'increased' },
+  scope: 'a visitor submitting the Form Trigger front door persists an execution',
+};
 
 /**
  * A minted harness code-identity fingerprint (as conjure would produce), for a given sha.
@@ -111,8 +127,8 @@ test('catch helpers: maxId / rowById / executionIdFrom coerce ids and tolerate e
   assert.equal(executionIdFrom(null), undefined);
 });
 
-test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes', () => {
-  const bundle = assembleCatchBundle({ intent: 'form submit persists an execution', iterations: [heldIteration(0), heldIteration(1)] });
+test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes (claim FROM the proposal)', () => {
+  const bundle = assembleCatchBundle({ intent: 'form submit persists an execution', claim: PROPOSED_CLAIM, iterations: [heldIteration(0), heldIteration(1)] });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.WORKS, v.reasons.join(' | '));
   assert.deepEqual(bundle.reproduce, { k: 2, n: 2, kFail: 0 });
@@ -148,19 +164,21 @@ test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the ex
   // code-identity fingerprint carried (binds the built SHA)
   const fp = byId('fingerprint');
   assert.ok(fp && fp.data.sha === 'MERGE', 'fingerprint binds the built sha');
-  // ONE non-quantified effect claim (no negative/quantifier for M6)
+  // ONE effect claim, its entity/relation/scope threaded FROM the proposal (Unknown #2), not hardcoded
   assert.equal(bundle.claims.length, 1);
   const claim = bundle.claims[0];
   assert.equal(claim.kind, 'effect');
   assert.equal(claim.quantified, undefined);
+  assert.equal(claim.scope, PROPOSED_CLAIM.scope); // scope FROM the proposal
   const ec = /** @type {import('../src/types.mjs').EffectCheck} */ (claim.effectCheck);
-  assert.deepEqual(ec.expectedAfterRelation, { op: 'increased' });
+  assert.equal(ec.entity, PROPOSED_CLAIM.entity); // entity FROM the proposal (in the disclosed menu)
+  assert.deepEqual(ec.expectedAfterRelation, { op: 'increased' }); // relation FROM the proposal
   assert.equal(ec.deltaReceiptId, 'store-delta');
   assert.equal(ec.confirmLegReceiptId, 'fresh-execution');
 });
 
 test('catch assembly: no reproduction executed (parent-shaped, feature-absent) => CND, no delta, effect NOT_EXECUTED', () => {
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: [absentIteration(), absentIteration()] });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: [absentIteration(), absentIteration()] });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.COULD_NOT_DETERMINE, v.reasons.join(' | '));
   assert.deepEqual(bundle.reproduce, { k: 0, n: 2, kFail: 0 }); // feature-absent counts toward NEITHER
@@ -171,7 +189,7 @@ test('catch assembly: no reproduction executed (parent-shaped, feature-absent) =
 });
 
 test('catch assembly: the walk ran but nothing persisted, reproduced => the delta FALSIFIES => DOES_NOT_WORK', () => {
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: [ranButUnpersistedIteration(0), ranButUnpersistedIteration(1)] });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: [ranButUnpersistedIteration(0), ranButUnpersistedIteration(1)] });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.DOES_NOT_WORK, v.reasons.join(' | '));
   assert.deepEqual(bundle.reproduce, { k: 0, n: 2, kFail: 2 }); // executed-but-unheld => kFail
@@ -180,7 +198,7 @@ test('catch assembly: the walk ran but nothing persisted, reproduced => the delt
 });
 
 test('catch assembly: a single confirmed walk (k=1) => CND (a single walk is never WORKS)', () => {
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: [heldIteration(0), absentIteration()] });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: [heldIteration(0), absentIteration()] });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.COULD_NOT_DETERMINE, v.reasons.join(' | '));
   assert.equal(bundle.reproduce.k, 1);
@@ -190,7 +208,7 @@ test('catch assembly: a single confirmed walk (k=1) => CND (a single walk is nev
 test('catch assembly: a fresh re-read that DISAGREES with the store cannot confirm => CND (dual-leg guard)', () => {
   // afterId=1 persisted, but the fresh REST re-read observed a different id (2) — stale/inconsistent.
   const stale = [heldIteration(0, { afterId: 1, freshObserved: 2 }), heldIteration(1, { afterId: 1, freshObserved: 2 })];
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: stale });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: stale });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.COULD_NOT_DETERMINE, v.reasons.join(' | ')); // NOT_EXECUTED (no valid confirm leg), never WORKS
   const fresh = bundle.receipts.find((r) => r.id === 'fresh-execution');
@@ -205,7 +223,7 @@ test('catch assembly: a fresh re-read that DISAGREES with the store cannot confi
 // sealing fails verifySeal → UNVERIFIED (contents not trusted), so a tamper can never green.
 
 test('sealedVerdict: an unsealed bundle is disposed by the pure verdict (transparent passthrough)', () => {
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: [heldIteration(0), heldIteration(1)] });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: [heldIteration(0), heldIteration(1)] });
   assert.equal(bundle.seal, undefined);
   assert.equal(sealedVerdict(bundle).state, verdict(bundle).state); // WORKS, unchanged
 });
@@ -213,7 +231,7 @@ test('sealedVerdict: an unsealed bundle is disposed by the pure verdict (transpa
 test('persistCatchReceipt: writes the sealed bundle to disk; re-read verifies and judges identically', () => {
   const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
   try {
-    const bundle = assembleCatchBundle({ intent: 'form submit persists an execution', iterations: [heldIteration(0), heldIteration(1)] });
+    const bundle = assembleCatchBundle({ intent: 'form submit persists an execution', claim: PROPOSED_CLAIM, iterations: [heldIteration(0), heldIteration(1)] });
     const { privateKey } = generateKeyPairSync('ed25519');
     const receiptPath = persistCatchReceipt(runDir, 'deadbeefcafef00d', sealBundle(bundle, privateKey));
     assert.ok(existsSync(receiptPath), 'sealed receipt written to disk');
@@ -228,7 +246,7 @@ test('persistCatchReceipt: writes the sealed bundle to disk; re-read verifies an
 });
 
 test('sealedVerdict: a receipt tampered AFTER sealing => UNVERIFIED (not judged on merit)', () => {
-  const bundle = assembleCatchBundle({ intent: 'x', iterations: [heldIteration(0), heldIteration(1)] });
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: [heldIteration(0), heldIteration(1)] });
   const { privateKey } = generateKeyPairSync('ed25519');
   const sealed = sealBundle(bundle, privateKey);
   assert.equal(sealedVerdict(sealed).state, Verdict.WORKS, 'intact seal → the honest WORKS');
@@ -241,8 +259,24 @@ test('sealedVerdict: a receipt tampered AFTER sealing => UNVERIFIED (not judged 
 });
 
 /**
+ * A realistic GOOD raw proposal (as an llmFn's tool_use input would arrive) for the n8n Form Trigger:
+ * a type-then-submit walk with world-stable selectors + one in-menu effect claim (increased).
+ * @returns {any}
+ */
+function goodRawProposal() {
+  return {
+    walk: [
+      { op: 'type', args: { selector: 'input[name="field-0"]', text: 'pb-mock-response' } },
+      { op: 'click', args: { selector: 'button[type="submit"]' } },
+    ],
+    claim: { entity: 'execution_entity.max_id', expectedAfterRelation: { op: 'increased' }, scope: PROPOSED_CLAIM.scope },
+  };
+}
+
+/**
  * Docker-free seams that simulate a live n8n Catch: the store grows by one execution per browser
- * submit, and the fresh REST re-read echoes the requested id (so the confirm leg content-binds).
+ * submit (one click), the fresh REST re-read echoes the requested id (so the confirm leg
+ * content-binds), and a MOCK llmFn returns the good proposal (no API key, no network).
  */
 function catchSeams() {
   let count = 0;
@@ -261,7 +295,7 @@ function catchSeams() {
     steps: [{ op: 'navigate', url: 'http://host.docker.internal:5678/webhook/abc/n8n-form' }],
     navigate: async () => {},
     execute: async (/** @type {string} */ js) =>
-      js.includes('querySelectorAll') ? [{ name: 'field', type: 'text', tag: 'input' }] : 'Your response has been recorded',
+      js.includes('querySelectorAll') ? [{ name: 'field-0', type: 'text', tag: 'input' }] : 'Your response has been recorded',
     find: async () => 'el-1',
     type: async () => {},
     click: async () => {
@@ -277,10 +311,11 @@ function catchSeams() {
     const m = url.match(/\/rest\/executions\/(\d+)/); // echo the requested id (a fresh honest re-read)
     return { status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify({ data: { id: m ? Number(m[1]) : 0 } }) };
   });
-  return { conjureFn, openBrowserFn, tapStoreFn, fetchFn };
+  const llmFn = asAny(async () => goodRawProposal());
+  return { conjureFn, openBrowserFn, tapStoreFn, fetchFn, llmFn };
 }
 
-test('runCatch: seals + persists the Catch bundle and computes the verdict from the on-disk sealed evidence', async () => {
+test('runCatch: seals + persists the Catch bundle and computes the verdict from the on-disk sealed evidence (mock llmFn)', async () => {
   const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
   try {
     const result = await runCatch({ recipeDir: N8N_RECIPE, runDir, ...catchSeams() });
@@ -291,7 +326,65 @@ test('runCatch: seals + persists the Catch bundle and computes the verdict from 
     assert.ok(result.bundle.seal);
     assert.equal(result.bundle.seal.digest, persisted.seal.digest, 'the returned bundle IS the re-read on-disk artifact');
     assert.equal(result.verdict.state, Verdict.WORKS, result.verdict.reasons.join(' | ')); // k=2 fresh worlds, each confirmed
+    // The claim in the sealed bundle came from the (mock) PROPOSAL, not a hardcoded string.
+    assert.ok(result.proposal, 'runCatch returns the frozen proposal');
+    assert.equal(result.bundle.claims[0].effectCheck?.entity, 'execution_entity.max_id');
+    assert.equal(result.bundle.claims[0].scope, PROPOSED_CLAIM.scope);
   } finally {
     rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * PARENT-leg seams: a feature-absent world — the front door serves no fillable field and the frozen
+ * merge selector matches nothing (find throws), so the replayed walk cannot execute. Nothing persists.
+ */
+function parentSeams() {
+  const conjureFn = asAny(async () => ({
+    recipe: {},
+    containerName: 'pb-sut-parent',
+    baseUrl: 'http://localhost:5678',
+    frontDoorUrl: 'http://localhost:5678/webhook/abc/n8n-form',
+    captures: {},
+    _cloneDir: null,
+    _compose: null,
+    receipts: [mint({ id: 'fingerprint', kind: 'fingerprint', provenance: 'harness', data: { mode: 'from_tree', sha: 'PARENT', container: 'pb-sut-parent' } })],
+    teardown: async () => {},
+  }));
+  const openBrowserFn = asAny(async () => ({
+    steps: [{ op: 'navigate', url: 'http://host.docker.internal:5678/webhook/abc/n8n-form' }],
+    navigate: async () => {},
+    execute: async (/** @type {string} */ js) => (js.includes('querySelectorAll') ? [] : ''), // no fillable fields at parent
+    find: async () => {
+      throw new Error('browserdrive: find matched no element'); // the frozen merge selector 404s at parent
+    },
+    type: async () => {},
+    click: async () => {},
+    teardown: async () => {},
+  }));
+  const tapStoreFn = asAny(async () => []); // nothing ever persists at parent
+  const fetchFn = asAny(async () => ({ status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => '{}' }));
+  return { conjureFn, openBrowserFn, tapStoreFn, fetchFn };
+}
+
+test('runCatch DIFFERENTIAL (mock llmFn): merge=WORKS ∧ parent=CND — the SAME frozen agent proposal replays across legs', async () => {
+  const mergeDir = mkdtempSync(join(tmpdir(), 'pb-catch-merge-'));
+  const parentDir = mkdtempSync(join(tmpdir(), 'pb-catch-parent-'));
+  try {
+    // MERGE leg: the agent proposes + the harness FREEZES the walk; the real effect confirms → WORKS.
+    const merge = await runCatch({ recipeDir: N8N_RECIPE, buildSha: 'MERGE', runDir: mergeDir, ...catchSeams() });
+    assert.equal(merge.verdict.state, Verdict.WORKS, merge.verdict.reasons.join(' | '));
+    assert.ok(merge.proposal, 'the merge leg froze a proposal');
+    // PARENT leg: replay the SAME frozen {walk, claim} against a feature-absent world → could-not-execute → CND.
+    const parent = await runCatch({ recipeDir: N8N_RECIPE, buildSha: 'PARENT', runDir: parentDir, proposal: merge.proposal || undefined, ...parentSeams() });
+    assert.equal(parent.verdict.state, Verdict.COULD_NOT_DETERMINE, parent.verdict.reasons.join(' | '));
+    // Apples-to-apples: the parent leg judged the EXACT frozen proposal from merge (claim from the proposal).
+    assert.deepEqual(parent.proposal, merge.proposal, 'the identical {walk, claim} was replayed at the parent leg');
+    assert.equal(merge.bundle.claims[0].effectCheck?.entity, 'execution_entity.max_id'); // claim entity FROM the proposal
+    // The two asserts above ARE the differential the runner (cli.mjs) decides: merge=WORKS ∧ parent≠WORKS,
+    // proven here from an AGENT-SHAPED proposal (claim from the proposal, not hardcoded).
+  } finally {
+    rmSync(mergeDir, { recursive: true, force: true });
+    rmSync(parentDir, { recursive: true, force: true });
   }
 });
