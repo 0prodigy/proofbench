@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { overlayDockerfile, resolvePlaceholders, extractJsonPath } from '../src/conjure.mjs';
+import { overlayDockerfile, resolvePlaceholders, extractJsonPath, parseComposeName, overlayPlan, composeArgv } from '../src/conjure.mjs';
 
 test('conjure: overlayDockerfile injects build_overlay before the corepack line, RUN-prefixing bare shell lines', () => {
   const df = ['FROM n8nio/base:18', 'WORKDIR /src', 'RUN corepack enable && corepack prepare --activate', 'RUN pnpm install'].join('\n');
@@ -45,4 +45,34 @@ test('conjure: extractJsonPath walks a $.a.b path and returns undefined off-path
   assert.equal(extractJsonPath({ a: 1 }, '$.a'), 1);
   assert.equal(extractJsonPath({ a: 1 }, 'a'), undefined); // must start with $
   assert.equal(extractJsonPath(null, '$.a'), undefined);
+});
+
+test('conjure: parseComposeName reads a top-level name:, strips quotes, ignores nested/absent', () => {
+  assert.equal(parseComposeName('name: documenso-test\n\nservices:\n  database:\n    image: postgres:15'), 'documenso-test');
+  assert.equal(parseComposeName('name: "doc-test"'), 'doc-test');
+  assert.equal(parseComposeName("name:   spaced-out   \n"), 'spaced-out'); // trims surrounding whitespace
+  assert.equal(parseComposeName('services:\n  app:\n    name: not-the-project'), null); // indented name: is a service key, not the project
+  assert.equal(parseComposeName('services:\n  db: {}'), null);
+});
+
+test('conjure: overlayPlan splits yaml overlays (-f) from staged files (copied into the checkout beside the base Dockerfile)', () => {
+  const plan = overlayPlan(['compose.override.mem.yml', 'Dockerfile.mem'], 'docker/Dockerfile');
+  assert.deepEqual(plan.composeOverlays, ['compose.override.mem.yml']); // a compose file is layered as -f
+  assert.deepEqual(plan.staged, [{ name: 'Dockerfile.mem', toRel: 'docker/Dockerfile.mem' }]); // staged beside docker/Dockerfile
+});
+
+test('conjure: overlayPlan derives the stage target from the base dockerfile dir and handles .yaml + no overlays', () => {
+  assert.deepEqual(overlayPlan(['x.yaml'], 'build/Dockerfile'), { composeOverlays: ['x.yaml'], staged: [] });
+  assert.deepEqual(overlayPlan(['Dockerfile.mem'], 'Dockerfile'), { composeOverlays: [], staged: [{ name: 'Dockerfile.mem', toRel: 'Dockerfile.mem' }] });
+  assert.deepEqual(overlayPlan(undefined, 'docker/Dockerfile'), { composeOverlays: [], staged: [] });
+});
+
+test('conjure: composeArgv builds `compose -p <project> -f <f>… <verb>` with the base file first', () => {
+  assert.deepEqual(composeArgv('documenso-test', ['/co/docker/testing/compose.yml', '/recipe/compose.override.mem.yml'], ['up', '-d', '--build']), [
+    'compose', '-p', 'documenso-test',
+    '-f', '/co/docker/testing/compose.yml',
+    '-f', '/recipe/compose.override.mem.yml',
+    'up', '-d', '--build',
+  ]);
+  assert.deepEqual(composeArgv('p', ['/a.yml'], ['down', '-v']), ['compose', '-p', 'p', '-f', '/a.yml', 'down', '-v']);
 });

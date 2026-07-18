@@ -6,7 +6,11 @@
  * (build-from-tree@SHA or a pinned image digest), runs a FRESH world (a brand-new
  * container per call, so fresh_world:recreate holds), polls the disclosed READY signal
  * (the ready response IS the bring-up proof), applies the disclosed setup_overlay, then
- * walks the disclosed REST SETUP through a minimal cookie jar. It mints — via the harness
+ * walks the disclosed REST SETUP through a minimal cookie jar. It is MODE-AWARE per
+ * recipe.conjure.mode: 'run' (n8n) `docker run`s a single container; 'compose' (documenso)
+ * clones the tree, stages the disclosed compose overlays where the graph expects them, and
+ * brings the service graph up with `docker compose … up -d --build` (app + postgres +
+ * inbucket), tearing it down with `down -v`. It mints — via the harness
  * mint(), the only path to HARNESS provenance — a code-identity FINGERPRINT and a bring-up
  * receipt (the ready request answered): together they prove "the code actually running is
  * the code under test" (the P3 identity binding). It returns a live SUT handle; the caller
@@ -18,8 +22,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
@@ -50,7 +54,16 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * @property {Record<string,any>} captures values captured from setup responses
  * @property {import('./types.mjs').Receipt[]} receipts [fingerprint, bringup] — harness provenance
  * @property {string|null} _cloneDir temp from-tree checkout to reap on teardown (null otherwise)
+ * @property {ComposeInfo|null} _compose compose project + -f files to `down -v` on teardown (null for run mode)
  * @property {() => Promise<void>} teardown
+ */
+
+/**
+ * What teardown needs to reap a compose graph: the project name and the ordered `-f` files
+ * (base compose_file + any compose overlays). Present only for mode 'compose'.
+ * @typedef {Object} ComposeInfo
+ * @property {string} project
+ * @property {string[]} files
  */
 
 // ---------------------------------------------------------------------------
@@ -175,6 +188,57 @@ function sleep(ms) {
 }
 
 // ---------------------------------------------------------------------------
+// Compose arg-building (pure; unit-tested; docker-free)
+// ---------------------------------------------------------------------------
+
+/**
+ * The compose project name is the graph's identity — the recipe's postgres store_tap.container
+ * (`<project>-<service>-N`) is authored to match it. Read the compose file's own top-level
+ * `name:` (a column-0 key; a nested/indented `name:` is ignored). Returns null when absent.
+ * @param {string} text the compose file contents
+ * @returns {string|null}
+ */
+export function parseComposeName(text) {
+  const m = /^name:[ \t]*(.+?)[ \t]*(?:#.*)?$/m.exec(text || '');
+  if (!m) return null;
+  return m[1].replace(/^["']|["']$/g, '') || null;
+}
+
+/**
+ * Classify the disclosed compose_overlays: a compose (`.yml`/`.yaml`) overlay is layered as an
+ * extra `-f`; any other overlay (e.g. the mem Dockerfile) is STAGED into the checkout beside the
+ * base Dockerfile — where the override's `build.dockerfile` points (RECIPE-FACTS: Dockerfile.mem
+ * → the checkout's docker/Dockerfile.mem). The stage target is derived from the base dockerfile's
+ * directory, never hardcoded.
+ * @param {string[]|undefined} overlays
+ * @param {string} dockerfile the from_tree dockerfile path (e.g. docker/Dockerfile)
+ * @returns {{composeOverlays:string[], staged:{name:string, toRel:string}[]}}
+ */
+export function overlayPlan(overlays, dockerfile) {
+  /** @type {string[]} */ const composeOverlays = [];
+  /** @type {{name:string, toRel:string}[]} */ const staged = [];
+  for (const ov of overlays || []) {
+    if (/\.ya?ml$/i.test(ov)) composeOverlays.push(ov);
+    else staged.push({ name: ov, toRel: join(dirname(dockerfile), ov) });
+  }
+  return { composeOverlays, staged };
+}
+
+/**
+ * Build a `docker compose -p <project> -f <f1> [-f <f2>…] <verb…>` argv. The base compose_file
+ * MUST come first so compose anchors relative build.context/env_file/volumes to its directory.
+ * @param {string} project
+ * @param {string[]} files ordered `-f` files (base first, overlays after)
+ * @param {string[]} verb e.g. ['up','-d','--build'] or ['down','-v']
+ * @returns {string[]}
+ */
+export function composeArgv(project, files, verb) {
+  const args = ['compose', '-p', project];
+  for (const f of files) args.push('-f', f);
+  return args.concat(verb);
+}
+
+// ---------------------------------------------------------------------------
 // Docker / git / HTTP (child_process + global fetch; mirrors phase2's helper)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +340,24 @@ async function httpReq(method, url, body, jar) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Shallow partial-clone the from_tree repo and checkout the exact SHA into a fresh temp dir.
+ * Registers the dir via onCloneDir the instant it exists, so a mid-clone failure still gets
+ * reaped. Shared by resolveImage (run mode) and bringUpCompose (compose mode).
+ * @param {import('./recipe.mjs').FromTreeIdentity} ci
+ * @param {(dir:string)=>void} onCloneDir
+ * @returns {string} the checkout dir
+ */
+function cloneAtSha(ci, onCloneDir) {
+  const cloneDir = mkdtempSync(join(tmpdir(), 'pb-conjure-'));
+  onCloneDir(cloneDir);
+  const clone = git(['clone', '--filter=blob:none', ci.repo, cloneDir], CLONE_TIMEOUT_MS);
+  if (clone.status !== 0) throw new Error(`conjure: git clone ${ci.repo} failed (exit ${clone.status}): ${tail(clone.stderr || clone.stdout)}`);
+  const co = git(['-C', cloneDir, 'checkout', ci.sha], GIT_TIMEOUT_MS);
+  if (co.status !== 0) throw new Error(`conjure: git checkout ${ci.sha} failed (exit ${co.status}): ${tail(co.stderr || co.stdout)}`);
+  return cloneDir;
+}
+
+/**
  * Resolve the SUT image and its digest per code_identity. from_tree: shallow partial-clone
  * @SHA, overlay the Dockerfile, build (cache-skipping if the per-SHA tag already exists).
  * pinned_image: pull and verify the digest matches. cloneDir is registered via onCloneDir
@@ -310,12 +392,7 @@ async function resolveImage(docker, recipe, onCloneDir) {
   const tag = `pb-sut-${slug(recipe.name)}-${ci.sha.slice(0, 7)}`;
   const cached = docker.run(['image', 'inspect', tag], DOCKER_TIMEOUT_MS).status === 0;
   if (!cached) {
-    const cloneDir = mkdtempSync(join(tmpdir(), 'pb-conjure-'));
-    onCloneDir(cloneDir);
-    const clone = git(['clone', '--filter=blob:none', ci.repo, cloneDir], CLONE_TIMEOUT_MS);
-    if (clone.status !== 0) throw new Error(`conjure: git clone ${ci.repo} failed (exit ${clone.status}): ${tail(clone.stderr || clone.stdout)}`);
-    const co = git(['-C', cloneDir, 'checkout', ci.sha], GIT_TIMEOUT_MS);
-    if (co.status !== 0) throw new Error(`conjure: git checkout ${ci.sha} failed (exit ${co.status}): ${tail(co.stderr || co.stdout)}`);
+    const cloneDir = cloneAtSha(ci, onCloneDir);
 
     const dfPath = join(cloneDir, ci.dockerfile);
     if (!existsSync(dfPath)) throw new Error(`conjure: dockerfile ${ci.dockerfile} not found in the checkout of ${ci.sha}`);
@@ -336,6 +413,60 @@ async function resolveImage(docker, recipe, onCloneDir) {
   const idInsp = docker.run(['image', 'inspect', tag, '--format', '{{.Id}}'], DOCKER_TIMEOUT_MS);
   const imageDigest = (idInsp.stdout || '').trim() || undefined;
   return { image: tag, imageDigest, sha: ci.sha };
+}
+
+/**
+ * Bring up a mode 'compose' SUT (documenso): clone the tree @SHA, STAGE the disclosed compose
+ * overlays where the graph expects them (a yaml overlay is an extra `-f`; the mem Dockerfile is
+ * copied into the checkout beside the base Dockerfile), then `docker compose -p <project> -f …
+ * up -d --build` (BuildKit, like run mode). The project name is the compose file's own top-level
+ * `name:` — the identity the recipe's store_tap.container is aligned to — so `down -v` and the
+ * postgres tap both find the right containers. cloneDir + composeInfo are registered via
+ * callbacks the instant they exist, so a mid-bring-up failure still reaps (the finally calls
+ * `down -v`). Returns the code-identity + app container for the fingerprint/handle.
+ * @param {Docker} docker
+ * @param {import('./recipe.mjs').Recipe} recipe
+ * @param {string} recipeDir
+ * @param {(dir:string)=>void} onCloneDir
+ * @param {(info:ComposeInfo)=>void} onCompose
+ * @returns {{image:string, imageDigest:string|undefined, sha:string, containerName:string}}
+ */
+function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose) {
+  const ci = recipe.code_identity;
+  const c = recipe.conjure;
+  if (ci.mode !== 'from_tree') {
+    throw new Error(`conjure: mode 'compose' requires code_identity.mode 'from_tree' (the compose graph builds the SUT from the tree); got '${ci.mode}'`);
+  }
+  if (!c.compose_file) throw new Error("conjure: mode 'compose' requires conjure.compose_file");
+  const cloneDir = cloneAtSha(ci, onCloneDir);
+
+  // Stage the disclosed overlays where the compose graph expects them.
+  const plan = overlayPlan(c.compose_overlays, ci.dockerfile);
+  for (const s of plan.staged) {
+    const from = join(recipeDir, s.name);
+    if (!existsSync(from)) throw new Error(`conjure: compose overlay '${s.name}' not found in ${recipeDir}`);
+    copyFileSync(from, join(cloneDir, s.toRel));
+  }
+  // Base compose_file FIRST (compose anchors relative build.context/env_file/volumes to its dir);
+  // yaml overlays are layered after, referenced from the recipe dir.
+  const files = [join(cloneDir, c.compose_file), ...plan.composeOverlays.map((o) => join(recipeDir, o))];
+
+  const composeText = readFileSync(join(cloneDir, c.compose_file), 'utf8');
+  const project = parseComposeName(composeText) || `pb-sut-${slug(recipe.name)}`;
+  onCompose({ project, files }); // register before `up` so a partial bring-up still reaps via down -v
+
+  const up = docker.run(composeArgv(project, files, ['up', '-d', '--build']), BUILD_TIMEOUT_MS, {
+    env: { ...process.env, DOCKER_BUILDKIT: '1' },
+  });
+  if (up.status !== 0) throw new Error(`conjure: docker compose up failed (exit ${up.status}): ${tail(up.stderr || up.stdout)}`);
+
+  // Compose V2 single-replica naming: the app service's container is <project>-<service>-1, and
+  // its built image (no `image:` set) is <project>-<service>. Both derived, never hardcoded.
+  const containerName = c.service ? `${project}-${c.service}-1` : project;
+  const imageName = c.service ? `${project}-${c.service}` : project;
+  const idInsp = docker.run(['image', 'inspect', imageName, '--format', '{{.Id}}'], DOCKER_TIMEOUT_MS);
+  const imageDigest = (idInsp.stdout || '').trim() || undefined;
+  return { image: imageName, imageDigest, sha: ci.sha, containerName };
 }
 
 // ---------------------------------------------------------------------------
@@ -359,18 +490,37 @@ export async function conjure(recipeDir) {
 
   /** @type {string|null} */ let containerName = null;
   /** @type {string|null} */ let cloneDir = null;
+  /** @type {ComposeInfo|null} */ let composeInfo = null;
   let success = false;
   try {
-    const { image, imageDigest, sha } = await resolveImage(docker, recipe, (d) => {
-      cloneDir = d;
-    });
+    /** @type {string} */ let image;
+    /** @type {string|undefined} */ let imageDigest;
+    /** @type {string|undefined} */ let sha;
 
-    // Fresh world: a unique container name per conjure => fresh_world:recreate is a brand-new container.
-    const runtag = Date.now().toString(36);
-    containerName = `pb-sut-${slug(recipe.name)}-${runtag}`;
-    const envArgs = Object.entries(c.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-    const run = docker.run(['run', '-d', '--name', containerName, '-p', `${c.published_port}:${c.container_port}`, ...envArgs, image], DOCKER_TIMEOUT_MS);
-    if (run.status !== 0) throw new Error(`conjure: docker run failed (exit ${run.status}): ${tail(run.stderr || run.stdout)}`);
+    if (c.mode === 'compose') {
+      // Compose class (documenso): bring the service graph up from the tree with the disclosed overlays.
+      const bring = bringUpCompose(
+        docker,
+        recipe,
+        recipeDir,
+        (d) => { cloneDir = d; },
+        (info) => { composeInfo = info; }
+      );
+      ({ image, imageDigest, sha } = bring);
+      containerName = bring.containerName;
+    } else {
+      // Run class (n8n): a single container from the resolved image.
+      ({ image, imageDigest, sha } = await resolveImage(docker, recipe, (d) => {
+        cloneDir = d;
+      }));
+
+      // Fresh world: a unique container name per conjure => fresh_world:recreate is a brand-new container.
+      const runtag = Date.now().toString(36);
+      containerName = `pb-sut-${slug(recipe.name)}-${runtag}`;
+      const envArgs = Object.entries(c.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+      const run = docker.run(['run', '-d', '--name', containerName, '-p', `${c.published_port}:${c.container_port}`, ...envArgs, image], DOCKER_TIMEOUT_MS);
+      if (run.status !== 0) throw new Error(`conjure: docker run failed (exit ${run.status}): ${tail(run.stderr || run.stdout)}`);
+    }
 
     // Ready: poll the disclosed ready signal — the ready response IS the bring-up proof.
     const readyUrl = `${baseUrl}${c.ready_signal.path}`;
@@ -417,8 +567,14 @@ export async function conjure(recipeDir) {
       }
     }
 
-    // Front door: resolve placeholders from captures, else a minted id in a setup body.
-    const frontDoorUrl = `${baseUrl}${resolvePlaceholders(recipe.front_door.url_template, (n) => captures[n] ?? bodyDerived[camelize(n)] ?? bodyDerived[n])}`;
+    // Front door: resolve placeholders from captures, else a minted id in a setup body. In
+    // compose mode a deferred-drive front door (documenso) mints no ids, so an unresolved
+    // placeholder stays literal (informational URL) instead of throwing; run mode stays strict.
+    const lookup = (/** @type {string} */ n) => captures[n] ?? bodyDerived[camelize(n)] ?? bodyDerived[n];
+    const frontDoorUrl = `${baseUrl}${resolvePlaceholders(
+      recipe.front_door.url_template,
+      c.mode === 'compose' ? (n) => lookup(n) ?? `{${n}}` : lookup
+    )}`;
 
     // Identity + bring-up proof: minted (harness provenance) — the code running IS the code under test.
     const fingerprint = mint({
@@ -450,32 +606,43 @@ export async function conjure(recipeDir) {
       captures,
       receipts: [fingerprint, bringup],
       _cloneDir: cloneDir,
+      _compose: composeInfo,
       teardown: () => teardownSut(handle),
     };
     success = true;
     return handle;
   } finally {
-    if (!success) await cleanup(docker, containerName, cloneDir);
+    if (!success) await cleanup(docker, containerName, cloneDir, composeInfo);
   }
 }
 
 /**
- * Reap a conjured SUT: remove the container and the from-tree checkout. Safe to call twice.
+ * Reap a conjured SUT: compose mode `down -v`s the whole graph (services + volumes); run mode
+ * removes the single container. Both also reap the from-tree checkout. Safe to call twice.
  * @param {SutHandle|null} [handle]
  * @returns {Promise<void>}
  */
 export async function teardownSut(handle) {
   if (!handle) return;
-  await cleanup(detectDocker(), handle.containerName, handle._cloneDir);
+  await cleanup(detectDocker(), handle.containerName, handle._cloneDir, handle._compose);
 }
 
 /**
  * @param {Docker|null} docker
  * @param {string|null} containerName
  * @param {string|null} cloneDir
+ * @param {ComposeInfo|null} [compose] when set, reap the compose graph via `down -v` instead of `rm -f`
  */
-async function cleanup(docker, containerName, cloneDir) {
-  if (docker && containerName) docker.run(['rm', '-f', containerName], DOCKER_TIMEOUT_MS); // no-op if already gone
+async function cleanup(docker, containerName, cloneDir, compose = null) {
+  if (docker) {
+    if (compose) {
+      // Reap the whole graph + volumes; runs BEFORE the checkout is removed (the -f files live
+      // in it). No-op if nothing came up. Failure still lets the checkout reap in the finally.
+      docker.run(composeArgv(compose.project, compose.files, ['down', '-v']), DOCKER_TIMEOUT_MS);
+    } else if (containerName) {
+      docker.run(['rm', '-f', containerName], DOCKER_TIMEOUT_MS); // no-op if already gone
+    }
+  }
   if (cloneDir) {
     try {
       rmSync(cloneDir, { recursive: true, force: true });
