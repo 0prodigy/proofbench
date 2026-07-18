@@ -3,7 +3,7 @@
 *Living checkpoint. Update it at the end of every working session. Git is the durable
 checkpoint (every milestone is committed); this doc is the human/agent handoff on top of it.*
 
-**Last updated:** 2026-07-17 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+**Last updated:** 2026-07-18 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
 
 ---
 
@@ -217,13 +217,65 @@ not defects — point the editor at the workspace TypeScript/types to silence th
    (so `validateProposal` gated it) it drove the LIVE differential → **merge `3ddc176d`=WORKS (k=2, real
    executions persisted, fresh-REST confirm agrees) ∧ parent `869b8f14`=CND (feature-absent)** = DIFFERENTIAL
    PASS, docker clean. So the FULL product loop (plain intent → conjure → REAL agent proposes the walk →
-   harness disposes → unfakeable merge-vs-parent verdict) is proven END-TO-END. **Residual (mechanical, NOT
-   honesty):** pb AUTONOMOUSLY invoking the LLM headless via `claudeCliLlmFn` (`node src/cli.mjs prove
-   recipes/n8n-form-trigger-pr7130`, auto-selects claude-cli) — the seam is unit-proven but the live call
-   needs a headless token (nested `claude -p` currently returns "OAuth session expired"). **Robust one-time
-   unblock:** `claude setup-token` → set `CLAUDE_CODE_OAUTH_TOKEN` → pb's `claude -p` auths headless forever
-   (I never touch the token). The capability was proven WITHOUT that, via this session's own auth (a cold
-   `model:sonnet` subagent as the LLM transport — a verification technique, not a product path).** Ponytail: one recipe, ≤2 store adapters, 3 drive
+   harness disposes → unfakeable merge-vs-parent verdict) is proven END-TO-END. **M5 AUTONOMOUS HEADLESS ✅ PROVEN
+   (2026-07-18) — the mechanical residual is CLOSED:** pb now invokes the LLM headless ALL BY ITSELF via
+   `claudeCliLlmFn` — `node src/cli.mjs prove recipes/n8n-form-trigger-pr7130` auto-selects claude-cli when
+   no `ANTHROPIC_API_KEY`, spawns `claude -p` in a cold neutral cwd, the real Sonnet proposes the
+   `{walk, claim}`, `validateProposal` gates the reply, and the harness drives the differential →
+   **DIFFERENTIAL PASS RE-VERIFIED** (merge `3ddc176d`=WORKS, k=2 real executions persisted + fresh-REST
+   confirm ∧ parent `869b8f14`=CND feature-absent), docker clean. **Seam confirmed LIVE / NO-CACHE** — a
+   fresh headless `claude -p` spawn each run, not a replayed transcript. The one-time unblock that closed
+   it: `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN` → pb's nested `claude -p` auths headless
+   indefinitely (the earlier "OAuth session expired" is gone; pb code never touches the token). So the FULL
+   product loop is proven AUTONOMOUS end-to-end: one command → conjure → pb's OWN headless Sonnet proposes
+   the walk → harness disposes → unfakeable merge-vs-parent verdict.
+   **DIFFERENTIAL VALIDITY VERIFIED — #7130 parent=CND is HONEST, not a hollow Catch (2026-07-18,
+   `docs/differential-validity-2026-07-18.md`):** a challenge asked whether "Node not found" on the parent
+   leg means pb is broken (a FALSE CND). REFUTED from ground truth — #7130 = `feat(n8n Form Trigger Node):
+   New node`, merge `3ddc176d` has EXACTLY ONE parent `869b8f14`; GitHub /files shows it ADDS
+   `packages/nodes-base/nodes/Form/FormTrigger.node.ts` (+`.node.json`, `form.svg`, `interfaces.ts`,
+   `utils.ts`, all status `added`) + MODIFIES `package.json` to register the node; the contents API for
+   `FormTrigger.node.ts` @ `869b8f14` returns HTTP 404 = ABSENT at parent. So parent=CND (`Node not found`
+   at activation — n8n validates node types at activation, not creation → the form never comes up → the
+   walk cannot execute → `executed:false` → counts toward NEITHER k nor kFail → CND, never a false DNW) is
+   a GENUINE feature-absent condition, honest tri-state. The PASS is real. **The REAL limitation it
+   exposes:** #7130 is an ADDITIVE-PR differential — parent=CND is the STRONGEST possible result for a
+   new-node PR (absent code cannot be behaviorally tested), but pb has NOT yet EXECUTED a MODIFYING/BUGFIX-PR
+   differential where the parent RUNS the same walk and returns **DOES_NOT_WORK** (walk ran, effect went
+   missing). That is the differential with teeth.
+   **NEXT EXECUTABLE PROOF — a modifying-PR parent=DNW differential (judge-chosen 2026-07-18): n8n #9157**
+   `fix(Respond to Webhook Node): Fix issue stopping form trigger response` — merge
+   `6c63cd971162d3f018b210d221ffc2a56535550a`, VERIFIED single parent
+   `91e59120c49802bbeb545809527d223af1967f9d` (~n8n 1.38.0, Apr 2024). A `+3/-1` MODIFYING diff (adds
+   `n8n-nodes-base.formTrigger` to a new `WEBHOOK_NODE_TYPES` allow-list, gated `if (nodeVersion >= 1.1)`).
+   Reuses the EXACT proven Form Trigger browser front door (ZERO new drive capability) and the identical
+   self-contained `docker/images/n8n-custom/Dockerfile` conjure already builds (`ARG N8N_RELEASE_TYPE=dev`
+   present). The move that gives it teeth: the workflow's own `settings {saveDataErrorExecution:"none",
+   saveDataSuccessExecution:"all"}` turns the parent's mid-execution `NodeOperationError` into a MISSING
+   `execution_entity` row → **merge=WORKS** (row persists, `max_id` increased + fresh-REST confirm) **∧
+   parent=DOES_NOT_WORK** (walk ran, `executed:true`, but no row → `"increased"` FALSIFIES → kFail=2/2) — a
+   BEHAVIORAL failure, structurally distinct from #7130's feature-absent CND. Build recipe dir
+   `recipes/n8n-respondwebhook-formtrigger-pr9157/` by cloning the proven recipe and changing ONLY
+   `code_identity` (SHAs above) + `workflow.json` (Form Trigger → RespondToWebhook typeVersion 1.1,
+   `responseMode:responseNode`, the `saveData*` settings). Build-time residuals only (normal for from-tree):
+   OMIT `build_overlay` first (this SHA has NO `corepack` anchor line → `overlayDockerfile` throws; add one
+   only on a real integrity-key failure), confirm the FormTrigger `responseMode` value + the
+   `/webhook/{id}/…` suffix at 1.38. Fallbacks: **#10992** (browser-driven Wait-node variant, era 1.61,
+   buildable now) and **#33022** (cleanest NATIVE row-count differential BUT needs a new pre-docker-build
+   compile stage conjure lacks — n8n 2.28 dropped the self-contained Dockerfile). Run: `node src/cli.mjs
+   prove recipes/n8n-respondwebhook-formtrigger-pr9157`.
+   **Second engine (documenso) — `ready:false`:** postgres+canvas capability banked (browser-drive
+   reaches/manipulates the real Konva canvas; psql tap `"Field"` 0→1 live) but a real documenso DIFFERENTIAL
+   is BLOCKED — PR #3031 = `feat: add field multiselect` touches only the Shift+click multi-select renderer,
+   so a place-one-field walk is NON-DISCRIMINATING (merge=WORKS ∧ parent=WORKS, correctly reported as
+   no-PASS, not a wiring bug). A discriminating documenso Catch needs the multiselect-specific walk (#3031's
+   own e2e `runShiftClickMultiSelectFlow`) PLUS new harness surface (cookie-inject in `browserdrive.mjs`; a
+   postgres-shaped delta in `catch.mjs`, whose row/max-id logic is sqlite/n8n-shaped today; a documenso
+   confirm leg — the current one calls n8n-only REST routes; multipart bodies + per-step headers +
+   cross-service captures in recipe setup). Not a drop-in. **Lyric (ENG-17397) — cluster-gated:** headless
+   auth is fully ready (gh `0prodigy` + `mic` DE-JWT headless re-mint + `akashpathak` static client-cert)
+   but the base-coherent lyriclet `akashpathak` (ns `delta`, `k8s-attach`) is HIBERNATED; waking it is the
+   mutating, confirmation-gated `mic byoc power akashpathak start` — CANNOT run headless. See item 6.** Ponytail: one recipe, ≤2 store adapters, 3 drive
    primitives — generality earned per case. The from-tree SUT image stays cached → warm conjure ~6s.
 5. **Phases 1–2 to production shape** (code-works, deployed-healthy) on the same class — after M6.
 6. **QUEUED MAJOR PHASE — Lyric k8s-attach dogfood (ENG-17397)** (Akash, 2026-07-18; "after" the OSS
