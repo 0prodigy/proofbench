@@ -42,6 +42,16 @@ import { join } from 'node:path';
 export const ALLOWED_WALK_OPS = Object.freeze(['find', 'type', 'click', 'clickAt', 'pointer']);
 
 /**
+ * The walk vocabulary for the ARGO drive (drive.mode:'argo-workflows'): a single `trigger` op — the
+ * user gesture is "run the DAG" (the workflow manifest is disclosed config, like the front-door URL).
+ * Kept a one-op vocabulary so agent-proposes/harness-disposes stays uniform and reuses this validator
+ * (the harness owns the run-nonce, the observe, and every out-of-band read). Selected via the
+ * `allowedOps` parameter of validateProposal/proposeWalkAndClaim; the browser default is unchanged.
+ * @type {readonly string[]}
+ */
+export const ALLOWED_ARGO_OPS = Object.freeze(['trigger']);
+
+/**
  * The relation set the FROZEN verdict adjudicates (verdict.mjs relationHolds). Mirrored here as the
  * proposer's input allowlist so a bad op is rejected at the door as an honest CND, rather than
  * reaching the verdict (where an unknown op relationHolds→false → FALSIFIED anyway). Kept in lockstep
@@ -147,6 +157,14 @@ function validateArgs(op, args, i) {
       if (!Array.isArray(args.actions) || args.actions.length === 0) bad(`walk[${i}].args.actions must be a non-empty array`);
       if (args.pointerType !== undefined) requireString(args.pointerType, `walk[${i}].args.pointerType`);
       return { actions: args.actions, ...(args.pointerType !== undefined ? { pointerType: args.pointerType } : {}) };
+    case 'trigger':
+      // The argo drive gesture: run the disclosed workflow. Optional validated string parameters; the
+      // run-nonce and the manifest are harness/config-owned, never agent-supplied.
+      if (args.parameters !== undefined) {
+        if (!args.parameters || typeof args.parameters !== 'object' || Array.isArray(args.parameters)) bad(`walk[${i}].args.parameters must be an object`);
+        for (const [k, v] of Object.entries(args.parameters)) requireString(v, `walk[${i}].args.parameters.${k}`);
+      }
+      return { ...(args.parameters !== undefined ? { parameters: { ...args.parameters } } : {}) };
     default:
       return bad(`walk[${i}].op unsupported '${op}'`); // unreachable: op is already allowlisted
   }
@@ -442,11 +460,11 @@ export async function claudeCliLlmFn({ intent, introspection, observables }, opt
  * throw as an honest could-not-execute → CND). The llmFn seam produces an untrusted raw proposal;
  * validateProposal is the gate. Default llmFn = the real Anthropic call.
  * @param {{intent:any, introspection:any, observables:string[]}} input
- * @param {{llmFn?:LlmFn}} [opts]
+ * @param {{llmFn?:LlmFn, allowedOps?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS for the argo drive)
  * @returns {Promise<Proposal>}
  */
 export async function proposeWalkAndClaim({ intent, introspection, observables }, opts = {}) {
   const llmFn = opts.llmFn || /** @type {LlmFn} */ ((input) => defaultLlmFn(input));
   const raw = await llmFn({ intent, introspection, observables });
-  return validateProposal(raw, { observables });
+  return validateProposal(raw, { observables, allowedOps: opts.allowedOps || ALLOWED_WALK_OPS });
 }

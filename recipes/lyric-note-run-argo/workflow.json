@@ -1,0 +1,32 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Workflow",
+  "metadata": {
+    "name": "lyric-note-run",
+    "labels": { "app.kubernetes.io/part-of": "lyric-note-run" }
+  },
+  "spec": {
+    "entrypoint": "run-note",
+    "serviceAccountName": "pb-note-runner",
+    "arguments": {
+      "parameters": [
+        { "name": "note_id", "value": "REPLACE_WITH_NOTE_ID" },
+        { "name": "pb_nonce", "value": "REPLACE_AT_DRIVE_TIME" }
+      ]
+    },
+    "templates": [
+      {
+        "name": "run-note",
+        "inputs": {
+          "parameters": [{ "name": "note_id" }, { "name": "pb_nonce" }]
+        },
+        "container": {
+          "name": "main",
+          "image": "REPLACE_WITH_PINNED_IMAGE@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "command": ["/bin/run-note"],
+          "args": ["--note", "{{inputs.parameters.note_id}}", "--pb-marker", "{{inputs.parameters.pb_nonce}}"]
+        }
+      }
+    ]
+  }
+}

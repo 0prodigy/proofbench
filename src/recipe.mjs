@@ -123,15 +123,41 @@ import { join } from 'node:path';
  * @property {boolean} [transient_lock_is_expected]
  */
 
-/** @typedef {SqliteStoreTap | PostgresStoreTap} StoreTap */
+/**
+ * The out-of-band, store-DIRECT k8s-exec tap for the argo/note-DAG leg (LIVE-GATED). It reads the
+ * datastore pod DIRECTLY (kubectl exec) with a nonce-scoped query — never an app endpoint (a
+ * url/base_url/endpoint field is rejected at load, requiredFix 4).
+ * @typedef {Object} K8sExecStoreTap
+ * @property {'k8s-exec'} engine
+ * @property {string} namespace the datastore namespace
+ * @property {string} [pod] the datastore pod to exec into (one of pod|pod_selector required)
+ * @property {string} [pod_selector] a label selector resolving the datastore pod
+ * @property {string} store_client the store client binary (e.g. 'mongosh'|'psql') — a store read, never an app call
+ * @property {string} entity the nonce-scoped observable the claim binds (never a global max_id/count aggregate)
+ * @property {Record<string,string>} queries name -> nonce-scoped query; each MUST carry the {nonce} placeholder (requiredFix 3)
+ */
+
+/** @typedef {SqliteStoreTap | PostgresStoreTap | K8sExecStoreTap} StoreTap */
+
+/**
+ * The argo-workflows drive config: which Workflow CR to submit, which parameter carries the
+ * run-nonce, and which step container carries the SHA under test (validated against the manifest).
+ * @typedef {Object} ArgoDrive
+ * @property {string} namespace the namespace to submit/observe the Workflow in
+ * @property {string} manifest_file JSON Argo Workflow CR file (relative to recipeDir)
+ * @property {string} nonce_parameter the workflow parameter the run-nonce is injected as
+ * @property {string} container the step container carrying the SHA under test (digest<->SHA selector)
+ */
 
 /**
  * How the driving agent DRIVES the front door to produce the store delta. 'deferred' means the
  * driver for this front door is not built, so the Catch honestly CNDs for this repo (never a
  * forced fit — e.g. a Konva <canvas> front door). Absent in a recipe defaults to 'deferred'.
+ * 'argo-workflows' triggers a nonce-stamped Argo Workflow DAG and observes THAT run out-of-band.
  * @typedef {Object} Drive
- * @property {'http'|'browser'|'note-lifecycle'|'deferred'} mode
+ * @property {'http'|'browser'|'note-lifecycle'|'deferred'|'argo-workflows'} mode
  * @property {string} [reason] why — especially for 'deferred'
+ * @property {ArgoDrive} [argo] required for mode 'argo-workflows'
  */
 
 /**
@@ -187,6 +213,10 @@ export function loadRecipe(recipeDir) {
   }
   if (!isObject(r)) bad('recipe', 'must be a JSON object');
 
+  // Peek the drive mode up front: the argo-workflows leg's environment is the cluster + the Workflow
+  // DAG (not a docker-conjured SUT), so it constrains code-identity/tap validation below.
+  const isArgoDrive = isObject(r.drive) && r.drive.mode === 'argo-workflows';
+
   // Identity
   if (r.kind !== 'pb-recipe-v1') bad('kind', `must be 'pb-recipe-v1' (got ${JSON.stringify(r.kind)})`);
   if (typeof r.name !== 'string' || !r.name.trim()) bad('name', 'must be a non-empty string');
@@ -206,6 +236,9 @@ export function loadRecipe(recipeDir) {
     }
   } else {
     bad('code_identity.mode', `must be 'from_tree' or 'pinned_image' (got ${JSON.stringify(ci.mode)})`);
+  }
+  if (isArgoDrive && ci.mode !== 'pinned_image') {
+    bad('code_identity.mode', "must be 'pinned_image' for drive.mode 'argo-workflows' — the digest<->SHA binding is the DISCLOSED image_digest read independently by pb (from_tree build→digest on-cluster is the deferred live variant)");
   }
 
   // conjure
@@ -278,8 +311,32 @@ export function loadRecipe(recipeDir) {
       if (typeof st[f] !== 'string' || !st[f]) bad(`store_tap.${f}`, "is required for engine 'postgres'");
     }
     if (st.busy_timeout_ms !== undefined && typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', 'must be a number when present (optional for postgres — MVCC needs no busy-timeout)');
+  } else if (st.engine === 'k8s-exec') {
+    // The out-of-band, store-DIRECT read for the argo/note-DAG leg (LIVE-GATED). It MUST be a store
+    // engine, NEVER an app endpoint (requiredFix 4): a url/base_url/endpoint field is rejected so the
+    // (deferred) tap cannot masquerade an app read as the persisted ground-truth leg.
+    if (typeof st.namespace !== 'string' || !st.namespace) bad('store_tap.namespace', "is required for engine 'k8s-exec' (the datastore namespace)");
+    if ((typeof st.pod !== 'string' || !st.pod) && (typeof st.pod_selector !== 'string' || !st.pod_selector)) {
+      bad('store_tap.pod|pod_selector', "one is required for engine 'k8s-exec' (the datastore pod to kubectl-exec into)");
+    }
+    if (typeof st.store_client !== 'string' || !st.store_client) bad('store_tap.store_client', "is required for engine 'k8s-exec' (e.g. 'mongosh'|'psql' — a store client, never an app call)");
+    for (const f of ['url', 'base_url', 'endpoint']) {
+      if (st[f] !== undefined) bad(`store_tap.${f}`, "is FORBIDDEN for engine 'k8s-exec' — the tap must be a store-direct read, never an app endpoint (requiredFix 4)");
+    }
+    if (typeof st.entity !== 'string' || !st.entity) bad('store_tap.entity', "is required for engine 'k8s-exec' (the nonce-scoped observable the claim binds)");
+    if (/(^|[._])(max_id|count)$/i.test(st.entity) || /\b(max|count)\s*\(/i.test(st.entity)) {
+      bad('store_tap.entity', 'must NOT be a global max_id/count aggregate for argo mode — a global counter is bumped by any concurrent run (requiredFix 3); bind a nonce-scoped entity');
+    }
+    for (const [qn, q] of Object.entries(st.queries)) {
+      if (typeof q !== 'string' || !q.includes('{nonce}')) {
+        bad(`store_tap.queries.${qn}`, 'must contain the {nonce} placeholder — the argo tap MUST be nonce-scoped and the runner substitutes the harness nonce (requiredFix 3)');
+      }
+    }
   } else {
-    bad('store_tap.engine', `must be 'sqlite' or 'postgres' (got ${JSON.stringify(st.engine)})`);
+    bad('store_tap.engine', `must be 'sqlite', 'postgres', or 'k8s-exec' (got ${JSON.stringify(st.engine)})`);
+  }
+  if (isArgoDrive && st.engine !== 'k8s-exec') {
+    bad('store_tap.engine', "drive.mode 'argo-workflows' requires a 'k8s-exec' out-of-band store tap (the persisted leg must be a store-direct read, never an app endpoint)");
   }
 
   // drive — how the front door is driven; absent defaults to an honest 'deferred' (drive not built → CND).
@@ -288,11 +345,51 @@ export function loadRecipe(recipeDir) {
   } else {
     const dr = r.drive;
     if (!isObject(dr)) bad('drive', 'must be an object when present');
-    if (!['http', 'browser', 'note-lifecycle', 'deferred'].includes(dr.mode)) {
-      bad('drive.mode', `must be one of 'http'|'browser'|'note-lifecycle'|'deferred' (got ${JSON.stringify(dr.mode)})`);
+    if (!['http', 'browser', 'note-lifecycle', 'deferred', 'argo-workflows'].includes(dr.mode)) {
+      bad('drive.mode', `must be one of 'http'|'browser'|'note-lifecycle'|'deferred'|'argo-workflows' (got ${JSON.stringify(dr.mode)})`);
     }
     if (dr.reason !== undefined && (typeof dr.reason !== 'string' || !dr.reason)) bad('drive.reason', 'must be a non-empty string when present');
+    if (dr.mode === 'argo-workflows') {
+      const a = dr.argo;
+      if (!isObject(a)) bad('drive.argo', "is required for drive.mode 'argo-workflows'");
+      if (typeof a.namespace !== 'string' || !a.namespace) bad('drive.argo.namespace', 'must be a non-empty string');
+      if (typeof a.nonce_parameter !== 'string' || !a.nonce_parameter) bad('drive.argo.nonce_parameter', 'must be a non-empty string (the workflow parameter the run-nonce is injected as)');
+      if (typeof a.container !== 'string' || !a.container) bad('drive.argo.container', 'must be a non-empty string (the step container carrying the SHA under test)');
+      if (typeof a.manifest_file !== 'string' || !a.manifest_file) bad('drive.argo.manifest_file', 'must be a non-empty string');
+      const mp = join(recipeDir, a.manifest_file);
+      if (!existsSync(mp)) bad('drive.argo.manifest_file', `references a missing file: ${a.manifest_file}`);
+      let manifest;
+      try {
+        manifest = JSON.parse(readFileSync(mp, 'utf8'));
+      } catch (e) {
+        bad('drive.argo.manifest_file', `must be a JSON Argo Workflow manifest (zero-dep parse): ${e instanceof Error ? e.message : String(e)}`);
+      }
+      // requiredFix 5: validate the digest<->SHA container selector against the REAL Workflow spec at
+      // load — an unvalidated selector makes the drive-time digest check vacuous.
+      const containers = argoContainerNames(manifest);
+      if (!containers.includes(a.container)) {
+        bad('drive.argo.container', `'${a.container}' is not a container in the workflow manifest templates [${containers.join(', ') || '(none)'}] — an unvalidated selector makes the digest<->SHA binding vacuous (requiredFix 5)`);
+      }
+    }
   }
 
   return /** @type {Recipe} */ (r);
+}
+
+/**
+ * The container names declared across a JSON Argo Workflow manifest's templates (both `container`
+ * and `containerSet.containers`) — used to validate the digest<->SHA selector at recipe load.
+ * @param {any} manifest
+ * @returns {string[]}
+ */
+function argoContainerNames(manifest) {
+  const tpls = manifest && manifest.spec && Array.isArray(manifest.spec.templates) ? manifest.spec.templates : [];
+  /** @type {string[]} */
+  const names = [];
+  for (const t of tpls) {
+    if (t && t.container && typeof t.container.name === 'string' && t.container.name) names.push(t.container.name);
+    const set = t && t.containerSet && Array.isArray(t.containerSet.containers) ? t.containerSet.containers : [];
+    for (const c of set) if (c && typeof c.name === 'string' && c.name) names.push(c.name);
+  }
+  return names;
 }

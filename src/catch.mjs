@@ -40,8 +40,9 @@
 import { conjure } from './conjure.mjs';
 import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
-import { resolveCatchSeams } from './registry.mjs';
-import { proposeWalkAndClaim } from './proposer.mjs';
+import { mintWorkflowAttempt, stampManifest, digestBinds, nonceFromRows } from './argoworkflows.mjs';
+import { resolveCatchSeams, resolveArgoSeams } from './registry.mjs';
+import { proposeWalkAndClaim, ALLOWED_ARGO_OPS } from './proposer.mjs';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
@@ -50,7 +51,7 @@ import { Verdict } from './types.mjs';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
 const REPRODUCTIONS = 2;
 const EXECUTION_SETTLE_MS = 12000; // how long to watch the store for the submitted execution (a beat, not a bare sleep)
@@ -535,8 +536,14 @@ export async function runCatch(opts) {
   const runDir = opts.runDir || mkdtempSync(join(tmpdir(), 'pb-catch-'));
 
   const recipe = loadRecipe(recipeDir);
+  // drive.mode DISPATCH (M3): the argo-workflows drive is a structurally different leg (submit a
+  // Workflow DAG, observe THAT run out-of-band) so it runs its own iteration path. The browser loop
+  // below is untouched (#7130 stays byte-identical). Grandfathered modes all browser-drive here.
+  if (recipe.drive && recipe.drive.mode === 'argo-workflows') {
+    return runArgoCatch(opts, recipe, runDir);
+  }
   // Config-keyed registry = the DEFAULT phase-seam wiring; an injected seam still WINS over it
-  // (unit tests inject mocks). See src/registry.mjs (drive stays browser-only this slice).
+  // (unit tests inject mocks). See src/registry.mjs.
   const { conjureFn, tapStoreFn, openBrowserFn } = resolveCatchSeams(opts, recipe);
   const sha = buildSha || /** @type {import('./recipe.mjs').FromTreeIdentity} */ (recipe.code_identity).sha || '';
   const queryName = Object.keys(recipe.store_tap.queries)[0];
@@ -654,6 +661,287 @@ export async function runCatch(opts) {
   // Seal (ed25519) → persist to the run dir → RE-READ the persisted artifact → judge THAT. The
   // verdict is bound to tamper-evident evidence ON DISK, never a loose in-memory object: a receipt
   // mutated after sealing fails verifySeal → UNVERIFIED (the contents are not trusted at all).
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
+  const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
+  return { phase: 'catch', sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath, proposal };
+}
+
+// ---------------------------------------------------------------------------
+// The ARGO WORKFLOWS Catch — drive.mode:'argo-workflows' (M3)
+// ---------------------------------------------------------------------------
+
+/**
+ * One argo reproduction's observed outcome — the raw facts assembleArgoBundle turns into receipts.
+ * Mirrors CatchIteration's executed/effectHeld partition exactly: `executed:false` = a mint
+ * precondition could not even be VERIFIED (submit failed / pin ambiguous / watch timed out / digest
+ * unbound / tap threw) → NO delta minted → NOT_EXECUTED → CND. `executed:true` with `effectHeld:false`
+ * = every precondition held and the nonce-scoped tap RAN, but the nonce did not round-trip (a real
+ * negative) → a non-satisfying delta (before==after) → FALSIFIED.
+ * @typedef {Object} ArgoIteration
+ * @property {boolean} executed the pinned run reached terminal, the digest bound, and the tap ran
+ * @property {boolean} effectHeld the nonce round-tripped into the store AND a second independent read agreed
+ * @property {number} before nonce-scoped rows before (always 0 — a fresh globally-unique nonce has no prior rows)
+ * @property {number} after nonce-scoped rows after the run
+ * @property {string} [nonce] the run-scoped nonce pb generated (public pin correlation)
+ * @property {string} [readbackNonce] the nonce READ BACK from the store in the delta tap (never stamped)
+ * @property {string} [confirmNonce] the nonce read from a SECOND independent out-of-band observation
+ * @property {string} [name] the observed workflow run name
+ * @property {string} [phase] the observed terminal phase (attempt-receipt only, never a delta)
+ * @property {string[]} [digests] the observed step-pod imageIDs
+ * @property {string} [boundDigest] the SHA-under-test digest pb bound (code_identity.image_digest)
+ * @property {string} [entity] the nonce-scoped store observable
+ * @property {import('./argoworkflows.mjs').DriveStep[]} [driveSteps] the recorded run
+ * @property {import('./types.mjs').Receipt} [fingerprint] the harness code-identity receipt
+ * @property {string} [reason] why this reproduction did not confirm the effect
+ */
+
+/**
+ * Assemble the argo evidence bundle from the reproduction outcomes — PURE, mirroring
+ * assembleCatchBundle. The binding iteration is the FIRST that executed. HONESTY (requiredFix 2/8 —
+ * the vacuous-confirm guard): the store-delta's `nonce` is the value READ BACK from the store
+ * (binding.readbackNonce), and the confirm leg's `nonce` is read from a SECOND, genuinely
+ * independent out-of-band observation (binding.confirmNonce) — NEITHER is the harness-generated UUID
+ * stamped blindly, so freshBinds is satisfied only when two independent reads agree. When either
+ * read did not re-observe the nonce, that field is absent → no valid confirm leg → CND. The workflow
+ * attempt is TOOL (mintWorkflowAttempt); the HARNESS delta is the sole minter (mintStoreDelta).
+ * @param {Object} args
+ * @param {any} args.intent
+ * @param {ArgoIteration[]} args.iterations
+ * @param {import('./proposer.mjs').ProposedClaim} [args.claim] the FROZEN agent-proposed effect claim
+ * @param {string} [args.actorIdentity]
+ * @param {string} [args.identity]
+ * @returns {import('./types.mjs').EvidenceBundle}
+ */
+export function assembleArgoBundle({ intent, iterations, claim, actorIdentity = ACTOR_IDENTITY, identity = VISITOR_IDENTITY }) {
+  const its = iterations || [];
+  const binding = its.find((it) => it.executed);
+  const fingerprint = (its.find((it) => it.fingerprint) || {}).fingerprint;
+
+  /** @type {import('./types.mjs').Receipt[]} */
+  const receipts = [];
+  if (fingerprint) receipts.push(fingerprint);
+  /** @type {string[]} */
+  const effectReceiptIds = [];
+
+  if (binding) {
+    const before = binding.before || 0;
+    // Nonce round-tripped → after > before (a real increase). Ran but no nonce row → after = before
+    // (no increase), so op:'increased' FALSIFIES rather than sits NOT_EXECUTED.
+    const after = binding.after != null ? binding.after : before;
+    const delta = mintStoreDelta({
+      id: 'store-delta',
+      entity: binding.entity || (claim ? claim.entity : 'argo.effect'),
+      before,
+      after,
+      identity,
+      sourcePR: false,
+      extra: {
+        ...(binding.name !== undefined ? { workflowName: binding.name } : {}),
+        ...(binding.boundDigest !== undefined ? { boundDigest: binding.boundDigest } : {}),
+        // The nonce READ BACK from the store out-of-band (only present when it round-tripped). The
+        // terminal PHASE is deliberately NOT carried on the delta — phase is not the oracle; it lives
+        // strictly in the TOOL attempt receipt.
+        ...(binding.readbackNonce !== undefined ? { nonce: binding.readbackNonce } : {}),
+      },
+    });
+    receipts.push(delta);
+    effectReceiptIds.push('store-delta');
+
+    // Workflow attempt (TOOL): the trigger + observed phase transitions + observed digests. The
+    // terminal PHASE lives ONLY here (never a delta) — phase is not the oracle.
+    receipts.push(
+      mintWorkflowAttempt({
+        id: 'argo-drive',
+        name: binding.name || '',
+        nonce: binding.nonce || '',
+        phase: binding.phase || '',
+        steps: binding.driveSteps || [],
+        digests: binding.digests,
+        identity,
+      })
+    );
+    effectReceiptIds.push('argo-drive');
+
+    // Confirm leg (TOOL, fresh-session): the nonce read from a SECOND independent out-of-band
+    // observation. It content-binds to the delta via the shared store-read nonce (freshBinds). Emitted
+    // ONLY when the run persisted AND the independent read re-observed the nonce.
+    if (binding.after != null && binding.confirmNonce !== undefined) {
+      receipts.push(
+        mint({
+          id: 'argo-confirm',
+          kind: 'fresh-session',
+          provenance: 'tool',
+          identity,
+          data: { entity: binding.entity || (claim ? claim.entity : 'argo.effect'), nonce: binding.confirmNonce, workflowName: binding.name },
+        })
+      );
+      effectReceiptIds.push('argo-confirm');
+    }
+  }
+
+  const quantified = quantifierFromIntent(intent) || !!(claim && claim.quantified);
+  /** @type {import('./types.mjs').Claim[]} */
+  const claims = claim
+    ? [
+        {
+          id: 'workflow-run-persists-effect',
+          kind: 'effect',
+          scope: claim.scope,
+          ...(quantified ? { quantified: true } : {}),
+          effectCheck: {
+            entity: claim.entity,
+            expectedAfterRelation: claim.expectedAfterRelation,
+            deltaReceiptId: 'store-delta',
+            confirmLegReceiptId: 'argo-confirm',
+          },
+          receiptIds: effectReceiptIds,
+        },
+      ]
+    : [];
+
+  const k = its.filter((it) => it.effectHeld).length;
+  const kFail = its.filter((it) => it.executed && !it.effectHeld).length;
+  return newBundle({ intent, actorIdentity, claims, receipts, reproduce: { k, n: its.length, kFail } });
+}
+
+/**
+ * Read + JSON-parse the recipe's Argo Workflow manifest (recipe.mjs already validated it at load).
+ * @param {string} recipeDir
+ * @param {string} manifestFile
+ * @returns {any}
+ */
+function loadArgoManifest(recipeDir, manifestFile) {
+  return JSON.parse(readFileSync(join(recipeDir, manifestFile), 'utf8'));
+}
+
+/**
+ * Run the ARGO WORKFLOWS Catch across REPRODUCTIONS nonce-scoped runs. Per reproduction the harness
+ * mints a FRESH globally-unique nonce, stamps + submits the Workflow CR, and enforces the THREE
+ * guardrails as MINT PRECONDITIONS (doc v2 §3 — the runner DECLINES to tap/mint a satisfying delta
+ * unless each holds):
+ *   1. SINGLE-RUN PINNING (P3): pinCheck — the pb.run/nonce label resolves to EXACTLY the submitted
+ *      run; 0 or >1 (a concurrent same-label run) throws → could-not-execute → CND.
+ *   2. DIGEST<->SHA BINDING (P1/P4): the selected step-pod imageID must bind the DISCLOSED
+ *      code_identity digest; unbound / pods GC'd / cache-hit → throw → CND.
+ *   3. NONCE ROUND-TRIP (P2): the store is tapped OUT-OF-BAND with the nonce-scoped query TWICE
+ *      independently; the delta's nonce is the value READ BACK (never stamped) and the confirm leg is
+ *      a genuinely independent second observation. Absent readback → no satisfying delta.
+ * Any UNVERIFIED precondition throws → executed:false → NO delta → CND by construction. A verified
+ * run whose nonce did not round-trip is a real negative (executed:true, effectHeld:false → FALSIFIED).
+ * The frozen core is untouched; the effect claim is agent-proposed (a one-op 'trigger' + claim).
+ * @param {any} opts the runCatch opts (recipeDir, buildSha, intent, proposal, llmFn, argoRunFn, argoTapFn, kubectl)
+ * @param {import('./recipe.mjs').Recipe} recipe the loaded recipe (drive.mode === 'argo-workflows')
+ * @param {string} runDir directory to persist the sealed receipt into
+ * @returns {Promise<CatchResult>}
+ */
+async function runArgoCatch(opts, recipe, runDir) {
+  const { recipeDir } = opts;
+  const { argoRunFn, argoTapFn } = resolveArgoSeams(opts, recipe);
+  const argo = /** @type {import('./recipe.mjs').ArgoDrive} */ (recipe.drive.argo);
+  const st = /** @type {import('./recipe.mjs').K8sExecStoreTap} */ (recipe.store_tap);
+  const ci = /** @type {import('./recipe.mjs').PinnedImageIdentity} */ (recipe.code_identity);
+  const queryName = Object.keys(st.queries)[0];
+  const boundDigest = ci.image_digest; // the DISCLOSED SHA<->digest binding, read independently by pb (F2: never the CI ref)
+  const observables = [st.entity]; // the harness-enumerated observable menu (the agent's claim must bind this)
+  const sha = boundDigest || '';
+  const intent =
+    opts.intent ||
+    `A ${recipe.name} note run driven as an Argo Workflow persists ${st.entity}, reproduced across nonce-scoped runs (image ${String(boundDigest).slice(0, 19)}).`;
+  const manifest = loadArgoManifest(recipeDir, argo.manifest_file);
+
+  /** @type {string[]} */
+  const diagnosis = [];
+  /** @type {ArgoIteration[]} */
+  const iterations = [];
+  /** @type {import('./proposer.mjs').Proposal|null} */
+  let proposal = opts.proposal || null;
+  let proposalFrozen = !!proposal;
+
+  for (let i = 0; i < REPRODUCTIONS; i++) {
+    const nonce = randomUUID(); // fresh, globally-unique, harness-minted per iteration (P2/P7 uniqueness)
+    /** @type {import('./argoworkflows.mjs').WorkflowRunClient|null} */ let client = null;
+    try {
+      // Freeze the agent proposal ONCE (mirrors runCatch): a one-op 'trigger' + the effect claim,
+      // proposed against DISCLOSED data (the manifest's templates/container), replayed verbatim.
+      if (!proposal && !proposalFrozen) {
+        proposalFrozen = true;
+        const introspection = { workflow: argo.manifest_file, container: argo.container, templates: (manifest && manifest.spec && manifest.spec.templates ? manifest.spec.templates : []).map((/** @type {any} */ t) => t && t.name).filter(Boolean) };
+        proposal = await proposeWalkAndClaim({ intent, introspection, observables }, { llmFn: opts.llmFn, allowedOps: ALLOWED_ARGO_OPS });
+        diagnosis.push(`argo: agent proposed a ${proposal.walk.length}-step trigger claiming ${proposal.claim.entity} ${proposal.claim.expectedAfterRelation.op} — frozen and replayed verbatim across reproductions.`);
+      }
+      if (!proposal) throw new Error('the agent seam produced no valid trigger+claim (frozen as unavailable) — could-not-execute');
+
+      client = await argoRunFn({ namespace: argo.namespace, kubectl: opts.kubectl });
+      const name = await client.submit(stampManifest(manifest, { nonceParameter: argo.nonce_parameter, nonce }));
+
+      // GUARDRAIL 1 — SINGLE-RUN PINNING (P3): observe EXACTLY the submitted run.
+      if (!(await client.pinCheck(nonce, name))) {
+        throw new Error(`single-run pinning failed — the pb.run/nonce label did not resolve to exactly the submitted workflow ${name} (0 or >1 matches: a concurrent same-label run) → CND`);
+      }
+      // Observe THAT run to a terminal phase (bounded → throw → CND). Phase is NOT the oracle.
+      const { phase } = await client.awaitTerminal(name);
+      // GUARDRAIL 2 — DIGEST<->SHA BINDING (P1/P4): the step-pod imageID must bind the SHA under test.
+      const digests = await client.podDigests(name, argo.container);
+      if (!digests.some((d) => digestBinds(d, boundDigest))) {
+        throw new Error(`digest<->SHA binding failed — no '${argo.container}' pod imageID bound to the code under test (${boundDigest}); observed=[${digests.join(', ') || "(none — pods GC'd / cache-hit / wrong selector)"}] → CND`);
+      }
+      // GUARDRAIL 3 — NONCE ROUND-TRIP (P2): tap OUT-OF-BAND with the nonce-scoped query, TWICE
+      // independently. before is 0 by construction (a fresh globally-unique nonce has no prior rows).
+      const tapHandle = { recipe, namespace: argo.namespace, name, nonce };
+      const deltaRows = await argoTapFn(tapHandle, queryName, nonce);
+      const readbackNonce = nonceFromRows(deltaRows, nonce);
+      const after = (deltaRows || []).length;
+      const confirmRows = await argoTapFn(tapHandle, queryName, nonce);
+      const confirmNonce = nonceFromRows(confirmRows, nonce);
+      const before = 0;
+      const effectHeld = after > before && readbackNonce === nonce && confirmNonce === nonce;
+      const reason = effectHeld
+        ? undefined
+        : readbackNonce !== nonce
+          ? 'the nonce did not round-trip into the store (no nonce-scoped row) — a real negative'
+          : confirmNonce !== nonce
+            ? 'the independent confirm read did not re-observe the nonce (confirm leg absent)'
+            : 'no store delta';
+
+      iterations.push({
+        executed: true,
+        effectHeld,
+        before,
+        after,
+        nonce,
+        readbackNonce,
+        confirmNonce,
+        name,
+        phase,
+        digests,
+        boundDigest,
+        entity: st.entity,
+        driveSteps: client.steps,
+        fingerprint: mint({ id: 'fingerprint', kind: 'fingerprint', provenance: 'harness', data: { mode: 'pinned_image', image_ref: ci.image_ref, image_digest: boundDigest, workflow: name } }),
+        reason,
+      });
+      diagnosis.push(
+        effectHeld
+          ? `argo: reproduction ${i} — workflow ${name} (${phase}) wrote the nonce-scoped effect; a second independent out-of-band read re-observed the nonce (confirm leg agrees).`
+          : `argo: reproduction ${i} executed but did not confirm the effect: ${reason}.`
+      );
+    } catch (e) {
+      const reason = String((e && /** @type {any} */ (e).message) || e);
+      diagnosis.push(`argo: reproduction ${i} could not execute (an UNVERIFIED mint precondition — feature-absent / could-not-execute, not evidence against the change): ${reason}`);
+      iterations.push({ executed: false, effectHeld: false, before: 0, after: 0, reason });
+    } finally {
+      if (client) {
+        try {
+          await client.teardown(nonce);
+        } catch {
+          /* already reaped */
+        }
+      }
+    }
+  }
+
+  const bundle = assembleArgoBundle({ intent, iterations, claim: proposal ? proposal.claim : undefined, actorIdentity: ACTOR_IDENTITY, identity: VISITOR_IDENTITY });
   const { privateKey } = generateKeyPairSync('ed25519');
   const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
   const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
