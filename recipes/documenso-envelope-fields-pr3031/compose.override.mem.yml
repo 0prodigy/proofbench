@@ -1,0 +1,8 @@
+# Spike override: build documenso from tree with the disclosed NODE_OPTIONS
+# heap overlay (docker/Dockerfile.mem). Used together with the repo's own
+# docker/testing/compose.yml. build.context is inherited from the base file
+# (../../ = repo root); only the dockerfile is swapped.
+services:
+  documenso:
+    build:
+      dockerfile: docker/Dockerfile.mem

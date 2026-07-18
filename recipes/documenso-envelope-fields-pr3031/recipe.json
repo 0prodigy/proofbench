@@ -1,0 +1,41 @@
+{
+  "kind": "pb-recipe-v1",
+  "name": "documenso Envelope Fields (PR #3031)",
+  "notes": "Second corpus class, chosen to force pipeline generality vs n8n: a multi-container compose graph (app + postgres:15 + inbucket) over a Postgres store. conjure.mode=compose brings the graph up via the repo's own docker/testing/compose.yml layered with the recipe-local mem overlays. The store tap is out-of-band `docker exec documenso-test-database-1 psql` (a SEPARATE DB container from the app) reading the PascalCase \"Field\" table the PR mutates — Prisma has no @@map, so the identifier MUST stay double-quoted in the query string. Postgres is MVCC/read-committed, so the tap takes no busy-timeout. Migrations are automatic and disclosed (163 Prisma migrations run by docker/start.sh at container boot), so there is no REST setup dance — setup is omitted. drive is 'deferred': the front door is a Konva <canvas> (see the e2e .konva-container canvas), and a browser-drive of a canvas is not built, so the Catch honestly CNDs for this repo. front_door is therefore informational; url_template is the authenticated document envelope editor derived from the e2e fixture (also served at templates/{id}/edit and /embed/v2/authoring/envelope/edit/{id}); the field-placement surface is the editor's addFields step. compose_overlays: compose.override.mem.yml is layered via `docker compose -f docker/testing/compose.yml -f compose.override.mem.yml` and swaps the app build to Dockerfile.mem (a copy of docker/Dockerfile plus a NODE_OPTIONS=--max-old-space-size=4096 overlay that fixes the react-router/Vite production build OOM, exit 134, at the default ~2GB V8 heap — NOT the n8n corepack gotcha); the recipe-local Dockerfile.mem is staged into the checkout at docker/Dockerfile.mem (where the override's build.dockerfile points) by the compose bring-up runner (a later slice). code_identity: from-tree @ 97835b8d self-reports version 2.14.0; the first shipped release containing #3031 is documenso/documenso:v2.14.0.",
+  "code_identity": {
+    "mode": "from_tree",
+    "repo": "https://github.com/documenso/documenso.git",
+    "sha": "97835b8dbb2ca24670c8a410972d949c982c8f61",
+    "dockerfile": "docker/Dockerfile",
+    "context": ".",
+    "version_label": "2.14.0"
+  },
+  "conjure": {
+    "mode": "compose",
+    "compose_file": "docker/testing/compose.yml",
+    "compose_overlays": ["compose.override.mem.yml", "Dockerfile.mem"],
+    "service": "documenso",
+    "env": {},
+    "container_port": 3000,
+    "published_port": 3000,
+    "ready_signal": { "path": "/api/health", "expect_status": 200 }
+  },
+  "fresh_world": { "strategy": "recreate" },
+  "store_tap": {
+    "engine": "postgres",
+    "container": "documenso-test-database-1",
+    "user": "documenso",
+    "db": "documenso",
+    "queries": {
+      "fields": "SELECT count(*) AS n FROM \"Field\";"
+    }
+  },
+  "drive": {
+    "mode": "deferred",
+    "reason": "Konva canvas front door — browser-drive of a <canvas> not built (honest CND)"
+  },
+  "front_door": {
+    "url_template": "/t/{team_url}/documents/{document_id}/edit",
+    "serves": "the authenticated document envelope editor; the addFields step renders the Konva .konva-container canvas where Field rows are placed. Informational only — drive is deferred, so {team_url}/{document_id} are never minted this slice."
+  }
+}

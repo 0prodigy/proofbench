@@ -60,5 +60,9 @@
       "executions": "SELECT id, workflowId, status, finished FROM execution_entity ORDER BY id;"
     },
     "transient_lock_is_expected": true
+  },
+  "drive": {
+    "mode": "http",
+    "reason": "the Form Trigger front door is server-rendered HTML plus a multipart POST — driven over HTTP"
   }
 }

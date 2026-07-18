@@ -4,15 +4,19 @@
  * the DELTA receipt the verdict adjudicates. This is the §1.1 persisted leg (harness
  * provenance): a store-of-record observation the driving agent has NO write-handle to.
  *
- * The read is a `docker exec ... sqlite3` against the store file INSIDE the container —
- * NEVER a call to the app's own API. An app-endpoint read is only TOOL provenance and can
- * never be the persisted leg (docs/phase-3-theory.md §1.1/§4); if the store cannot be read
- * out of band, this module throws rather than fall back to an app read.
+ * The read is a `docker exec … <client>` against the store DIRECTLY — NEVER a call to the
+ * app's own API. It is engine-discriminated: sqlite (n8n) is a store FILE inside the SUT
+ * container read with `sqlite3 -json`; postgres (documenso) is a SEPARATE DB container read
+ * with `psql -At`. An app-endpoint read is only TOOL provenance and can never be the persisted
+ * leg (docs/phase-3-theory.md §1.1/§4); if the store cannot be read out of band, this module
+ * throws rather than fall back to an app read — for BOTH engines.
  *
  * tapStore runs a recipe's named read-only query and returns the parsed rows. Per M1's
  * finding, n8n runs sqlite in rollback-journal mode, so a reader can intermittently collide
  * with a writer; the recipe's busy-timeout makes that invisible, and a transient
- * "database is locked" is EXPECTED — retried, never treated as a SUT failure. mintStoreDelta
+ * "database is locked" is EXPECTED — retried, never treated as a SUT failure. Postgres is the
+ * opposite: MVCC/read-committed readers never block on writers, so the postgres path takes no
+ * busy-timeout and no lock-retry (a single read). mintStoreDelta
  * turns a bracketed before/after into a HARNESS delta receipt via the harness mint() (the
  * only path to harness provenance). This module DECIDES no verdict — it only provides the
  * tap and the mint helper; the caller (M6) brackets a user action with two taps.
@@ -83,9 +87,21 @@ function parseJsonRows(stdout) {
 }
 
 /**
- * Run the recipe's named store query OUT OF BAND against the store file inside the container
- * and return the parsed rows. NEVER touches the app's API — this is the harness-provenance
- * persisted leg (§1.1/§4).
+ * Parse `psql -At -F '\t'` stdout (tuples only — no header/footer — tab-separated) to rows of
+ * string fields. Empty stdout is zero rows. Postgres emits TEXT (no typing); the caller coerces.
+ * @param {string} stdout
+ * @returns {string[][]}
+ */
+function parsePsqlRows(stdout) {
+  const lines = (stdout || '').split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop(); // drop the trailing newline
+  return lines.map((line) => line.split('\t'));
+}
+
+/**
+ * Run the recipe's named store query OUT OF BAND against the conjured SUT's persisted store and
+ * return the parsed rows. NEVER touches the app's API — this is the harness-provenance persisted
+ * leg (§1.1/§4). Dispatches on the recipe's store engine (sqlite | postgres).
  *
  * @param {import('./conjure.mjs').SutHandle} handle a live conjured SUT
  * @param {string} queryName a key of recipe.store_tap.queries
@@ -94,15 +110,27 @@ function parseJsonRows(stdout) {
  */
 export async function tapStore(handle, queryName, docker = defaultDocker()) {
   const st = handle.recipe.store_tap;
-  if (st.engine !== 'sqlite') {
-    throw new Error(`storetap: unsupported engine '${st.engine}' — only 'sqlite' is supported (the psql path is a later case)`);
-  }
   const query = st.queries[queryName];
   if (typeof query !== 'string' || !query) {
     throw new Error(`storetap: unknown query '${queryName}' — recipe store_tap.queries has: ${Object.keys(st.queries).join(', ') || '(none)'}`);
   }
+  if (st.engine === 'sqlite') return tapSqlite(handle, st, queryName, query, docker);
+  if (st.engine === 'postgres') return tapPostgres(st, queryName, query, docker);
+  throw new Error(`storetap: unsupported engine '${String(/** @type {any} */ (st).engine)}' — only 'sqlite' and 'postgres' are supported`);
+}
 
-  // Out-of-band read: docker exec ... sqlite3 -json -cmd ".timeout N" <db> "<query>".
+/**
+ * sqlite tap: `docker exec <sut> sqlite3 -json -cmd ".timeout N" <db_path> "<query>"` against the
+ * store file INSIDE the SUT container. A transient "database is locked" is EXPECTED under
+ * rollback-journal contention — retried, never a SUT failure.
+ * @param {import('./conjure.mjs').SutHandle} handle
+ * @param {import('./recipe.mjs').SqliteStoreTap} st
+ * @param {string} queryName
+ * @param {string} query
+ * @param {DockerRunner} docker
+ * @returns {Promise<any[]>}
+ */
+async function tapSqlite(handle, st, queryName, query, docker) {
   const args = ['exec', handle.containerName, 'sqlite3', '-json', '-cmd', `.timeout ${st.busy_timeout_ms}`, st.db_path, query];
 
   for (let attempt = 0; ; attempt++) {
@@ -125,6 +153,26 @@ export async function tapStore(handle, queryName, docker = defaultDocker()) {
     }
     throw new Error(`storetap: query '${queryName}' failed (exit ${res.status}): ${tail(stderr || res.stdout)}`);
   }
+}
+
+/**
+ * postgres tap: `docker exec <container> psql -U <user> -d <db> -At -F '\t' -c "<query>"` against
+ * a SEPARATE DB container. Postgres is MVCC/read-committed → readers never block on writers, so
+ * there is NO busy-timeout and NO lock-retry (a single read, the opposite of sqlite). Rows come
+ * back tuples-only (no header/footer), tab-separated, parsed to a string[][]. Throws rather than
+ * fall back to an app read — the persisted leg must be read out of band (§1.1/§4).
+ * @param {import('./recipe.mjs').PostgresStoreTap} st
+ * @param {string} queryName
+ * @param {string} query
+ * @param {DockerRunner} docker
+ * @returns {string[][]}
+ */
+function tapPostgres(st, queryName, query, docker) {
+  const args = ['exec', st.container, 'psql', '-U', st.user, '-d', st.db, '-At', '-F', '\t', '-c', query];
+  const res = docker.run(args, DOCKER_TIMEOUT_MS);
+  if (res.error) throw new Error(`storetap: docker exec for query '${queryName}' failed to run: ${res.error.message}`);
+  if (res.status !== 0) throw new Error(`storetap: query '${queryName}' failed (exit ${res.status}): ${tail(res.stderr || res.stdout)}`);
+  return parsePsqlRows(res.stdout);
 }
 
 /**

@@ -16,6 +16,7 @@ import { loadRecipe } from '../src/recipe.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const N8N_RECIPE = join(ROOT, 'recipes', 'n8n-form-trigger-pr7130');
+const DOCUMENSO_RECIPE = join(ROOT, 'recipes', 'documenso-envelope-fields-pr3031');
 
 /** A minimal, valid pb-recipe-v1 object (fresh each call) to mutate per malformed case. */
 function validRecipe() {
@@ -62,6 +63,70 @@ test('recipe: the n8n Form Trigger recipe validates and its load-bearing fields 
   // the front-door {webhook_id} is minted from the node's webhookId in workflow.json
   const wf = JSON.parse(readFileSync(join(N8N_RECIPE, 'workflow.json'), 'utf8'));
   assert.ok(wf.nodes[0].webhookId, 'workflow node carries a webhookId (the URL base)');
+  // generalized contract: a single-container recipe defaults conjure.mode to 'run', and n8n's
+  // front door is the built HTTP drive (not the deferred default)
+  assert.equal(r.conjure.mode, 'run');
+  assert.equal(r.store_tap.engine, 'sqlite');
+  assert.equal(r.drive.mode, 'http');
+});
+
+test('recipe: the documenso Envelope Fields recipe validates (compose mode + postgres tap + deferred drive)', () => {
+  const r = loadRecipe(DOCUMENSO_RECIPE);
+  // compose-mode conjure: the multi-service class, the repo's own testing compose + mem overlays
+  assert.equal(r.conjure.mode, 'compose');
+  assert.equal(r.conjure.compose_file, 'docker/testing/compose.yml');
+  assert.equal(r.conjure.service, 'documenso');
+  const overlays = r.conjure.compose_overlays || [];
+  assert.ok(overlays.length >= 1, 'compose_overlays present');
+  for (const f of overlays) assert.ok(existsSync(join(DOCUMENSO_RECIPE, f)), `overlay ${f} exists on disk`);
+  // postgres store tap: a SEPARATE DB container, the PR-mutated "Field" table (double-quoted)
+  assert.equal(r.store_tap.engine, 'postgres');
+  const pg = /** @type {import('../src/recipe.mjs').PostgresStoreTap} */ (r.store_tap);
+  assert.equal(pg.container, 'documenso-test-database-1');
+  assert.equal(pg.user, 'documenso');
+  assert.equal(pg.db, 'documenso');
+  assert.match(pg.queries.fields, /"Field"/); // PascalCase identifier stays double-quoted (no @@map)
+  assert.equal(pg.busy_timeout_ms, undefined); // postgres is MVCC → no busy-timeout
+  // honest code-identity: from_tree bound to the exact merge SHA
+  assert.equal(r.code_identity.mode, 'from_tree');
+  assert.equal(
+    /** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity).sha,
+    '97835b8dbb2ca24670c8a410972d949c982c8f61'
+  );
+  // drive is honestly deferred (Konva <canvas> front door) → the Catch CNDs for this repo
+  assert.equal(r.drive.mode, 'deferred');
+  assert.match(r.drive.reason || '', /canvas/i);
+  // front door is a URL template carrying a minted id (informational, since drive is deferred)
+  assert.match(r.front_door.url_template, /\{[^}]+\}/);
+  // documenso self-bootstraps (auto-migrations) → no REST setup dance
+  assert.deepEqual(r.setup, []);
+});
+
+test('recipe: absent setup and absent drive default honestly (empty setup, deferred drive)', () => {
+  const o = /** @type {any} */ (validRecipe());
+  delete o.setup; // a SUT that self-bootstraps needs no REST dance
+  delete o.drive;
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.deepEqual(r.setup, []); // defaulted to empty — never a forced fit
+    assert.equal(r.drive.mode, 'deferred'); // absent drive → honest CND, never over-claims
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: every drive mode validates and resolves', () => {
+  for (const mode of ['http', 'browser', 'note-lifecycle', 'deferred']) {
+    const o = /** @type {any} */ (validRecipe());
+    o.drive = { mode };
+    const dir = writeRecipeDir(o);
+    try {
+      assert.equal(loadRecipe(dir).drive.mode, mode);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test('recipe: a minimal recipe with all required fields validates', () => {
@@ -84,12 +149,17 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'from_tree missing sha', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', dockerfile: 'd', context: '.' }), match: /code_identity\.sha/ },
     { label: 'pinned_image missing digest', mutate: (o) => (o.code_identity = { mode: 'pinned_image', image_ref: 'x:1' }), match: /code_identity\.image_digest/ },
     { label: 'non-recreate fresh_world', mutate: (o) => (o.fresh_world = { strategy: 'reuse' }), match: /fresh_world\.strategy/ },
-    { label: 'empty setup', mutate: (o) => (o.setup = []), match: /setup/ },
+    { label: 'non-array setup', mutate: (o) => (o.setup = 'nope'), match: /setup/ },
     { label: 'setup step with both body and body_file', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', body: {}, body_file: 'b.json' }]), match: /both/ },
     { label: 'setup body_file missing on disk', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', body_file: 'nope.json' }]), match: /body_file.*missing|missing.*body_file/ },
     { label: 'front_door url_template without placeholder', mutate: (o) => (o.front_door = { url_template: '/static' }), match: /url_template.*placeholder/ },
+    { label: 'bogus conjure.mode', mutate: (o) => (o.conjure.mode = 'swarm'), match: /conjure\.mode/ },
+    { label: 'compose mode missing compose_file', mutate: (o) => (o.conjure.mode = 'compose'), match: /conjure\.compose_file/ },
     { label: 'missing store_tap', mutate: (o) => delete o.store_tap, match: /store_tap/ },
     { label: 'store_tap with empty queries', mutate: (o) => (o.store_tap.queries = {}), match: /store_tap\.queries/ },
+    { label: 'bogus store_tap.engine', mutate: (o) => (o.store_tap = { engine: 'mysql', queries: { q: 'SELECT 1;' } }), match: /store_tap\.engine/ },
+    { label: 'postgres tap missing container', mutate: (o) => (o.store_tap = { engine: 'postgres', user: 'u', db: 'd', queries: { q: 'SELECT 1;' } }), match: /store_tap\.container/ },
+    { label: 'bogus drive.mode', mutate: (o) => (o.drive = { mode: 'telepathy' }), match: /drive\.mode/ },
   ];
   for (const { label, mutate, match } of cases) {
     const o = validRecipe();

@@ -49,12 +49,23 @@ import { join } from 'node:path';
  */
 
 /**
+ * How to CONJURE the SUT — two disclosed classes:
+ *   - mode 'run' (default): a single container (n8n) — the runner `docker run`s one image.
+ *   - mode 'compose': a multi-service graph (documenso = app + postgres + inbucket) — the
+ *     runner brings the graph up with `docker compose -f <compose_file> [-f <overlay>…]`.
+ * The base fields (env, ports, ready_signal) apply to BOTH classes; compose adds compose_file
+ * (required), compose_overlays, and service. (The compose bring-up runner is a later slice;
+ * here the recipe only DECLARES the compose class.)
  * @typedef {Object} Conjure
- * @property {Record<string,string>} env container environment
+ * @property {'run'|'compose'} [mode] conjure strategy; defaults to 'run' (single container)
+ * @property {Record<string,string>} env inline container environment (a compose SUT usually lets the compose file own env → {})
  * @property {number} container_port port the SUT listens on inside the container
  * @property {number} published_port host port it is published on
  * @property {ReadySignal} ready_signal
  * @property {string[]} [setup_overlay] disclosed setup-time fixups (e.g. `apk add sqlite` for the tap)
+ * @property {string} [compose_file] compose file path relative to the checkout — REQUIRED for mode 'compose' (e.g. docker/testing/compose.yml)
+ * @property {string[]} [compose_overlays] recipe-local override file names layered over compose_file (e.g. a mem Dockerfile + compose override)
+ * @property {string} [service] the app service name within the compose graph (mode 'compose')
  */
 
 /**
@@ -85,12 +96,41 @@ import { join } from 'node:path';
  */
 
 /**
- * @typedef {Object} StoreTap
- * @property {string} engine store engine (e.g. sqlite)
- * @property {string} db_path path to the store file inside the container
- * @property {number} busy_timeout_ms busy-timeout for the out-of-band read (n8n sqlite = rollback journal)
+ * The out-of-band STORE TAP, engine-discriminated — two disclosed classes:
+ *   - sqlite (n8n): a store FILE inside the SUT container. Rollback-journal mode means a
+ *     reader can collide with a writer, so busy_timeout_ms is REQUIRED and a transient
+ *     "database is locked" is EXPECTED (retried, never a SUT failure).
+ *   - postgres (documenso): a SEPARATE DB container tapped via `docker exec <container> psql`.
+ *     Postgres MVCC/read-committed means readers never block on writers, so NO busy-timeout is
+ *     needed (busy_timeout_ms is optional and unused for postgres).
+ * @typedef {Object} SqliteStoreTap
+ * @property {'sqlite'} engine
+ * @property {string} db_path path to the store file inside the SUT container
+ * @property {number} busy_timeout_ms busy-timeout for the out-of-band read (rollback-journal contention)
  * @property {Record<string,string>} queries name -> static read-only query (non-empty)
  * @property {boolean} [transient_lock_is_expected] a transient "database is locked" is expected, cleared by the timeout — never a SUT failure
+ */
+
+/**
+ * @typedef {Object} PostgresStoreTap
+ * @property {'postgres'} engine
+ * @property {string} container the DB container the tap `docker exec`s into (a SEPARATE container from the app)
+ * @property {string} user postgres role (docker exec over the local unix socket = trust auth, no password)
+ * @property {string} db database name
+ * @property {Record<string,string>} queries name -> static read-only query (non-empty); PascalCase identifiers MUST be double-quoted in the query string (Prisma does not remap them to snake_case)
+ * @property {number} [busy_timeout_ms] optional and unused for postgres — MVCC readers never block on writers
+ * @property {boolean} [transient_lock_is_expected]
+ */
+
+/** @typedef {SqliteStoreTap | PostgresStoreTap} StoreTap */
+
+/**
+ * How the driving agent DRIVES the front door to produce the store delta. 'deferred' means the
+ * driver for this front door is not built, so the Catch honestly CNDs for this repo (never a
+ * forced fit — e.g. a Konva <canvas> front door). Absent in a recipe defaults to 'deferred'.
+ * @typedef {Object} Drive
+ * @property {'http'|'browser'|'note-lifecycle'|'deferred'} mode
+ * @property {string} [reason] why — especially for 'deferred'
  */
 
 /**
@@ -103,9 +143,10 @@ import { join } from 'node:path';
  * @property {Conjure} conjure
  * @property {FreshWorld} fresh_world
  * @property {AuthPreflight} [auth_preflight]
- * @property {SetupStep[]} setup
+ * @property {SetupStep[]} setup disclosed REST setup steps — may be empty when the SUT self-bootstraps (e.g. documenso auto-runs its Prisma migrations at boot, so it needs no REST dance)
  * @property {FrontDoor} front_door
  * @property {StoreTap} store_tap
+ * @property {Drive} drive how the front door is driven (absent defaults to 'deferred', an honest CND)
  */
 
 /**
@@ -176,6 +217,16 @@ export function loadRecipe(recipeDir) {
   if (typeof c.ready_signal.expect_status !== 'number') bad('conjure.ready_signal.expect_status', 'must be a number');
   if (c.setup_overlay !== undefined && !isStringArray(c.setup_overlay)) bad('conjure.setup_overlay', 'must be a string[]');
 
+  // conjure.mode — 'run' (default, single container) | 'compose' (multi-service graph). Default
+  // a missing mode to 'run' so a single-container recipe (n8n) stays valid without a mode field.
+  if (c.mode === undefined) c.mode = 'run';
+  else if (c.mode !== 'run' && c.mode !== 'compose') bad('conjure.mode', `must be 'run' or 'compose' (got ${JSON.stringify(c.mode)})`);
+  if (c.mode === 'compose') {
+    if (typeof c.compose_file !== 'string' || !c.compose_file) bad('conjure.compose_file', "is required for mode 'compose'");
+    if (c.compose_overlays !== undefined && !isStringArray(c.compose_overlays)) bad('conjure.compose_overlays', 'must be a string[]');
+    if (c.service !== undefined && (typeof c.service !== 'string' || !c.service)) bad('conjure.service', 'must be a non-empty string when present');
+  }
+
   // fresh_world — v1 only supports recreate
   const fw = r.fresh_world;
   if (!isObject(fw)) bad('fresh_world', 'must be an object');
@@ -189,8 +240,11 @@ export function loadRecipe(recipeDir) {
     if (typeof ap.path !== 'string' || !ap.path) bad('auth_preflight.path', 'must be a non-empty string');
   }
 
-  // setup — non-empty array of steps
-  if (!Array.isArray(r.setup) || r.setup.length === 0) bad('setup', 'must be a non-empty array of steps');
+  // setup — optional disclosed REST steps. Absent/empty is valid: some SUTs self-bootstrap
+  // (documenso auto-runs its Prisma migrations at container boot; there is no REST setup dance
+  // to model, and inventing one would be a forced fit). When present it must be an array.
+  if (r.setup === undefined) r.setup = [];
+  else if (!Array.isArray(r.setup)) bad('setup', 'must be an array of steps when present');
   r.setup.forEach((/** @type {any} */ step, /** @type {number} */ i) => {
     if (!isObject(step)) bad(`setup[${i}]`, 'must be an object');
     if (typeof step.id !== 'string' || !step.id) bad(`setup[${i}].id`, 'must be a non-empty string');
@@ -209,14 +263,34 @@ export function loadRecipe(recipeDir) {
   if (typeof fd.url_template !== 'string' || !fd.url_template) bad('front_door.url_template', 'must be a non-empty string');
   if (!/\{[^}]+\}/.test(fd.url_template)) bad('front_door.url_template', 'must contain a {...} placeholder for the minted id');
 
-  // store_tap — the out-of-band persisted-leg read
+  // store_tap — the out-of-band persisted-leg read; engine-discriminated (sqlite | postgres).
   const st = r.store_tap;
   if (!isObject(st)) bad('store_tap', 'must be an object');
-  if (typeof st.engine !== 'string' || !st.engine) bad('store_tap.engine', 'must be a non-empty string');
-  if (typeof st.db_path !== 'string' || !st.db_path) bad('store_tap.db_path', 'must be a non-empty string');
-  if (typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', 'must be a number');
   if (!isObject(st.queries) || Object.keys(st.queries).length === 0) bad('store_tap.queries', 'must be a non-empty object of named queries');
   if (st.transient_lock_is_expected !== undefined && typeof st.transient_lock_is_expected !== 'boolean') bad('store_tap.transient_lock_is_expected', 'must be a boolean');
+  if (st.engine === 'sqlite') {
+    if (typeof st.db_path !== 'string' || !st.db_path) bad('store_tap.db_path', "is required for engine 'sqlite'");
+    if (typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', "is required (a number) for engine 'sqlite' (the rollback-journal busy-timeout)");
+  } else if (st.engine === 'postgres') {
+    for (const f of ['container', 'user', 'db']) {
+      if (typeof st[f] !== 'string' || !st[f]) bad(`store_tap.${f}`, "is required for engine 'postgres'");
+    }
+    if (st.busy_timeout_ms !== undefined && typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', 'must be a number when present (optional for postgres — MVCC needs no busy-timeout)');
+  } else {
+    bad('store_tap.engine', `must be 'sqlite' or 'postgres' (got ${JSON.stringify(st.engine)})`);
+  }
+
+  // drive — how the front door is driven; absent defaults to an honest 'deferred' (drive not built → CND).
+  if (r.drive === undefined) {
+    r.drive = { mode: 'deferred', reason: 'no drive declared for this recipe (honest CND)' };
+  } else {
+    const dr = r.drive;
+    if (!isObject(dr)) bad('drive', 'must be an object when present');
+    if (!['http', 'browser', 'note-lifecycle', 'deferred'].includes(dr.mode)) {
+      bad('drive.mode', `must be one of 'http'|'browser'|'note-lifecycle'|'deferred' (got ${JSON.stringify(dr.mode)})`);
+    }
+    if (dr.reason !== undefined && (typeof dr.reason !== 'string' || !dr.reason)) bad('drive.reason', 'must be a non-empty string when present');
+  }
 
   return /** @type {Recipe} */ (r);
 }

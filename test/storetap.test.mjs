@@ -31,6 +31,22 @@ function makeHandle(engine = 'sqlite') {
   };
 }
 
+/** A minimal fake postgres SUT handle: the tap execs into a SEPARATE DB container (store_tap.container). */
+function makePgHandle() {
+  return {
+    containerName: 'pb-sut-documenso-abc', // the APP container — the postgres tap does NOT exec into this
+    recipe: {
+      store_tap: {
+        engine: 'postgres',
+        container: 'documenso-test-database-1',
+        user: 'documenso',
+        db: 'documenso',
+        queries: { fields: 'SELECT count(*) AS n FROM "Field";' },
+      },
+    },
+  };
+}
+
 /**
  * A fake docker runner: records every argv, returns the queued response for each call
  * (clamped to the last so a single response repeats).
@@ -70,6 +86,47 @@ test('storetap: tapStore returns [] on empty stdout and on a bare []', async () 
   assert.deepEqual(await tapStore(asAny(makeHandle()), 'executions', asAny(fakeDocker([{ status: 0, stdout: '[]\n' }]))), []);
 });
 
+test('storetap: tapStore builds the docker exec psql -U <user> -d <db> -At argv and parses tab rows (postgres, no busy-timeout)', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: '0\n' }]);
+  const rows = await tapStore(asAny(makePgHandle()), 'fields', asAny(docker));
+  assert.deepEqual(docker.calls[0], [
+    'exec',
+    'documenso-test-database-1', // the SEPARATE DB container (store_tap.container), NOT handle.containerName
+    'psql',
+    '-U',
+    'documenso',
+    '-d',
+    'documenso',
+    '-At',
+    '-F',
+    '\t',
+    '-c',
+    'SELECT count(*) AS n FROM "Field";',
+  ]);
+  assert.deepEqual(rows, [['0']]); // tuples-only, tab-split, no header/footer
+  assert.equal(docker.calls.length, 1); // MVCC: a single read, no lock-retry
+});
+
+test('storetap: the postgres tap parses multi-column tab rows and an empty result set', async () => {
+  assert.deepEqual(
+    await tapStore(asAny(makePgHandle()), 'fields', asAny(fakeDocker([{ status: 0, stdout: '1\tSIGNATURE\n2\tTEXT\n' }]))),
+    [
+      ['1', 'SIGNATURE'],
+      ['2', 'TEXT'],
+    ]
+  );
+  assert.deepEqual(await tapStore(asAny(makePgHandle()), 'fields', asAny(fakeDocker([{ status: 0, stdout: '' }]))), []);
+});
+
+test('storetap: the postgres tap throws (never falls back to an app read) on a non-zero psql exit', async () => {
+  const docker = fakeDocker([{ status: 1, stderr: 'ERROR:  relation "field" does not exist' }]);
+  await assert.rejects(
+    () => tapStore(asAny(makePgHandle()), 'fields', asAny(docker)),
+    /query 'fields' failed \(exit 1\)[\s\S]*relation "field" does not exist/
+  );
+  assert.equal(docker.calls.length, 1); // no retry (MVCC), no fallback
+});
+
 test('storetap: tapStore treats a transient "database is locked" as EXPECTED — retries then succeeds', async () => {
   const docker = fakeDocker([
     { status: 1, stderr: 'Error: near line 1: database is locked' },
@@ -95,9 +152,9 @@ test('storetap: tapStore throws on a non-lock error, naming the query and the st
   assert.equal(docker.calls.length, 1); // a real error is not retried
 });
 
-test('storetap: tapStore throws a clear "unsupported engine" error for a non-sqlite store', async () => {
+test('storetap: tapStore throws a clear "unsupported engine" error for an engine that is neither sqlite nor postgres', async () => {
   const docker = fakeDocker([{ status: 0, stdout: '[]' }]);
-  await assert.rejects(() => tapStore(asAny(makeHandle('postgres')), 'executions', asAny(docker)), /unsupported engine 'postgres'/);
+  await assert.rejects(() => tapStore(asAny(makeHandle('mysql')), 'executions', asAny(docker)), /unsupported engine 'mysql'/);
   assert.equal(docker.calls.length, 0);
 });
 
