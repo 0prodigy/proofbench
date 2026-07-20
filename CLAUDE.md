@@ -56,6 +56,17 @@ owns the deploy; it is the verification layer between them.
    roadmap gate (`docs/ROADMAP.md`). Everything else gets one line in DEFERRED.md and
    dies for now.
 
+## The adoption bar (binding — founder-approved 2026-07-20)
+
+Honesty is necessary, not sufficient. pb wins only as a DAILY habit in a company's
+jira-to-deploy flow, so every gate also reports the four adoption metrics in
+`docs/ROADMAP.md` (named-unblock rate, CND rate, verdict wall-clock, time-to-first-
+verdict). Two agent rules that follow: (a) a CND that does not name the one action that
+unblocks it is a bug with false-WORKS severity; (b) when choosing between hardening an
+already-honest path and widening what gets an honest named verdict, widen — coverage
+walls (a repo that won't conjure, an unnamed egress failure, a recipe that takes days)
+kill adoption faster than any missed hardening.
+
 ## Session protocol
 
 - Start: read this file → `docs/RESUME.md` → `docs/ROADMAP.md`. Work ONLY on the current

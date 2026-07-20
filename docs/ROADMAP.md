@@ -20,6 +20,24 @@ explicitly cut from v1. Full issue register at the bottom.
 
 ---
 
+## Adoption metrics (binding at every gate from G1 — added 2026-07-20 product audit)
+
+`false-WORKS = 0` is honesty. Honesty alone does not make a daily habit — these four do.
+A gate does not pass on honesty alone; each gate reports all four.
+
+1. **Named-unblock rate = 100%.** Every CND names the ONE action that unblocks it
+   (rustc bar; IC-7/DP-11 already promise this). A CND without a named unblock is a bug,
+   filed and fixed with the same severity as a false-WORKS. CND-spam is how verification
+   tools get uninstalled.
+2. **CND rate, measured.** % of pool runs landing CND, reported per gate. High early is
+   fine; unmeasured is not — it must be visibly falling or the habit never forms.
+3. **Verdict wall-clock, measured.** Minutes per leg, cold conjure vs warm, reported per
+   gate. Target (target, not gate): warm merge-leg verdict ≤ 15 min — the PR-review
+   attention window. The differential is 2× cost by construction; see the R2 CI-mode
+   decision.
+4. **Time-to-first-verdict on a NEW repo.** G1: ≤ 1 hour hand-authored (already the
+   gate). G2: ≤ 15 min with `pb init` proposing the recipe.
+
 ## R0 — Truth reset (days) · GATE G0
 
 Make every claim match reality; land the catch with teeth.
@@ -103,6 +121,23 @@ Make pb a habit, not a demo. Smallest pipeline glue that creates daily runs.
       confirms. Propose/dispose applied to onboarding — recipes stop costing days.
 - [ ] **Dogfood:** pb's own repo runs pb in CI; recruit 1–3 external OSS repos to run
       the Action weekly. Their catches/CNDs become corpus entries.
+- [ ] **Sealed-room minimum (coverage wall for real-company apps):** outbound HTTP from
+      the conjured world is default-deny block-and-record; blocked egress becomes a NAMED
+      finding/CND cause ("your system tried to reach api.stripe.com; nothing was there"),
+      never an unnamed hang/timeout; typed fake creds (`pb_fake_…`) injected at boot when
+      the app demands vendor keys, disclosed in the cast list. (DP-07's minimum. Without
+      this, most SaaS-calling repos — i.e. most company repos — fail WEIRDLY instead of
+      honestly, and the named-unblock metric is unmeetable. Curated doubles stay deferred.)
+- [ ] **Intent source for CI (decision + implementation):** the Action takes the intent
+      sentence from the PR title/body (linked-ticket ingestion later, IC-14); an
+      uncheckable sentence → capture-time CND quoting the blocking words (IC-7). Garbage
+      in must land CND, never a guessed WORKS.
+- [ ] **CI verdict mode:** `pb prove --merge-only` for the daily PR gate (half the cost,
+      inside the attention window); the case file is explicitly labeled NON-differential.
+      Full differential stays for catches, launch claims, and a nightly pool run.
+- [ ] **Concurrent-run isolation:** two pb runs on one CI runner never collide —
+      nonce-scoped container names/ports/run dirs (reaper already nonce-aware; verify
+      under real parallel invocation).
 
 **G2 passed when:** pb has run unattended in CI on ≥20 real PRs across ≥2 repos with
 zero false-WORKS and ≥1 real catch reported on a PR.
@@ -167,8 +202,27 @@ real user demands it.
 Pipeline: CI trigger/PR reporting → R2 · approval gate semantics → R2 (branch protection)
 then R4 (policy) · daemon/GitHub App/Jira → R4 only.
 
+Adoption blockers (2026-07-20 product audit — what stops DAILY use even where verdicts
+work): B1 recipe authoring cost, days of expert work per repo (→ R2 `pb init`; G2
+measures time-to-first-verdict) · B2 verdict latency unmeasured, differential = 2× by
+construction (→ metrics block + R2 `--merge-only`) · B3 CND-spam / unnamed failures
+erode trust faster than catches build it (→ named-unblock rate = 100%) · B4 sealed room
+unscheduled — external-SaaS apps (most company apps) fail unnamed (→ R2 sealed-room
+minimum) · B5 intent source undefined for CI (→ R2 decision: PR title/body) · B6
+concurrent CI runs collide on docker resources (→ R2 isolation) · B7 enterprise security
+posture undocumented — untrusted PR code executes in the conjured world; needs the
+"SUT is containerized, default-deny egress, pb holds no secrets, LLM sees intent +
+introspection only" page (→ R3, written with the Lyric dogfood).
+
 ## Decision log (settled — do not reopen)
 
+- 2026-07-20 (founder, product audit): fundamentals CONFIRMED right — the 8 invariants,
+  recipe seam, differential Catch stand; the gap is coverage/cost/onboarding, all
+  additive. No rewrite, ever. Adoption metrics block above is binding at every gate.
+- 2026-07-20: daily CI mode = merge-leg only, explicitly labeled; differential reserved
+  for catches, launch claims, nightly pool.
+- 2026-07-20: sealed-room MINIMUM (block-and-record + fake creds) scheduled R2; curated
+  doubles (payments/email) stay deferred until a real repo demands them.
 - 2026-07-20: npm name `proofbench` (free; `pb` taken), bin stays `pb`.
 - 2026-07-20: launch identity = the CATCH (a DNW with a receipt), never a green PASS.
 - 2026-07-20: R-gates are strictly ordered; no R3 surface before G1, no R4 before G3.

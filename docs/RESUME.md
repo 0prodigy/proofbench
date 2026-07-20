@@ -47,6 +47,14 @@ redesign, do not touch the frozen core. Current gate: **finish G0 remainder, the
   everything. NOTE: never leave a broken worktree under .claude/worktrees/ — `node --test`
   sweeps it.
 
+**2026-07-20 PRODUCT AUDIT (founder-requested, post-interrupt):** fundamentals confirmed
+right — NO rewrite, ever. Gaps are coverage/cost/onboarding, all additive: ROADMAP gained
+a binding **Adoption metrics** block (named-unblock rate 100%, CND rate, verdict
+wall-clock, time-to-first-verdict), five new R2 items (sealed-room minimum, CI intent
+source = PR title/body, `--merge-only` CI mode, concurrent-run isolation, plus `pb init`
+already there), adoption blockers B1–B7 in the issue register, and CLAUDE.md gained "The
+adoption bar." Gate order R0→R4 UNCHANGED; resume order below UNCHANGED.
+
 **RESUME ORDER (next session):** (1) finish slice A on `r1-slice-a` (typecheck) → merge to
 product-v1; (2) redo/finish slice B against the merged slice-A contract (handle.cookies =
 [{name,value}]; confirm[] schema = setup[] schema) → merge; (3) migrate BOTH n8n recipes'
