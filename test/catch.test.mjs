@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleCatchBundle, observedValue, confirmAgrees, normalizeEqualsClaimValue, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
+import { assembleCatchBundle, observedValue, confirmAgrees, normalizeEqualsClaimValue, coerceObservedForBind, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
@@ -160,6 +160,38 @@ test("catch helpers: normalizeEqualsClaimValue aligns an 'equals' claim's boolea
   assert.deepEqual(normalizeEqualsClaimValue({ op: 'increased' }, 1), { op: 'increased' });
   assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: 'archived' }, 'archived'), { op: 'equals', value: 'archived' });
   assert.equal(normalizeEqualsClaimValue(undefined, 1), undefined);
+});
+
+test("catch helpers: coerceObservedForBind reshapes a confirm-leg observation into after's own type before minting (verdict.mjs's freshBinds does its own strict deepEqual — frozen, never touched)", () => {
+  assert.equal(coerceObservedForBind(true, 1), 1);
+  assert.equal(coerceObservedForBind(false, 0), 0);
+  assert.equal(coerceObservedForBind(false, 1), 0); // a real disagreement stays a disagreement post-coercion
+  assert.equal(coerceObservedForBind(1, true), true);
+  assert.equal(coerceObservedForBind('1', 1), 1);
+  assert.equal(coerceObservedForBind('abc', 1), 'abc'); // non-numeral string passes through unchanged
+  assert.equal(coerceObservedForBind(1, 1), 1); // same type: untouched
+});
+
+test('catch assembly: a boolean confirm-leg observation against a numeric store after (linkding shape) still reaches WORKS via coerceObservedForBind, not verdict.mjs', () => {
+  const claim = { entity: 'bookmarks_bookmark.newest_shared', expectedAfterRelation: { op: 'equals', value: 1 }, scope: 'newest bookmark shared' };
+  const it = () => ({
+    executed: true,
+    effectHeld: true,
+    before: undefined,
+    after: 1,
+    entity: 'bookmarks_bookmark.newest_shared',
+    freshObserved: true, // a JSON API capture returns a real boolean; the store tap reads sqlite's 0/1
+    countBefore: 0,
+    countAfter: 1,
+    driveSteps: [],
+    observedText: '',
+    frontDoorUrl: 'http://localhost:9096/bookmarks/new',
+    fingerprint: fingerprint('MERGE'),
+    reason: undefined,
+  });
+  const bundle = assembleCatchBundle({ intent: 'default_mark_shared', claim, iterations: [it(), it()] });
+  const v = verdict(bundle);
+  assert.equal(v.state, Verdict.WORKS, v.reasons.join(' | '));
 });
 
 test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes (claim FROM the proposal)', () => {

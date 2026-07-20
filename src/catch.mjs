@@ -185,6 +185,28 @@ export function confirmAgrees(freshObserved, after) {
 }
 
 /**
+ * Reshape a fresh confirm-leg observation into `after`'s own TYPE before it is minted onto the
+ * 'fresh-execution' receipt — verdict.mjs's `freshBinds` does its OWN strict `deepEqual(observed,
+ * after)` (the frozen core, never touched here), so the exact same boolean/0-1 representation gap
+ * confirmAgrees handles for the iteration-level bookkeeping would otherwise resurface at the
+ * receipt layer. Coercing REPRESENTATION only (never meaning) means a genuine disagreement still
+ * produces a genuinely different value post-coercion (deepEqual still correctly fails) — this can
+ * never manufacture an agreement verdict.mjs wouldn't otherwise reach honestly.
+ * @param {any} observed
+ * @param {any} after
+ * @returns {any}
+ */
+export function coerceObservedForBind(observed, after) {
+  if (typeof after === 'number' && typeof observed === 'boolean') return observed ? 1 : 0;
+  if (typeof after === 'boolean' && typeof observed === 'number') return observed !== 0;
+  if (typeof after === 'number' && typeof observed === 'string') {
+    const n = Number(observed);
+    if (Number.isFinite(n)) return n;
+  }
+  return observed;
+}
+
+/**
  * Assemble the evidence bundle from the reproduction outcomes — PURE, mirroring phase3's
  * receipt/claim block. The binding iteration is the FIRST that executed the walk: if it persisted
  * an execution the store-delta is a real increase (before < after) confirmed by the fresh leg
@@ -270,7 +292,7 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
           kind: 'fresh-session',
           provenance: 'tool',
           identity,
-          data: { entity, after: binding.after, observed: binding.freshObserved },
+          data: { entity, after: binding.after, observed: coerceObservedForBind(binding.freshObserved, binding.after) },
         })
       );
       effectReceiptIds.push('fresh-execution');
