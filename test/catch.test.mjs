@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleCatchBundle, observedValue, confirmAgrees, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
+import { assembleCatchBundle, observedValue, confirmAgrees, normalizeEqualsClaimValue, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
@@ -144,6 +144,22 @@ test('catch helpers: confirmAgrees coerces the SAME boolean-shaped column\'s two
   assert.equal(confirmAgrees('0', 1), false);
   assert.equal(confirmAgrees(undefined, 1), false);
   assert.equal(confirmAgrees('abc', 1), false); // non-numeric string never silently agrees
+});
+
+test("catch helpers: normalizeEqualsClaimValue aligns an 'equals' claim's boolean/numeral TYPE to the observed store value's, never its meaning", () => {
+  // linkding shape: the agent proposes 'the shared column equals true', the store tap reads sqlite's 0/1.
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: true }, 1), { op: 'equals', value: 1 });
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: false }, 0), { op: 'equals', value: 0 });
+  // the reverse direction (observed already boolean, claim numeric) also coerces.
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: 1 }, true), { op: 'equals', value: true });
+  // a genuine disagreement is NOT laundered into an agreement by the coercion: it only aligns
+  // TYPE (true -> 1, unconditionally), so the mismatch (1 vs the real observed 0) still surfaces
+  // at verdict.mjs's deepEqual, unaffected by this helper.
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: true }, 0), { op: 'equals', value: 1 });
+  // untouched: non-'equals' ops, and 'equals' whose value isn't a bool/number pair.
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'increased' }, 1), { op: 'increased' });
+  assert.deepEqual(normalizeEqualsClaimValue({ op: 'equals', value: 'archived' }, 'archived'), { op: 'equals', value: 'archived' });
+  assert.equal(normalizeEqualsClaimValue(undefined, 1), undefined);
 });
 
 test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes (claim FROM the proposal)', () => {

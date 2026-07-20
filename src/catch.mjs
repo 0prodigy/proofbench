@@ -142,6 +142,27 @@ export function observedValue(rows, spec) {
 }
 
 /**
+ * Coerce a proposed `op:'equals'` claim's value TYPE to match the harness-observed store value's
+ * type when they represent the SAME boolean-shaped scalar under a different shape (mirrors
+ * confirmAgrees' reasoning, one step earlier — before verdict.mjs's exact `deepEqual` runs):
+ * SQLite has no BOOLEAN type, so a named-scalar boolean column round-trips as 0/1, while an
+ * agent's proposed claim naturally encodes a true/false intent ("the shared column equals true").
+ * Only aligns REPRESENTATION, never MEANING — coercing true->1/false->0 (or the reverse) cannot
+ * turn a genuine disagreement into an agreement (1 vs a coerced 0 still disagrees). Every op other
+ * than 'equals', and any 'equals' whose value isn't a boolean/number cross-type pair, passes
+ * through unchanged. verdict.mjs itself stays untouched — this only shapes what reaches it.
+ * @param {{op:string, value?:any}|undefined} rel
+ * @param {any} observed
+ * @returns {{op:string, value?:any}|undefined}
+ */
+export function normalizeEqualsClaimValue(rel, observed) {
+  if (!rel || rel.op !== 'equals' || !('value' in rel)) return rel;
+  if (typeof observed === 'number' && typeof rel.value === 'boolean') return { ...rel, value: rel.value ? 1 : 0 };
+  if (typeof observed === 'boolean' && typeof rel.value === 'number') return { ...rel, value: rel.value !== 0 };
+  return rel;
+}
+
+/**
  * Compare the fresh confirm-leg observation to the store-tap's AFTER value, coercing the SAME
  * boolean-shaped column's two honest representations: SQLite has no BOOLEAN type, so the store
  * tap reads a Django BooleanField column back as an INTEGER 0/1, while a JSON confirm capture off
@@ -195,6 +216,9 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
   if (fingerprint) receipts.push(fingerprint); // harness code-identity (built SHA) — minted by conjure
   /** @type {string[]} */
   const effectReceiptIds = [];
+  // Normalized in-place below (only when a binding gives us the observed value to normalize
+  // against); untouched when there's no binding — see normalizeEqualsClaimValue.
+  let expectedAfterRelation = claim ? claim.expectedAfterRelation : undefined;
 
   if (binding) {
     const before = binding.before;
@@ -205,6 +229,7 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
     // The entity is the recipe-declared observable this reproduction bound (§6), falling back to
     // the agent's own claim.entity, then a generic label — never a hardcoded n8n-shaped constant.
     const entity = binding.entity || (claim ? claim.entity : DEFAULT_EFFECT_ENTITY);
+    expectedAfterRelation = normalizeEqualsClaimValue(expectedAfterRelation, after);
     const delta = mintStoreDelta({
       id: 'store-delta',
       entity,
@@ -268,7 +293,9 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
           ...(quantified ? { quantified: true } : {}),
           effectCheck: {
             entity: claim.entity,
-            expectedAfterRelation: claim.expectedAfterRelation,
+            // claim truthy here => expectedAfterRelation started as claim.expectedAfterRelation
+            // (required, never undefined) and normalizeEqualsClaimValue preserves that.
+            expectedAfterRelation: /** @type {{op:string, value?:any}} */ (expectedAfterRelation),
             deltaReceiptId: 'store-delta',
             confirmLegReceiptId: 'fresh-execution',
           },
