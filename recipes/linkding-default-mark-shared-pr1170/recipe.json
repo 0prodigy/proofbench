@@ -1,7 +1,7 @@
 {
   "kind": "pb-recipe-v1",
   "name": "linkding \"Add option to mark bookmarks as shared by default\" (PR #1170)",
-  "notes": "Cold-customer trial recipe (non-n8n, non-documenso). sissbruecker/linkding: self-hosted Django bookmark manager, single container, sqlite by default. PR #1170 adds UserProfile.default_mark_shared (migration 0048) and threads it into BookmarkForm.__init__'s GET-initial for the 'shared' checkbox on the new-bookmark form (bookmarks/forms.py). Discriminating walk: log in as the bootstrap superuser -> enable_sharing + default_mark_shared=True via /settings/update -> open /bookmarks/new -> type a URL, click Save WITHOUT touching the 'shared' checkbox -> persisted bookmarks_bookmark.shared must be 1. On the parent SHA the column/field/initial-wiring do not exist at all (migration 0048 absent), so the same walk cannot even set the precondition — the row that lands has shared=0 regardless, or the setup step itself 500s on the unknown profile field depending on Django's strict-vs-lenient form handling. merge_sha 6c874afff230ee16b1939b3d4e1fa370a4203f44's single parent_sha 723b843c1360f29bb5908a4a501af756e736f843 verified via GET https://api.github.com/repos/sissbruecker/linkding/commits/<merge_sha> (one parent -- linear history, no merge-commit two-parent ambiguity). version.txt at the merge SHA still reads 1.42.0 (version bump happens at release time, not per-PR, same pattern as the n8n 1.11.0-self-report/1.12.0-shipped gap already disclosed in recipes/n8n-form-trigger-pr7130); CHANGELOG.md confirms #1170 first ships in v1.43.0. FOUR pb gaps hit for real authoring/attempting this recipe (beyond the already-known n8n-shaped hardcoding in catch.mjs): (1) recipe.mjs's front_door.url_template validator hard-requires a literal {..} placeholder (the regex /\\{[^}]+\\}/) -- but this PR's front door is a STATIC creation-form path (/bookmarks/new) with no natural per-resource id to mint, unlike n8n's {webhook_id} or documenso's {document_id}. Worked around here by putting an inert 'marker' scalar in login.json purely so front_door.url_template's ?ref={marker} satisfies the static regex -- it is NEVER actually resolved because setup throws at the login step first (see gap 3), so this is schema theater, not a real placeholder. (2) conjure.mjs has no docker build --target field/flag anywhere in resolveImage() (code_identity/Conjure typedefs in recipe.mjs have no `target` property either) -- docker/default.Dockerfile's LAST stage is `linkding-plus` (installs chromium+node+a forked single-file-cli tarball for the optional HTML-snapshot feature), not the actual default `linkding` stage two FROMs earlier; pb is structurally forced to build the heavier, network-fetching, higher-blast-radius stage for ANY multi-stage Dockerfile shaped this way (a common pattern: default target, then an opt-in heavier variant appended after it in the same file). (3) conjure.mjs's httpReq (setup-step runner) hardcodes `Content-Type: application/json` + `JSON.stringify(body)` for every request and PARSES RESPONSES AS JSON ONLY (extractJsonPath walks res.json) -- it has no application/x-www-form-urlencoded or multipart mode and no HTML-response parsing. Django's session-cookie login (LinkdingLoginView) and the /settings/update profile-save endpoint are classic server-rendered form posts guarded by CSRF (csrfmiddlewaretoken, embedded in the login page's HTML, or the X-CSRFToken header) -- a JSON body populates neither request.POST nor the CSRF field/header, so Django's CsrfViewMiddleware is expected to 403 the very first setup step ('login') before the view ever runs, independent of credentials being correct. (4) Even granting (3) were fixed, SutHandle (conjure.mjs) never carries the setup dance's cookie jar (`jar` is a function-local Map, dropped when conjure() returns) and browserdrive.mjs's openBrowser()/client.navigate() has no add-cookie / login step -- so the LATER browser-drive leg (catch.mjs:582, client.navigate(handle.frontDoorUrl)) opens a brand-new, unauthenticated Selenium session with zero session carryover from conjure's setup login, and /bookmarks/new is @login_required -> the harness would land on /login/ instead of the bookmark form even if setup somehow succeeded. This generalizes the documenso recipe's already-disclosed 'session-cookie injection ... is the follow-up, not built here' beyond documenso's canvas case to ANY authenticated front door -- which is most of pb's own stated v1 scope ('a signed-in user performs a state-changing action').",
+  "notes": "Cold-customer trial recipe (non-n8n, non-documenso). sissbruecker/linkding: self-hosted Django bookmark manager, single container, sqlite by default. PR #1170 adds UserProfile.default_mark_shared (migration 0048) and threads it into BookmarkForm.__init__'s GET-initial for the 'shared' checkbox on the new-bookmark form (bookmarks/forms.py). Discriminating walk: log in as the bootstrap superuser -> enable_sharing + default_mark_shared=True via /settings/update -> open /bookmarks/new -> type a URL, click Save WITHOUT touching the 'shared' checkbox -> persisted bookmarks_bookmark.shared must be 1. On the parent SHA the column/field/initial-wiring do not exist at all (migration 0048 absent), so the same walk cannot even set the precondition — the row that lands has shared=0 regardless, or the setup step itself 500s on the unknown profile field depending on Django's strict-vs-lenient form handling. merge_sha 6c874afff230ee16b1939b3d4e1fa370a4203f44's single parent_sha 723b843c1360f29bb5908a4a501af756e736f843 verified via GET https://api.github.com/repos/sissbruecker/linkding/commits/<merge_sha> (one parent -- linear history, no merge-commit two-parent ambiguity). version.txt at the merge SHA still reads 1.42.0 (version bump happens at release time, not per-PR); CHANGELOG.md confirms #1170 first ships in v1.43.0.\n\nSLICE A+B MIGRATION (this pass): four of the five originally-disclosed gaps are now genuinely wired and applied here. (1) front_door.url_template's placeholder is now OPTIONAL (recipe.mjs) — the static creation-form path is used verbatim (/bookmarks/new), no more 'marker'-query schema theater. (2) code_identity.target is now a real field, threaded into `docker build --target` (conjure.mjs buildImageArgv) — set to the actual default stage 'linkding' (NOT 'linkding-plus', the heavier chromium+node opt-in variant two FROMs later in docker/default.Dockerfile) so pb builds the intended lightweight stage. (3a) setup/confirm steps now support content_type:'form' (application/x-www-form-urlencoded via URLSearchParams) — applied to 'login' and 'profile' below, the correct wire shape for Django's server-rendered forms (previously forced JSON, which populates neither request.POST nor CSRF). (3b) an HTML-regex capture ({from:'html',pattern}) is now available and used here (login_page step) to pull csrfmiddlewaretoken off the rendered login page. (4) SutHandle now exposes the setup dance's cookie jar (handle.cookies) and catch.mjs lands it into the browser via client.addCookie before navigating to the front door — so the browser-drive leg is no longer a guaranteed-unauthenticated session.\n\nTWO GAPS REMAIN, newly disclosed and NOT fixed here (out of scope for a recipe-only migration; both are code changes to conjure.mjs/catch.mjs, not JSON): (A) only a step's `path` is placeholder-templated (resolvePlaceholders) — `body`/`body_file` are used byte-verbatim, with no substitution from `captures`. So the csrf_token captured by 'login_page' below has nowhere to land in 'login's body_file (login.json is static) — Django's CsrfViewMiddleware is still expected to 403 the login POST live, independent of credentials. login.json/profile.json are therefore left without a csrfmiddlewaretoken field (adding a stale dummy value would fail identically and would be dishonest scaffolding). This generalizes to any Django/session-CSRF app in the corpus, not just linkding. (B) the confirm leg's HTML-regex capture (extractHtml, conjure.mjs) always returns a raw string (regex group 1, no coercion); this recipe's store-tap observable (bookmarks_bookmark.shared) is a raw, un-coerced sqlite integer (0/1). runConfirmLeg's effectHeld check is a strict `freshObserved === after`, so an HTML-captured string can never strictly equal a numeric store value — the confirm leg is therefore structurally unable to hold for ANY html-capture-vs-numeric-observable pairing, independent of whether the regex text below is exactly right. The 'read' confirm step's pattern is consequently a best-effort placeholder (I did not fetch the real rendered bookmark-list markup this slice, per the 'no live docker differentials this phase' instruction) — expect both the regex and the type-mismatch to need a follow-up fix during live validation. Until (A) and (B) land, this recipe is expected to CND live (walk may execute, but neither login nor the fresh confirm can be trusted to complete) — an honest CND, never a fabricated WORKS.",
   "code_identity": {
     "mode": "from_tree",
     "repo": "https://github.com/sissbruecker/linkding.git",
@@ -9,6 +9,7 @@
     "parent_sha": "723b843c1360f29bb5908a4a501af756e736f843",
     "dockerfile": "docker/default.Dockerfile",
     "context": ".",
+    "target": "linkding",
     "version_label": "1.42.0"
   },
   "conjure": {
@@ -23,35 +24,66 @@
     "setup_overlay": ["apt-get update && apt-get install -y sqlite3"]
   },
   "fresh_world": { "strategy": "recreate" },
-  "auth_preflight": { "method": "GET", "path": "/login/" },
   "setup": [
+    {
+      "id": "login_page",
+      "method": "GET",
+      "path": "/login/",
+      "capture": { "csrf_token": { "from": "html", "pattern": "name=\"csrfmiddlewaretoken\" value=\"([^\"]+)\"" } }
+    },
     {
       "id": "login",
       "method": "POST",
       "path": "/login/",
+      "content_type": "form",
       "body_file": "login.json"
     },
     {
       "id": "profile",
       "method": "POST",
       "path": "/settings/update",
+      "content_type": "form",
       "body_file": "profile.json"
     }
   ],
   "front_door": {
-    "url_template": "/bookmarks/new?ref={marker}",
-    "serves": "the authenticated 'Add bookmark' form (bookmarks/new.html) -- a single-page, server-rendered form with url/title/description/tags/unread/shared fields. The {marker} placeholder is schema theater (see notes gap 1/3): it is never actually resolved at runtime because the login setup step throws first."
+    "url_template": "/bookmarks/new",
+    "serves": "the authenticated 'Add bookmark' form (bookmarks/new.html) -- a single-page, server-rendered form with url/title/description/tags/unread/shared fields. No placeholder needed (slice A made front_door placeholders optional) — this is a static creation-form path, used verbatim."
   },
   "store_tap": {
     "engine": "sqlite",
     "db_path": "/etc/linkding/data/db.sqlite3",
     "busy_timeout_ms": 3000,
     "queries": {
-      "bookmarks": "SELECT id, url, shared, unread, owner_id FROM bookmarks_bookmark ORDER BY id DESC;"
+      "bookmarks": "SELECT id, shared FROM bookmarks_bookmark ORDER BY id DESC;"
+    },
+    "observables": {
+      "bookmarks": { "entity": "bookmarks_bookmark.newest_shared", "relation": "named-scalar", "field": "shared" }
     }
   },
+  "confirm": [
+    {
+      "id": "login_page",
+      "method": "GET",
+      "path": "/login/",
+      "capture": { "csrf_token": { "from": "html", "pattern": "name=\"csrfmiddlewaretoken\" value=\"([^\"]+)\"" } }
+    },
+    {
+      "id": "login",
+      "method": "POST",
+      "path": "/login/",
+      "content_type": "form",
+      "body_file": "login.json"
+    },
+    {
+      "id": "read",
+      "method": "GET",
+      "path": "/bookmarks/",
+      "capture": { "observed": { "from": "html", "pattern": "bookmark-item[\\s\\S]{0,400}?data-shared=\"(true|false|1|0)\"" } }
+    }
+  ],
   "drive": {
     "mode": "browser",
-    "reason": "the 'Add bookmark' front door is a plain server-rendered HTML form (url/title/shared checkbox + Save button) -- a real click/type/click walk, no canvas. Untested beyond conjure: catch.mjs always browser-drives (registry.mjs BROWSER_DRIVE_MODES) and the login-gated front door cannot be reached by that browser session (see notes gap 4)."
+    "reason": "the 'Add bookmark' front door is a plain server-rendered HTML form (url/title/shared checkbox + Save button) -- a real click/type/click walk, no canvas. Slice B lands the setup cookie jar into the browser (handle.cookies -> client.addCookie) before navigating, so the front door is now reachable in principle; whether login itself completes still depends on the disclosed CSRF gap (notes gap A)."
   }
 }
