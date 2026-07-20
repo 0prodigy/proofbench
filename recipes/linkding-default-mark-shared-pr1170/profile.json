@@ -1,4 +1,5 @@
 {
+  "csrfmiddlewaretoken": "{csrf_token}",
   "update_profile": "",
   "theme": "auto",
   "bookmark_date_display": "relative",

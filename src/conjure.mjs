@@ -140,6 +140,27 @@ export function resolvePlaceholders(template, lookup) {
 }
 
 /**
+ * Resolve `{name}` placeholders in a setup/confirm step's body — recursively, over string
+ * leaves only (object/array shape passes through unchanged) — via the same lookup + throw-if-
+ * unresolved contract as {@link resolvePlaceholders}. Previously `body`/`body_file` were sent
+ * byte-verbatim with no substitution from `captures`, so a capture like a CSRF token had nowhere
+ * to land (R1 gap A, `recipes/linkding-default-mark-shared-pr1170/recipe.json` notes).
+ * @param {any} node
+ * @param {(name:string)=>any} lookup
+ * @returns {any}
+ */
+export function resolveBodyPlaceholders(node, lookup) {
+  if (typeof node === 'string') return resolvePlaceholders(node, lookup);
+  if (Array.isArray(node)) return node.map((x) => resolveBodyPlaceholders(x, lookup));
+  if (node && typeof node === 'object') {
+    /** @type {Record<string,any>} */ const out = {};
+    for (const [k, v] of Object.entries(node)) out[k] = resolveBodyPlaceholders(v, lookup);
+    return out;
+  }
+  return node;
+}
+
+/**
  * Walk a simple `$.a.b` JSONPath (the capture syntax). Non-`$` paths and off-path reads
  * return undefined.
  * @param {any} obj
@@ -678,6 +699,7 @@ export async function conjure(recipeDir, opts = {}) {
       let body;
       if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
       else if (step.body !== undefined) body = step.body;
+      if (body !== undefined) body = resolveBodyPlaceholders(body, (n) => captures[n]);
       if (body !== undefined) collectScalars(body, bodyDerived);
       const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar, step.content_type);
       if (res.status < 200 || res.status >= 300) {

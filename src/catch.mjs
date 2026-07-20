@@ -39,7 +39,7 @@
  * confirm read. The honesty core (verdict/harness/evidence) stays FROZEN.
  */
 
-import { conjure, resolvePlaceholders, extractJsonPath, extractHtml, absorbSetCookies, encodeSetupBody } from './conjure.mjs';
+import { conjure, resolvePlaceholders, resolveBodyPlaceholders, extractJsonPath, extractHtml, absorbSetCookies, encodeSetupBody } from './conjure.mjs';
 import { registerReap, deregisterReap } from './reaper.mjs';
 import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
@@ -493,6 +493,13 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }
     let body;
     if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
     else if (step.body !== undefined) body = step.body;
+    if (body !== undefined) {
+      try {
+        body = resolveBodyPlaceholders(body, (n) => (n === 'value' ? afterValue : captures[n]));
+      } catch (e) {
+        return { reason: `confirm step "${step.id}" could not resolve its body: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
     const res = await confirmHttpReq(fetchFn, step.method, `${baseUrl}${path}`, body, jar, step.content_type);
     if (res.status < 200 || res.status >= 300) {
       return { reason: `confirm step "${step.id}" failed: HTTP ${res.status}` };

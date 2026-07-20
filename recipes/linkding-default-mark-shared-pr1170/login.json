@@ -1,4 +1,5 @@
 {
   "username": "pb-admin",
-  "password": "pb-Str0ngPassw0rd!"
+  "password": "pb-Str0ngPassw0rd!",
+  "csrfmiddlewaretoken": "{csrf_token}"
 }
