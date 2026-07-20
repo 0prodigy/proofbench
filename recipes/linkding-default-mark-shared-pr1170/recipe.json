@@ -39,6 +39,12 @@
       "body_file": "login.json"
     },
     {
+      "id": "profile_page",
+      "method": "GET",
+      "path": "/settings/",
+      "capture": { "csrf_token": { "from": "html", "pattern": "name=\"csrfmiddlewaretoken\" value=\"([^\"]+)\"" } }
+    },
+    {
       "id": "profile",
       "method": "POST",
       "path": "/settings/update",
