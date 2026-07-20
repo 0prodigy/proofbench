@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Proofbench — Your agents say it works. Proofbench proves it.</title>
-<meta name="description" content="Proofbench is an open-source harness that proves an AI agent's change actually works for a real user — a tri-state verdict the agent cannot fake, bound to the exact code that ran, with sealed replayable receipts." />
+<meta name="description" content="Proofbench is an open-source harness that proves an AI agent's change actually works for a real user — a tri-state verdict the agent cannot fake, bound to the exact code that ran, with sealed replayable receipts. Caught live: n8n PR #9157 — merge WORKS, parent DOES NOT WORK." />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M12 1.5 21.6 7v10L12 22.5 2.4 17V7Z' stroke='%230B6B44' stroke-width='1.4'/%3E%3Cpath d='M7.4 12.2 10.4 15.2 16.6 8.8' stroke='%230B6B44' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="assets/site.css" />
 <script>
@@ -51,7 +51,8 @@
       <div class="hero-copy">
         <p class="eyebrow">open-source · agent-verification harness</p>
         <h1>Your agents say it works. <span class="accent">Proofbench proves it.</span></h1>
-        <p class="hero-sub">The agent only ever <em>proposes</em>. A deterministic harness <em>disposes</em> — it brings your whole system to life, drives it like a hostile first user, taps the store out of the agent's reach, and returns one of three verdicts bound to the exact code that ran. The agent cannot write the verdict, fabricate the evidence, or touch the seal.</p>
+        <p class="hero-sub">The agent only ever <em>proposes</em>. A deterministic harness <em>disposes</em> — it conjures your app (builds and boots a disposable copy from the exact commit), runs the agent-proposed walk (the scripted user actions) in a real browser, taps the datastore out of the agent's reach, and seals the evidence (signs it, so any later edit is detectable). The agent cannot write the verdict, fabricate the evidence, or touch the seal.</p>
+        <p class="hero-sub">That record is real: <strong>n8n PR #9157</strong>, a webhook fix. The same user walk ran on the fix and on the build just before it. On the older build the submission never reached the store — the page said "Error in workflow" and the out-of-band store tap confirmed nothing persisted. Verdict: <strong>DOES NOT WORK</strong>, failure reproduced 2 of 2. With the fix: <strong>WORKS</strong>, reproduced 2 of 2. That differential is The Catch.</p>
         <div class="hero-cta">
           <a class="btn btn-primary" href="#catch">See The Catch</a>
           <a class="btn btn-ghost" href="https://github.com/0prodigy/proofbench">
@@ -60,7 +61,7 @@
           </a>
         </div>
         <div class="hero-install code-frame">
-          <code>node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</code>
+          <code>node src/cli.mjs prove recipes/n8n-respondwebhook-formtrigger-pr9157</code>
           <button class="copy-btn" type="button" data-copy-target aria-label="Copy prove command">Copy</button>
         </div>
       </div>
@@ -68,23 +69,23 @@
       <!-- Certificate: filled state is the accessible, no-JS, reduced-motion default. -->
       <div class="cert" id="cert">
         <div class="cert-head">
-          <h3 class="cert-title">Verification Record</h3>
-          <span class="cert-serial">Case pb-3ddc176</span>
+          <h3 class="cert-title">Differential Record</h3>
+          <span class="cert-serial">n8n PR #9157 · sealed ed25519</span>
         </div>
         <dl class="cert-fields">
-          <div class="cert-field"><dt>Target</dt><dd data-field="target" data-value="n8n #7130">n8n #7130</dd></div>
-          <div class="cert-field"><dt>Merge</dt><dd data-field="merge" data-value="3ddc176">3ddc176</dd></div>
-          <div class="cert-field"><dt>Parent</dt><dd data-field="parent" data-value="869b8f14">869b8f14</dd></div>
-          <div class="cert-field"><dt>Verdict</dt><dd data-field="verdict" data-value="WORKS">WORKS</dd></div>
-          <div class="cert-field"><dt>Diff</dt><dd data-field="diff" data-value="PASS">PASS</dd></div>
+          <div class="cert-field"><dt>Claim</dt><dd data-field="target" data-value="form submit persists">form submit persists</dd></div>
+          <div class="cert-field"><dt>Merge</dt><dd data-field="merge" data-value="WORKS" title="merge 6c63cd971162d3f018b210d221ffc2a56535550a">WORKS</dd></div>
+          <div class="cert-field"><dt>Parent</dt><dd data-field="parent" data-value="DOES NOT WORK" title="parent 91e59120c49802bbeb545809527d223af1967f9d">DOES NOT WORK</dd></div>
+          <div class="cert-field"><dt>Reproduced</dt><dd data-field="repro" data-value="2 of 2, fresh worlds">2 of 2, fresh worlds</dd></div>
+          <div class="cert-field"><dt>Differential</dt><dd data-field="diff" data-value="PASS — the fix is why">PASS — the fix is why</dd></div>
         </dl>
         <div class="cert-seal-slot" id="cert-seal" aria-hidden="true">
-          <svg class="seal-svg" viewBox="0 0 100 100" role="img" aria-label="Proofbench seal, verdict WORKS, differential PASS">
+          <svg class="seal-svg" viewBox="0 0 100 100" role="img" aria-label="Proofbench seal, merge WORKS, parent DOES NOT WORK, differential PASS">
             <defs><path id="seal-arc" d="M 50,50 m -37,0 a 37,37 0 1,1 74,0 a 37,37 0 1,1 -74,0" /></defs>
             <circle cx="50" cy="50" r="46" />
             <circle cx="50" cy="50" r="33" />
-            <text><textPath href="#seal-arc" startOffset="2">PROOFBENCH · WORKS · SEALED ·</textPath></text>
-            <text x="50" y="54" text-anchor="middle" font-size="11" font-weight="600">PASS</text>
+            <text><textPath href="#seal-arc" startOffset="2">PROOFBENCH · THE CATCH · SEALED ·</textPath></text>
+            <text x="50" y="53" text-anchor="middle" font-size="9" font-weight="600">CAUGHT</text>
           </svg>
         </div>
       </div>
@@ -93,9 +94,9 @@
       <div class="term" id="term-demo">
         <div class="term-chrome">
           <span class="term-dot f"></span><span class="term-dot n"></span><span class="term-dot p"></span>
-          <span class="term-title">pb prove · n8n-form-trigger-pr7130</span>
+          <span class="term-title">pb prove · n8n-respondwebhook-formtrigger-pr9157</span>
         </div>
-        <div class="term-body" id="term-body"><div class="term-line t-cmd">node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</div><div class="term-line t-out">pb prove — MERGE 3ddc176dfa2d → WORKS</div><div class="term-line t-pass">  WORKS: 1 confirmed effect claim, reproduced k=2</div><div class="term-line t-out">pb prove — PARENT 869b8f14caaf → COULD_NOT_DETERMINE</div><div class="term-line t-notrun">  note: Node not found: n8n-nodes-base.formTrigger</div><div class="term-line t-out">pb prove — DIFFERENTIAL (the PR IS why it works)</div><div class="term-line t-out">  merge  3ddc176dfa2d: WORKS</div><div class="term-line t-out">  parent 869b8f14caaf: COULD_NOT_DETERMINE</div><div class="term-line t-pass">  DIFFERENTIAL: PASS  (merge=WORKS ∧ parent≠WORKS)</div></div>
+        <div class="term-body" id="term-body"><div class="term-line t-cmd">node src/cli.mjs prove recipes/n8n-respondwebhook-formtrigger-pr9157</div><div class="term-line t-out">pb prove — MERGE 6c63cd971162 → WORKS</div><div class="term-line t-pass">  WORKS: 1 confirmed effect claim, reproduced k=2</div><div class="term-line t-out">pb prove — PARENT 91e59120c498 → DOES_NOT_WORK</div><div class="term-line t-fail">  FALSIFIED form-submit-persists-execution (effect): harness delta does not satisfy the expected relation</div><div class="term-line t-out">pb prove — DIFFERENTIAL (the PR IS why it works)</div><div class="term-line t-out">  merge  6c63cd971162: WORKS</div><div class="term-line t-fail">  parent 91e59120c498: DOES_NOT_WORK</div><div class="term-line t-pass">  DIFFERENTIAL: PASS  (PASS iff merge=WORKS ∧ parent≠WORKS)</div></div>
       </div>
     </div>
   </section>
@@ -201,33 +202,92 @@ EVIDENCE SEALED ed25519</code></pre>
       <div class="section-head">
         <p class="eyebrow">the magic moment</p>
         <h2>The Catch: the PR <em>is</em> why it works.</h2>
-        <p>A single WORKS proves nothing — the feature might have worked before your change. So Proofbench runs the same user walk on both the merge and its parent and reports the <strong>differential</strong>. It passes only when the merge WORKS and the parent does not.</p>
+        <p>A single WORKS proves nothing — the feature might have worked before your change. So Proofbench runs the identical agent-proposed walk on the merge and on its parent and reports the <strong>differential</strong>. It passes only when the merge WORKS and the parent does not. Three real recipes have run this, on two different stacks — the sealed evidence for each is linked below.</p>
       </div>
 
-      <div class="diff-grid">
-        <div class="diff-leg is-primary">
-          <span class="diff-leg-label">merge · 3ddc176</span>
-          <span class="badge badge-works">WORKS</span>
-          <span class="diff-leg-note">Submit → <code>execution_entity.max_id</code> 0 → 1, confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</span>
+      <div class="case-block">
+        <h3 class="case-block-title">n8n · PR #9157 <span class="badge badge-dnw">the catch</span></h3>
+        <p class="case-block-desc">A webhook form-submit fix. The identical walk ran on the fix and on the commit just before it.</p>
+        <div class="diff-grid">
+          <div class="diff-leg is-primary">
+            <span class="diff-leg-label">merge</span>
+            <span class="badge badge-works">WORKS</span>
+            <span class="diff-leg-note">Submit → <code>execution_entity.max_id</code> 0 → 1, confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</span>
+          </div>
+          <div class="diff-op">
+            <span class="diff-verb">∧</span>
+            <span>merge WORKS<br/>parent ≠ WORKS</span>
+          </div>
+          <div class="diff-leg">
+            <span class="diff-leg-label">parent</span>
+            <span class="badge badge-dnw">DOES NOT WORK</span>
+            <span class="diff-leg-note">Same walk, same store tap: the page said "Error in workflow" and <code>execution_entity.max_id</code> never moved. Falsified, reproduced 2 of 2 — not a one-off.</span>
+          </div>
         </div>
-        <div class="diff-op">
-          <span class="diff-verb">∧</span>
-          <span>merge WORKS<br/>parent ≠ WORKS</span>
-        </div>
-        <div class="diff-leg">
-          <span class="diff-leg-label">parent · 869b8f14</span>
-          <span class="badge badge-cnd">COULD NOT DETERMINE</span>
-          <span class="diff-leg-note">The Form Trigger node does not exist yet at the parent SHA — the workflow will not activate. Absent code is never convicted; the honest answer is CND.</span>
-        </div>
+        <div class="diff-result"><span>DIFFERENTIAL:</span> <span class="pass">PASS</span> <span style="color:var(--ink-3);">— the fix is why it works, not the environment.</span></div>
+        <details class="case-raw">
+          <summary>Raw commit identity + sealed evidence</summary>
+          <p>merge <code>6c63cd971162d3f018b210d221ffc2a56535550a</code> · parent <code>91e59120c49802bbeb545809527d223af1967f9d</code></p>
+          <p><a href="cases/n8n-respondwebhook-formtrigger-pr9157.merge.json">merge receipt (sealed JSON)</a> · <a href="cases/n8n-respondwebhook-formtrigger-pr9157.parent.json">parent receipt (sealed JSON)</a></p>
+        </details>
       </div>
 
-      <div class="diff-result">
-        <span>DIFFERENTIAL:</span> <span class="pass">PASS</span>
-        <span style="color:var(--ink-3);">— the change is why the feature works, not the environment.</span>
+      <div class="case-block">
+        <h3 class="case-block-title">linkding · PR #1170 <span class="badge badge-dnw">the second catch</span></h3>
+        <p class="case-block-desc">A second repo, a different stack entirely — Django + sqlite, not Node — proof the Catch is a general pattern, not an n8n-shaped trick.</p>
+        <div class="diff-grid">
+          <div class="diff-leg is-primary">
+            <span class="diff-leg-label">merge</span>
+            <span class="badge badge-works">WORKS</span>
+            <span class="diff-leg-note">A visitor with <code>default_mark_shared</code> set saves a bookmark without touching the checkbox → <code>bookmarks_bookmark.newest_shared</code> = 1, confirmed fresh, reproduced k=2.</span>
+          </div>
+          <div class="diff-op">
+            <span class="diff-verb">∧</span>
+            <span>merge WORKS<br/>parent ≠ WORKS</span>
+          </div>
+          <div class="diff-leg">
+            <span class="diff-leg-label">parent</span>
+            <span class="badge badge-dnw">DOES NOT WORK</span>
+            <span class="diff-leg-note">Identical walk, identical profile setting: the saved bookmark's <code>shared</code> column comes back 0 — the default never applied. Falsified, reproduced 2 of 2.</span>
+          </div>
+        </div>
+        <div class="diff-result"><span>DIFFERENTIAL:</span> <span class="pass">PASS</span> <span style="color:var(--ink-3);">— the fix is why it works, not the environment.</span></div>
+        <details class="case-raw">
+          <summary>Raw commit identity + sealed evidence</summary>
+          <p>merge <code>6c874afff230ee16b1939b3d4e1fa370a4203f44</code> · parent <code>723b843c1360f29bb5908a4a501af756e736f843</code></p>
+          <p><a href="cases/linkding-default-mark-shared-pr1170.merge.json">merge receipt (sealed JSON)</a> · <a href="cases/linkding-default-mark-shared-pr1170.parent.json">parent receipt (sealed JSON)</a></p>
+        </details>
+      </div>
+
+      <div class="case-block">
+        <h3 class="case-block-title">n8n · PR #7130 <span class="badge badge-cnd">the earned green</span></h3>
+        <p class="case-block-desc">The first differential Proofbench ever ran, before the harness could catch a live regression. The parent lands honest CND because the feature's code doesn't exist yet there — not because anything broke.</p>
+        <div class="diff-grid">
+          <div class="diff-leg is-primary">
+            <span class="diff-leg-label">merge</span>
+            <span class="badge badge-works">WORKS</span>
+            <span class="diff-leg-note">Submit → <code>execution_entity.max_id</code> 0 → 1, confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</span>
+          </div>
+          <div class="diff-op">
+            <span class="diff-verb">∧</span>
+            <span>merge WORKS<br/>parent ≠ WORKS</span>
+          </div>
+          <div class="diff-leg">
+            <span class="diff-leg-label">parent</span>
+            <span class="badge badge-cnd">COULD NOT DETERMINE</span>
+            <span class="diff-leg-note">The Form Trigger node doesn't exist yet at the parent SHA — the workflow can't even activate. Absent code is never convicted; the honest answer is CND.</span>
+          </div>
+        </div>
+        <div class="diff-result"><span>DIFFERENTIAL:</span> <span class="pass">PASS</span> <span style="color:var(--ink-3);">— the change is why the feature works, not the environment.</span></div>
+        <details class="case-raw">
+          <summary>Raw commit identity + sealed evidence</summary>
+          <p>merge <code>3ddc176dfa2d3d99a328a29a3a8613e35ff456a0</code> · parent <code>869b8f14caaf334f011bcd87d3928dc8ab41f62e</code></p>
+          <p><a href="cases/n8n-form-trigger-pr7130.merge.json">merge receipt (sealed JSON)</a> · <a href="cases/n8n-form-trigger-pr7130.parent.json">parent receipt (sealed JSON)</a> · <a href="case.html">interactive case file (self-verifies offline)</a></p>
+        </details>
       </div>
 
       <div class="hero-cta" style="margin-top:var(--space-4);">
-        <a class="btn btn-primary" href="case.html">Open the sealed case file</a>
+        <a class="btn btn-primary" href="case.html">Open the interactive case file (#7130)</a>
       </div>
     </div>
   </section>
@@ -299,8 +359,8 @@ EVIDENCE SEALED ed25519</code></pre>
 cd proofbench
 
 # run the same user walk on merge and parent, report the differential
-node src/cli.mjs prove recipes/n8n-form-trigger-pr7130</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
-          <p class="demo-caption">merge 3ddc176: WORKS · parent 869b8f14: COULD_NOT_DETERMINE · DIFFERENTIAL: PASS</p>
+node src/cli.mjs prove recipes/n8n-respondwebhook-formtrigger-pr9157</code></pre><button class="copy-btn" type="button" data-copy-target>Copy</button></div>
+          <p class="demo-caption">merge 6c63cd97: WORKS · parent 91e59120: DOES_NOT_WORK · DIFFERENTIAL: PASS — reproduced 2/2</p>
         </div>
         <div class="tab-panel" id="panel-gate" role="tabpanel" aria-labelledby="tab-gate">
           <div class="code-frame"><pre><code># the malicious-driver gate: proves a lying agent cannot manufacture a WORKS

@@ -1,13 +1,26 @@
-# Proof-of-Work for AI Change — working name TBD
+# Proofbench
 
 > When an AI agent says a feature is done, get **proof, not its word**, that a real user
 > can actually do the thing — across every service it touches — as a verdict the agent
 > **cannot fake**, with evidence you can **replay**.
 
-**Status:** built and green on branch `product-v1` — honesty core frozen, one live
-differential Catch executed (n8n #7130). What is proven vs pending is tracked in
-`docs/ROADMAP.md`; agents read `CLAUDE.md` first. Prior code and ADRs live on `main` /
-`ENG-17397-proofbench-k8s-attach` and are historical only.
+**Status:** built and green on branch `product-v1` (`node --test` all passing,
+`node src/cli.mjs gate` PASS, `npm run typecheck` clean). Three full differential
+Catches have executed live and sealed — each pair committed under `site/cases/`:
+
+- **n8n #9157** — merge `6c63cd97` = WORKS ∧ parent `91e59120` = DOES NOT WORK
+  (reproduced 2/2, falsified — the first live regression catch).
+- **linkding #1170** — merge `6c874aff` = WORKS ∧ parent `723b843c` = DOES NOT WORK
+  (reproduced 2/2) — a second repo, a different stack (Django + sqlite, not Node).
+- **n8n #7130** — merge `3ddc176d` = WORKS ∧ parent `869b8f14` = COULD NOT DETERMINE
+  (feature absent at the parent — the earned green before the harness could catch a
+  live regression). Interactive, self-verifying case file at `site/case.html`.
+
+Everything past these three recipes — a second execution engine beyond docker-compose
+conjure, a Postgres-class discriminator, the k8s/Lyric attach path, `orgconfig.mjs`
+org-level policy — is designed, not yet exercised live, and reported as such (not
+claimed) in `docs/ROADMAP.md`. Agents read `CLAUDE.md` first. Prior code and ADRs live
+on `main` / `ENG-17397-proofbench-k8s-attach` and are historical only.
 
 ---
 
