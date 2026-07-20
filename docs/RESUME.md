@@ -28,8 +28,19 @@ clean):**
   falsified) — the first non-n8n differential Catch (Django/sqlite stack), closing R1's proof-case
   bar. Sealed receipts committed under `site/cases/`.
 - **Re-gate n8n #7130 + #9157 post-migration** (`faeee96`): both differentials re-run on the new
-  generic path — fresh sealed receipts, byte-different but same verdicts (the migration didn't
-  change the answer).
+  generic path. #7130 matched the committed verdicts on the first run (merge=WORKS ∧
+  parent=CND). #9157 did NOT match on its first run — both legs came back CND (the live
+  claude-CLI proposer returned a malformed/mismatched walk on one leg; `catch.mjs`'s
+  propose-once-freeze calls the seam exactly once per leg with no retry, so a single bad
+  proposal collapses the whole leg to CND). Confirmed this was proposer flakiness, not a
+  migration regression, by reading `catch.mjs`/`proposer.mjs` (the migration commits never
+  touched `validateArgs`/`validateClaim`) then re-running the SAME differential with zero code
+  changes: merge=WORKS ∧ parent=DOES_NOT_WORK (kFail=2/2), matching the previously committed
+  evidence exactly. Fresh sealed receipts committed either way (`faeee96`'s message discloses
+  the retry). **Known gap surfaced, not yet fixed:** the live claude-CLI proposer path has no
+  retry on a malformed single proposal — a future slice should either retry-once-per-leg or
+  widen `validateProposal`'s tolerance, since today one bad LLM reply costs a CND instead of a
+  WORKS/DNW (an adoption-metric hit: CND rate, not a false-WORKS).
 - **Site + README truth pass** (`caca762`): hero + certificate lead with the #9157 catch, not a
   green PASS; three real case blocks (#9157 catch, #1170 second catch, #7130 earned-green/CND) each
   linked to committed `site/cases/*.json`; README verdicts traced to committed evidence.
