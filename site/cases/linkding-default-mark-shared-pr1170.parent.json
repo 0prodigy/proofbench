@@ -1,0 +1,208 @@
+{
+  "intent": "A visitor who has enabled sharing and set 'default_mark_shared' in their profile opens the 'Add bookmark' form, fills in a URL, and clicks Save WITHOUT touching the 'shared' checkbox — the walk must leave that checkbox untouched, exactly as the form loaded it. The persisted bookmark's shared column must equal 1 (the checkbox's own default state, driven by the profile setting — never explicitly toggled by the walk itself).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "newly saved bookmark inherits shared=1 default from profile setting without the walk touching the checkbox",
+      "effectCheck": {
+        "entity": "bookmarks_bookmark.newest_shared",
+        "expectedAfterRelation": {
+          "op": "equals",
+          "value": 1
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": [
+        "store-delta",
+        "browser-drive",
+        "fresh-execution"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "id": "fingerprint",
+      "kind": "fingerprint",
+      "provenance": "harness",
+      "data": {
+        "mode": "from_tree",
+        "sha": "723b843c1360f29bb5908a4a501af756e736f843",
+        "image_digest": "sha256:7e913b2b161f169c6d6d11be7bbcccc6dae94d66cd2edcfd57a94849175e8470",
+        "version_label": "1.42.0",
+        "image_ref_or_tag": "pb-sut-linkding-add-option-to-mark-bookmarks-as-shared-by-default-pr-1170-723b843",
+        "container": "pb-sut-linkding-add-option-to-mark-bookmarks-as-shared-by-default-pr-1170-mrtnszqf"
+      },
+      "sha256": "52ad209b2d51b338683bc958c3100a66ee82ff82123c58fedafe7cef43d58508"
+    },
+    {
+      "id": "store-delta",
+      "kind": "delta",
+      "provenance": "harness",
+      "identity": "form-visitor",
+      "sourcePR": false,
+      "data": {
+        "entity": "bookmarks_bookmark.newest_shared",
+        "after": 0,
+        "countBefore": 0,
+        "countAfter": 1
+      },
+      "sha256": "856a0b544e9565de64fe6cbdf8580826205cd70aec7507cf5c55635b6accd36a"
+    },
+    {
+      "id": "browser-drive",
+      "kind": "attempt",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "request": "browser-drive http://localhost:9096/bookmarks/new",
+        "frontDoorUrl": "http://localhost:9096/bookmarks/new",
+        "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:9096"
+          },
+          {
+            "op": "addCookie",
+            "name": "csrftoken"
+          },
+          {
+            "op": "addCookie",
+            "name": "sessionid"
+          },
+          {
+            "op": "addCookie",
+            "name": "messages"
+          },
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:9096/bookmarks/new"
+          },
+          {
+            "op": "execute",
+            "script": "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerC…",
+            "value": [
+              {
+                "name": "csrfmiddlewaretoken",
+                "tag": "input",
+                "type": "hidden"
+              },
+              {
+                "name": "csrfmiddlewaretoken",
+                "tag": "input",
+                "type": "hidden"
+              },
+              {
+                "name": "csrfmiddlewaretoken",
+                "tag": "input",
+                "type": "hidden"
+              },
+              {
+                "name": "auto_close",
+                "tag": "input",
+                "type": "hidden"
+              },
+              {
+                "name": "url",
+                "tag": "input",
+                "type": "text"
+              },
+              {
+                "name": "tag_string",
+                "tag": "input",
+                "type": "text"
+              },
+              {
+                "name": "title",
+                "tag": "input",
+                "type": "text"
+              },
+              {
+                "name": "description",
+                "tag": "textarea",
+                "type": "text"
+              },
+              {
+                "name": "notes",
+                "tag": "textarea",
+                "type": "text"
+              },
+              {
+                "name": "unread",
+                "tag": "input",
+                "type": "checkbox"
+              },
+              {
+                "name": "shared",
+                "tag": "input",
+                "type": "checkbox"
+              },
+              {
+                "name": null,
+                "tag": "input",
+                "type": "submit"
+              }
+            ]
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"url\"]",
+            "elementId": "f.E535DFEDE7FEB053F8E7C96C9F054330.d.75DB5C3D12A7A0E3DCE50CD819F142A0.e.10"
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"url\"]",
+            "elementId": "f.E535DFEDE7FEB053F8E7C96C9F054330.d.75DB5C3D12A7A0E3DCE50CD819F142A0.e.10"
+          },
+          {
+            "op": "type",
+            "elementId": "f.E535DFEDE7FEB053F8E7C96C9F054330.d.75DB5C3D12A7A0E3DCE50CD819F142A0.e.10",
+            "text": "https://example.com/first-visit"
+          },
+          {
+            "op": "find",
+            "css": "input[type=\"submit\"]",
+            "elementId": "f.E535DFEDE7FEB053F8E7C96C9F054330.d.75DB5C3D12A7A0E3DCE50CD819F142A0.e.23"
+          },
+          {
+            "op": "click",
+            "elementId": "f.E535DFEDE7FEB053F8E7C96C9F054330.d.75DB5C3D12A7A0E3DCE50CD819F142A0.e.23"
+          },
+          {
+            "op": "execute",
+            "script": "return document.body ? document.body.innerText : \"\"",
+            "value": "LINKDING\n \nBookmarks\nFilters\nArchive\nDelete\nAdd tags\nRemove tags\nMark as read\nMark as unread\nShare\nUnshare\nRefresh from website\nExecute\nhttps://example.com/first-visit\nToday\n|\nView\nEdit\nArchive\nRemove\nPrevious\n1\nNext"
+          }
+        ],
+        "observed": "LINKDING\n \nBookmarks\nFilters\nArchive\nDelete\nAdd tags\nRemove tags\nMark as read\nMark as unread\nShare\nUnshare\nRefresh from website\nExecute\nhttps://example.com/first-visit\nToday\n|\nView\nEdit\nArchive\nRemove\nPrevious\n1\nNext",
+        "after": 0
+      },
+      "sha256": "02d69fcb035044f92dad3caeaff8cbc2f4f79eb6217c8a565b54e5530c1b1e17"
+    },
+    {
+      "id": "fresh-execution",
+      "kind": "fresh-session",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "entity": "bookmarks_bookmark.newest_shared",
+        "after": 0,
+        "observed": 0
+      },
+      "sha256": "64d921d183d3b6a74a1ec1ef87a50f25a1e92fee6db5598e43b4d6d393f1a855"
+    }
+  ],
+  "reproduce": {
+    "k": 0,
+    "n": 2,
+    "kFail": 2
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "5033f5d3202076fb5b7c77f1e7306b4e66897280306462c6220e54a19845b4d6",
+    "signature": "H7vKRARBSMGV4AwvP77UnzD/vfoXRNpwD4h8OBaAmtJjmT+0BRbN8FOorrrogVA17UfNruMgDKpzf55/LE4QBg==",
+    "publicKey": "MCowBQYDK2VwAyEAm9ZmIuvjDU0h6K4buC22hRHX03EOQgKHoZiiF6jd/tk="
+  }
+}
