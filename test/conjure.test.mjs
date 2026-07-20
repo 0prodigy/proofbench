@@ -8,7 +8,18 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { overlayDockerfile, resolvePlaceholders, extractJsonPath, parseComposeName, overlayPlan, composeArgv } from '../src/conjure.mjs';
+import {
+  overlayDockerfile,
+  resolvePlaceholders,
+  extractJsonPath,
+  extractHtml,
+  parseComposeName,
+  overlayPlan,
+  composeArgv,
+  buildImageArgv,
+  encodeSetupBody,
+  absorbSetCookies,
+} from '../src/conjure.mjs';
 
 test('conjure: overlayDockerfile injects build_overlay before the corepack line, RUN-prefixing bare shell lines', () => {
   const df = ['FROM n8nio/base:18', 'WORKDIR /src', 'RUN corepack enable && corepack prepare --activate', 'RUN pnpm install'].join('\n');
@@ -183,4 +194,51 @@ test('conjure: composeArgv builds `compose -p <project> -f <f>… <verb>` with t
     'up', '-d', '--build',
   ]);
   assert.deepEqual(composeArgv('p', ['/a.yml'], ['down', '-v']), ['compose', '-p', 'p', '-f', '/a.yml', 'down', '-v']);
+});
+
+test('conjure: buildImageArgv reproduces the exact prior argv when no target is set, and inserts --target before the context when disclosed (§1)', () => {
+  assert.deepEqual(buildImageArgv('/co/Dockerfile.pb-overlay', 'pb-sut-tag', '/co/ctx'), [
+    'build', '-f', '/co/Dockerfile.pb-overlay', '-t', 'pb-sut-tag', '/co/ctx',
+  ]);
+  assert.deepEqual(buildImageArgv('/co/Dockerfile.pb-overlay', 'pb-sut-tag', '/co/ctx', { n8nDevBuildArg: true }), [
+    'build', '-f', '/co/Dockerfile.pb-overlay', '-t', 'pb-sut-tag', '--build-arg', 'N8N_RELEASE_TYPE=dev', '/co/ctx',
+  ]);
+  assert.deepEqual(buildImageArgv('/co/Dockerfile.pb-overlay', 'pb-sut-tag', '/co/ctx', { target: 'builder' }), [
+    'build', '-f', '/co/Dockerfile.pb-overlay', '-t', 'pb-sut-tag', '--target', 'builder', '/co/ctx',
+  ]);
+});
+
+test('conjure: encodeSetupBody defaults to JSON (byte-identical to before) and encodes "form" as URLSearchParams (§2)', () => {
+  assert.deepEqual(encodeSetupBody(undefined, { a: 1, b: 'x' }), { contentTypeHeader: 'application/json', encoded: JSON.stringify({ a: 1, b: 'x' }) });
+  assert.deepEqual(encodeSetupBody('json', { a: 1 }), { contentTypeHeader: 'application/json', encoded: '{"a":1}' });
+  assert.deepEqual(encodeSetupBody('form', { username: 'admin', password: 'p@ss w/ord' }), {
+    contentTypeHeader: 'application/x-www-form-urlencoded',
+    encoded: new URLSearchParams({ username: 'admin', password: 'p@ss w/ord' }).toString(),
+  });
+});
+
+test('conjure: extractHtml runs the capture regex over the response body and returns group 1, or undefined off-match (§3)', () => {
+  const html = '<input type="hidden" name="csrfmiddlewaretoken" value="abc123XYZ">';
+  assert.equal(extractHtml(html, 'name="csrfmiddlewaretoken" value="([^"]+)"'), 'abc123XYZ');
+  assert.equal(extractHtml(html, 'name="nope" value="([^"]+)"'), undefined);
+  assert.equal(extractHtml('', 'x'), undefined);
+});
+
+test('conjure: absorbSetCookies collects Set-Cookie into the jar regardless of status — a 302 (Django login redirect) included (§4)', () => {
+  const headers = new Headers();
+  headers.append('set-cookie', 'csrftoken=abc123; Path=/; SameSite=Lax');
+  headers.append('set-cookie', 'sessionid=xyz789; HttpOnly; Path=/');
+  const res = new Response(null, { status: 302, headers });
+  const jar = new Map();
+  absorbSetCookies(res, jar);
+  assert.equal(jar.get('csrftoken'), 'abc123');
+  assert.equal(jar.get('sessionid'), 'xyz789');
+});
+
+test('conjure: absorbSetCookies never lets a cleared (empty-value) cookie wipe the jar', () => {
+  const jar = new Map([['csrftoken', 'abc123']]);
+  const headers = new Headers();
+  headers.append('set-cookie', 'csrftoken=');
+  absorbSetCookies(new Response(null, { status: 200, headers }), jar);
+  assert.equal(jar.get('csrftoken'), 'abc123'); // unchanged
 });

@@ -53,6 +53,9 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * @property {string} baseUrl e.g. http://localhost:5678
  * @property {string} frontDoorUrl the user-facing URL, placeholders resolved
  * @property {Record<string,any>} captures values captured from setup responses
+ * @property {{name:string, value:string}[]} cookies the setup dance's cookie jar, exposed for a
+ *   later drive slice (e.g. carrying a Django csrftoken/sessionid into a driven request);
+ *   last-write-wins order
  * @property {import('./types.mjs').Receipt[]} receipts [fingerprint, bringup] — harness provenance
  * @property {string|null} _cloneDir temp from-tree checkout to reap on teardown (null otherwise)
  * @property {ComposeInfo|null} _compose compose project + -f files to `down -v` on teardown (null for run mode)
@@ -151,6 +154,20 @@ export function extractJsonPath(obj, path) {
     cur = cur[key];
   }
   return cur;
+}
+
+/**
+ * Run an HTML-capture regex (<=200 chars, one capture group — validated at recipe load) over a
+ * setup response body and return its first capture group, or undefined if it doesn't match.
+ * The alternative capture source to {@link extractJsonPath} (e.g. Django's csrfmiddlewaretoken
+ * hidden input, which a JSON-only capture cannot reach).
+ * @param {string} text
+ * @param {string} pattern
+ * @returns {string|undefined}
+ */
+export function extractHtml(text, pattern) {
+  const m = new RegExp(pattern).exec(text || '');
+  return m ? m[1] : undefined;
 }
 
 /** @param {string} s @returns {string} docker-safe slug */
@@ -269,6 +286,25 @@ export function composeArgv(project, files, verb) {
   return args.concat(verb);
 }
 
+/**
+ * Build a `docker build -f <overlayPath> -t <tag> [--build-arg …] [--target <target>] <context>`
+ * argv for a from_tree run-mode SUT. `--target` (§1) lets a recipe pick a non-default build stage
+ * (e.g. linkding's real default stage isn't the last; the last stage's build 404s on an upstream
+ * bug). Omitting opts.target reproduces the exact prior argv (byte-identical for shipped recipes).
+ * @param {string} overlayPath
+ * @param {string} tag
+ * @param {string} context absolute docker build context dir
+ * @param {{n8nDevBuildArg?:boolean, target?:string}} [opts]
+ * @returns {string[]}
+ */
+export function buildImageArgv(overlayPath, tag, context, opts = {}) {
+  const args = ['build', '-f', overlayPath, '-t', tag];
+  if (opts.n8nDevBuildArg) args.push('--build-arg', 'N8N_RELEASE_TYPE=dev');
+  if (opts.target) args.push('--target', opts.target);
+  args.push(context);
+  return args;
+}
+
 // ---------------------------------------------------------------------------
 // Docker / git / HTTP (child_process + global fetch; mirrors phase2's helper)
 // ---------------------------------------------------------------------------
@@ -321,15 +357,51 @@ function cookieHeader(jar) {
 }
 
 /**
+ * Absorb any Set-Cookie headers from a setup-step response into the jar (last-write-wins;
+ * never let a cleared cookie wipe the jar). Status-independent by design — `readSetCookies`
+ * reads headers regardless of status, so a 3xx redirect (e.g. Django's post-login redirect)
+ * absorbs cookies exactly like a 2xx.
+ * @param {Response} res
+ * @param {Map<string,string>} jar
+ */
+export function absorbSetCookies(res, jar) {
+  for (const c of readSetCookies(res)) {
+    const first = c.split(';')[0];
+    const eq = first.indexOf('=');
+    if (eq > 0) {
+      const name = first.slice(0, eq).trim();
+      const value = first.slice(eq + 1).trim();
+      if (name && value) jar.set(name, value);
+    }
+  }
+}
+
+/**
+ * Encode a setup-step body per content_type: 'json' (default, byte-identical to before) sends
+ * `application/json` + JSON.stringify; 'form' sends `application/x-www-form-urlencoded` via
+ * URLSearchParams over the body object (the shape a Django-style HTML form login expects).
+ * @param {string|undefined} contentType 'json' (default) | 'form'
+ * @param {any} body
+ * @returns {{contentTypeHeader:string, encoded:string}}
+ */
+export function encodeSetupBody(contentType, body) {
+  if (contentType === 'form') {
+    return { contentTypeHeader: 'application/x-www-form-urlencoded', encoded: new URLSearchParams(body).toString() };
+  }
+  return { contentTypeHeader: 'application/json', encoded: JSON.stringify(body) };
+}
+
+/**
  * A single setup HTTP request through a minimal cookie jar: sends the accumulated cookies,
  * absorbs any Set-Cookie from the response, returns status + parsed JSON.
  * @param {string} method
  * @param {string} url
- * @param {any} body inline JSON body, or undefined for none
+ * @param {any} body inline body, or undefined for none
  * @param {Map<string,string>} jar
+ * @param {string} [contentType] 'json' (default) | 'form' — how `body` is encoded on the wire
  * @returns {Promise<{status:number, text:string, json:any}>}
  */
-async function httpReq(method, url, body, jar) {
+async function httpReq(method, url, body, jar, contentType) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
@@ -340,19 +412,12 @@ async function httpReq(method, url, body, jar) {
     /** @type {RequestInit} */
     const init = { method, headers, signal: controller.signal, redirect: 'manual' };
     if (body !== undefined && body !== null) {
-      headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(body);
+      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body);
+      headers['Content-Type'] = contentTypeHeader;
+      init.body = encoded;
     }
     const res = await fetch(url, init);
-    for (const c of readSetCookies(res)) {
-      const first = c.split(';')[0];
-      const eq = first.indexOf('=');
-      if (eq > 0) {
-        const name = first.slice(0, eq).trim();
-        const value = first.slice(eq + 1).trim();
-        if (name && value) jar.set(name, value); // never let a cleared cookie wipe the jar
-      }
-    }
+    absorbSetCookies(res, jar);
     const text = await res.text();
     let json;
     try {
@@ -441,10 +506,12 @@ async function resolveImage(docker, recipe, onCloneDir, buildSha) {
     const base = deriveBaseImage(overlaid);
     if (base) docker.run(['pull', base], PULL_TIMEOUT_MS); // best-effort; the build pulls FROM if this misses
 
-    const buildArgs = ['build', '-f', overlayPath, '-t', tag];
-    // Supply the M1-disclosed dev build-type only when the tree declares that arg (derived, not blind).
-    if (/^\s*ARG\s+N8N_RELEASE_TYPE\b/im.test(overlaid)) buildArgs.push('--build-arg', 'N8N_RELEASE_TYPE=dev');
-    buildArgs.push(join(cloneDir, ci.context));
+    // Supply the M1-disclosed dev build-type only when the tree declares that arg (derived, not
+    // blind); pass --target only when the recipe discloses one (§1).
+    const buildArgs = buildImageArgv(overlayPath, tag, join(cloneDir, ci.context), {
+      n8nDevBuildArg: /^\s*ARG\s+N8N_RELEASE_TYPE\b/im.test(overlaid),
+      target: ci.target,
+    });
     const build = docker.run(buildArgs, BUILD_TIMEOUT_MS, { env: { ...process.env, DOCKER_BUILDKIT: '1' } });
     if (build.status !== 0) throw new Error(`conjure: docker build failed (exit ${build.status}): ${tail(build.stderr || build.stdout)}`);
   }
@@ -612,12 +679,14 @@ export async function conjure(recipeDir, opts = {}) {
       if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
       else if (step.body !== undefined) body = step.body;
       if (body !== undefined) collectScalars(body, bodyDerived);
-      const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar);
+      const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar, step.content_type);
       if (res.status < 200 || res.status >= 300) {
         throw new Error(`conjure: setup step "${step.id}" failed: HTTP ${res.status} ${tail(res.text, 300)}`);
       }
       if (step.capture) {
-        for (const [name, jp] of Object.entries(step.capture)) captures[name] = extractJsonPath(res.json, jp);
+        for (const [name, cap] of Object.entries(step.capture)) {
+          captures[name] = typeof cap === 'string' ? extractJsonPath(res.json, cap) : extractHtml(res.text, cap.pattern);
+        }
       }
     }
 
@@ -658,6 +727,7 @@ export async function conjure(recipeDir, opts = {}) {
       baseUrl,
       frontDoorUrl,
       captures,
+      cookies: Array.from(jar, ([name, value]) => ({ name, value })),
       receipts: [fingerprint, bringup],
       _cloneDir: cloneDir,
       _compose: composeInfo,

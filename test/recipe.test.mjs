@@ -145,6 +145,82 @@ test('recipe: a minimal recipe with all required fields validates', () => {
   }
 });
 
+test('recipe: code_identity.target (from_tree only) is optional and passes through when present', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.code_identity = { mode: 'from_tree', repo: 'r', sha: 's', dockerfile: 'd', context: '.', target: 'builder' };
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.equal(/** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity).target, 'builder');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: setup step content_type "form" validates and defaults to unset (json) when absent', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.setup = [{ id: 's1', method: 'POST', path: '/x', body: { a: 1 }, content_type: 'form' }];
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.equal(r.setup[0].content_type, 'form');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: setup step capture accepts an {from:"html", pattern} regex capture alongside the existing JSONPath string form', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.setup = [{
+    id: 's1',
+    method: 'GET',
+    path: '/x',
+    capture: { csrf_token: { from: 'html', pattern: 'name="csrfmiddlewaretoken" value="([^"]+)"' }, id: '$.data.id' },
+  }];
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.deepEqual(r.setup[0].capture.csrf_token, { from: 'html', pattern: 'name="csrfmiddlewaretoken" value="([^"]+)"' });
+    assert.equal(r.setup[0].capture.id, '$.data.id'); // JSONPath capture stays untouched
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: confirm is validated with the exact setup step schema and defaults to empty when absent', () => {
+  const withConfirm = /** @type {any} */ (validRecipe());
+  withConfirm.confirm = [{ id: 'c1', method: 'GET', path: '/y', content_type: 'form', capture: { tok: { from: 'html', pattern: '(x)' } } }];
+  let dir = writeRecipeDir(withConfirm);
+  try {
+    const r = loadRecipe(dir);
+    assert.equal(r.confirm.length, 1);
+    assert.equal(r.confirm[0].id, 'c1');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const withoutConfirm = /** @type {any} */ (validRecipe());
+  delete withoutConfirm.confirm;
+  dir = writeRecipeDir(withoutConfirm);
+  try {
+    assert.deepEqual(loadRecipe(dir).confirm, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: front_door.url_template with no {placeholder} validates and is used verbatim (optional per §5)', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.front_door = { url_template: '/static/create' };
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.equal(r.front_door.url_template, '/static/create');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('recipe: a malformed recipe fails loudly, each error naming the bad field', () => {
   /** @type {Array<{label:string, mutate:(o:any)=>void, match:RegExp}>} */
   const cases = [
@@ -158,7 +234,13 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'non-array setup', mutate: (o) => (o.setup = 'nope'), match: /setup/ },
     { label: 'setup step with both body and body_file', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', body: {}, body_file: 'b.json' }]), match: /both/ },
     { label: 'setup body_file missing on disk', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', body_file: 'nope.json' }]), match: /body_file.*missing|missing.*body_file/ },
-    { label: 'front_door url_template without placeholder', mutate: (o) => (o.front_door = { url_template: '/static' }), match: /url_template.*placeholder/ },
+    { label: 'front_door missing url_template', mutate: (o) => (o.front_door = {}), match: /front_door\.url_template/ },
+    { label: 'from_tree empty target', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', sha: 's', dockerfile: 'd', context: '.', target: '' }), match: /code_identity\.target/ },
+    { label: 'setup step bogus content_type', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', body: { a: 1 }, content_type: 'xml' }]), match: /content_type/ },
+    { label: 'html capture missing pattern', mutate: (o) => (o.setup = [{ id: 's', method: 'GET', path: '/x', capture: { csrf: { from: 'html' } } }]), match: /pattern/ },
+    { label: 'html capture pattern too long', mutate: (o) => (o.setup = [{ id: 's', method: 'GET', path: '/x', capture: { csrf: { from: 'html', pattern: 'a'.repeat(201) } } }]), match: /200/ },
+    { label: 'html capture pattern does not compile', mutate: (o) => (o.setup = [{ id: 's', method: 'GET', path: '/x', capture: { csrf: { from: 'html', pattern: '(unterminated' } } }]), match: /compile/ },
+    { label: 'confirm step missing id', mutate: (o) => (o.confirm = [{ method: 'POST', path: '/x' }]), match: /confirm\[0\]\.id/ },
     { label: 'bogus conjure.mode', mutate: (o) => (o.conjure.mode = 'swarm'), match: /conjure\.mode/ },
     { label: 'compose mode missing compose_file', mutate: (o) => (o.conjure.mode = 'compose'), match: /conjure\.compose_file/ },
     { label: 'missing store_tap', mutate: (o) => delete o.store_tap, match: /store_tap/ },

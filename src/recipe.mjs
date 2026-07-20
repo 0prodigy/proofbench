@@ -30,6 +30,8 @@ import { join } from 'node:path';
  * @property {string} dockerfile path to the Dockerfile (relative to the checkout)
  * @property {string} context docker build context
  * @property {string[]} [build_overlay] disclosed build-time fixups (e.g. the corepack signature fix)
+ * @property {string} [target] docker build `--target` stage (e.g. when a tree's default/last stage
+ *   isn't the buildable one — a real linkding blocker: its last stage 404s on an upstream bug)
  * @property {string} [version_label] version this SHA self-reports (may differ from the release tag)
  */
 
@@ -87,12 +89,25 @@ import { join } from 'node:path';
  * @property {string} path request path (may reference a prior capture, e.g. `/x/{workflow_id}`)
  * @property {any} [body] inline JSON body (mutually exclusive with body_file)
  * @property {string} [body_file] path (relative to recipeDir) to a JSON body file
- * @property {Record<string,string>} [capture] name -> JSONPath extracted from the response
+ * @property {'json'|'form'} [content_type] how `body` is encoded on the wire; defaults to 'json'.
+ *   'form' sends `application/x-www-form-urlencoded` (URLSearchParams over the body object) —
+ *   the shape a Django-style HTML form login expects.
+ * @property {Record<string,string|HtmlCapture>} [capture] name -> a JSONPath string read from the
+ *   JSON response (default, unchanged), or an {@link HtmlCapture} regex read from the response HTML
+ *   (e.g. Django's csrfmiddlewaretoken hidden input)
+ */
+
+/**
+ * An alternative, HTML-regex capture source (the JSONPath string form stays the default).
+ * @typedef {Object} HtmlCapture
+ * @property {'html'} from
+ * @property {string} pattern a regex (<=200 chars) with one capture group; group 1 is captured
  */
 
 /**
  * @typedef {Object} FrontDoor
- * @property {string} url_template user-facing URL with a `{placeholder}` for a minted id
+ * @property {string} url_template user-facing URL. A `{placeholder}` for a minted id is OPTIONAL —
+ *   a template with none (e.g. a static creation form) is used verbatim.
  * @property {string} [serves] what the front door serves (documentation)
  */
 
@@ -171,6 +186,8 @@ import { join } from 'node:path';
  * @property {FreshWorld} fresh_world
  * @property {AuthPreflight} [auth_preflight]
  * @property {SetupStep[]} setup disclosed REST setup steps — may be empty when the SUT self-bootstraps (e.g. documenso auto-runs its Prisma migrations at boot, so it needs no REST dance)
+ * @property {SetupStep[]} [confirm] optional post-drive REST confirm steps — same step schema as
+ *   `setup` (validated identically here; a later slice walks it). Absent defaults to empty.
  * @property {FrontDoor} front_door
  * @property {StoreTap} store_tap
  * @property {Drive} drive how the front door is driven (absent defaults to 'deferred', an honest CND)
@@ -194,6 +211,49 @@ function isStringArray(v) {
 /** @param {any} v @returns {boolean} */
 function isObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Validate an array of setup-shaped steps: id/method/path, body XOR body_file (resolved on
+ * disk), optional content_type ('json' default | 'form'), and optional per-name capture — a
+ * JSONPath string (default, unchanged) or an {from:'html', pattern} regex read from the response
+ * HTML. Shared verbatim by `setup` and `confirm` (§6): the confirm array is the SAME step shape,
+ * just walked by a later slice — this loader only validates it.
+ * @param {any} steps
+ * @param {string} field 'setup' or 'confirm'
+ * @param {string} recipeDir
+ */
+function validateSteps(steps, field, recipeDir) {
+  if (!Array.isArray(steps)) bad(field, 'must be an array of steps when present');
+  steps.forEach((/** @type {any} */ step, /** @type {number} */ i) => {
+    if (!isObject(step)) bad(`${field}[${i}]`, 'must be an object');
+    if (typeof step.id !== 'string' || !step.id) bad(`${field}[${i}].id`, 'must be a non-empty string');
+    if (typeof step.method !== 'string' || !step.method) bad(`${field}[${i}].method`, 'must be a non-empty string');
+    if (typeof step.path !== 'string' || !step.path) bad(`${field}[${i}].path`, 'must be a non-empty string');
+    if (step.body !== undefined && step.body_file !== undefined) bad(`${field}[${i}]`, 'must not set both body and body_file');
+    if (step.body_file !== undefined) {
+      if (typeof step.body_file !== 'string' || !step.body_file) bad(`${field}[${i}].body_file`, 'must be a non-empty string');
+      if (!existsSync(join(recipeDir, step.body_file))) bad(`${field}[${i}].body_file`, `references a missing file: ${step.body_file}`);
+    }
+    if (step.content_type !== undefined && step.content_type !== 'json' && step.content_type !== 'form') {
+      bad(`${field}[${i}].content_type`, `must be 'json' or 'form' when present (got ${JSON.stringify(step.content_type)})`);
+    }
+    if (step.capture !== undefined) {
+      if (!isObject(step.capture)) bad(`${field}[${i}].capture`, 'must be an object of name -> JSONPath string (default) or {from:"html",pattern}');
+      for (const [name, cap] of Object.entries(step.capture)) {
+        if (typeof cap === 'string') continue; // JSONPath — the existing, default form (unchanged)
+        if (!isObject(cap)) bad(`${field}[${i}].capture.${name}`, 'must be a JSONPath string or an {from:"html",pattern} object');
+        if (cap.from !== 'html') bad(`${field}[${i}].capture.${name}.from`, `must be 'html' when capture is an object (got ${JSON.stringify(cap.from)})`);
+        if (typeof cap.pattern !== 'string' || !cap.pattern) bad(`${field}[${i}].capture.${name}.pattern`, "is required for from:'html'");
+        if (cap.pattern.length > 200) bad(`${field}[${i}].capture.${name}.pattern`, `must be <= 200 chars (got ${cap.pattern.length})`);
+        try {
+          new RegExp(cap.pattern);
+        } catch (e) {
+          bad(`${field}[${i}].capture.${name}.pattern`, `must compile as a RegExp: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+  });
 }
 
 /**
@@ -230,6 +290,7 @@ export function loadRecipe(recipeDir) {
     }
     if (ci.parent_sha !== undefined && (typeof ci.parent_sha !== 'string' || !ci.parent_sha)) bad('code_identity.parent_sha', 'must be a non-empty string when present (the differential baseline SHA)');
     if (ci.build_overlay !== undefined && !isStringArray(ci.build_overlay)) bad('code_identity.build_overlay', 'must be a string[]');
+    if (ci.target !== undefined && (typeof ci.target !== 'string' || !ci.target)) bad('code_identity.target', 'must be a non-empty string when present (the docker build --target stage)');
   } else if (ci.mode === 'pinned_image') {
     for (const f of ['image_ref', 'image_digest']) {
       if (typeof ci[f] !== 'string' || !ci[f]) bad(`code_identity.${f}`, "is required for mode 'pinned_image'");
@@ -279,24 +340,19 @@ export function loadRecipe(recipeDir) {
   // (documenso auto-runs its Prisma migrations at container boot; there is no REST setup dance
   // to model, and inventing one would be a forced fit). When present it must be an array.
   if (r.setup === undefined) r.setup = [];
-  else if (!Array.isArray(r.setup)) bad('setup', 'must be an array of steps when present');
-  r.setup.forEach((/** @type {any} */ step, /** @type {number} */ i) => {
-    if (!isObject(step)) bad(`setup[${i}]`, 'must be an object');
-    if (typeof step.id !== 'string' || !step.id) bad(`setup[${i}].id`, 'must be a non-empty string');
-    if (typeof step.method !== 'string' || !step.method) bad(`setup[${i}].method`, 'must be a non-empty string');
-    if (typeof step.path !== 'string' || !step.path) bad(`setup[${i}].path`, 'must be a non-empty string');
-    if (step.body !== undefined && step.body_file !== undefined) bad(`setup[${i}]`, 'must not set both body and body_file');
-    if (step.body_file !== undefined) {
-      if (typeof step.body_file !== 'string' || !step.body_file) bad(`setup[${i}].body_file`, 'must be a non-empty string');
-      if (!existsSync(join(recipeDir, step.body_file))) bad(`setup[${i}].body_file`, `references a missing file: ${step.body_file}`);
-    }
-  });
+  else validateSteps(r.setup, 'setup', recipeDir);
 
-  // front_door — URL template carrying a minted id
+  // confirm — optional post-drive REST steps (§6), validated with EXACTLY the setup step schema
+  // (same id/method/path/body/content_type/capture rules). Absent defaults to empty, like setup;
+  // no executor here — a later slice walks it.
+  if (r.confirm === undefined) r.confirm = [];
+  else validateSteps(r.confirm, 'confirm', recipeDir);
+
+  // front_door — user-facing URL. A `{placeholder}` for a minted id is OPTIONAL (§5): a template
+  // with none (e.g. a static creation form) is used verbatim — no forced schema theater.
   const fd = r.front_door;
   if (!isObject(fd)) bad('front_door', 'must be an object');
   if (typeof fd.url_template !== 'string' || !fd.url_template) bad('front_door.url_template', 'must be a non-empty string');
-  if (!/\{[^}]+\}/.test(fd.url_template)) bad('front_door.url_template', 'must contain a {...} placeholder for the minted id');
 
   // store_tap — the out-of-band persisted-leg read; engine-discriminated (sqlite | postgres).
   const st = r.store_tap;
