@@ -200,6 +200,11 @@ import { join } from 'node:path';
  * @property {'pb-recipe-v1'} kind
  * @property {string} name
  * @property {string} [notes] human notes (e.g. how a front-door placeholder is minted)
+ * @property {string} [intent] the behavioral claim the agent proposes a walk against — REQUIRED
+ *   for a recipe whose discriminating behavior isn't "persists an execution" (runCatch's generic
+ *   default, n8n-shaped); e.g. linkding #1170's default_mark_shared needs "...WITHOUT touching the
+ *   shared checkbox" or a cold proposer has no signal against clicking it. Prose, not a DSL — the
+ *   walk itself stays agent-proposed.
  * @property {CodeIdentity} code_identity
  * @property {Conjure} conjure
  * @property {FreshWorld} fresh_world
@@ -340,6 +345,7 @@ export function loadRecipe(recipeDir) {
   // Identity
   if (r.kind !== 'pb-recipe-v1') bad('kind', `must be 'pb-recipe-v1' (got ${JSON.stringify(r.kind)})`);
   if (typeof r.name !== 'string' || !r.name.trim()) bad('name', 'must be a non-empty string');
+  if (r.intent !== undefined && (typeof r.intent !== 'string' || !r.intent.trim())) bad('intent', 'must be a non-empty string when present');
 
   // code_identity — discriminated union on `mode`
   const ci = r.code_identity;

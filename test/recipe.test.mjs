@@ -264,6 +264,7 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
   const cases = [
     { label: 'wrong kind', mutate: (o) => (o.kind = 'nope'), match: /kind/ },
     { label: 'empty name', mutate: (o) => (o.name = '   '), match: /name/ },
+    { label: 'empty intent', mutate: (o) => (o.intent = '   '), match: /intent/ },
     { label: 'bogus code_identity.mode', mutate: (o) => (o.code_identity = { mode: 'bogus' }), match: /code_identity\.mode/ },
     { label: 'from_tree missing sha', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', dockerfile: 'd', context: '.' }), match: /code_identity\.sha/ },
     { label: 'from_tree empty parent_sha', mutate: (o) => (o.code_identity = { mode: 'from_tree', repo: 'r', sha: 's', dockerfile: 'd', context: '.', parent_sha: '' }), match: /code_identity\.parent_sha/ },

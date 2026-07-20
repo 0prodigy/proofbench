@@ -286,8 +286,9 @@ async function main() {
     // that identical {walk, claim} at the single parent (baseline). The differential stays
     // apples-to-apples (only the built SHA differs) and LLM non-determinism is irrelevant.
     const llmFn = selectLlmFn();
-    const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha, llmFn });
-    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined, llmFn });
+    const intent = recipe.intent;
+    const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha, llmFn, intent });
+    const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined, llmFn, intent });
     process.stdout.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
     process.stdout.write(renderCatch('PARENT', parent.sha, parent) + '\n');
     const pass = merge.verdict.state === Verdict.WORKS && parent.verdict.state !== Verdict.WORKS;
