@@ -112,6 +112,23 @@ import { join } from 'node:path';
  */
 
 /**
+ * How catch.mjs reduces a named store-tap query's rows to the ONE comparable value a claim's
+ * `entity` binds (§6 generic effect binding) — engine-shaped, replacing the n8n-only autoincrement
+ * assumption: `row-count` (the number of rows returned — a listing query), `max-id` (the max of an
+ * id-like field/column across rows — n8n's autoincrement shape), `named-scalar` (the sole value of
+ * the first row's first field/column — a query that already aggregates in SQL, e.g. documenso's
+ * `SELECT count(*) AS n …`). Keyed by the SAME name as `store_tap.queries`; absent for a given
+ * query name falls back to an engine-honest default (sqlite: max-id over 'id'; postgres:
+ * named-scalar over column 0) so an already-shipped recipe with no `observables` block loads and
+ * binds exactly as it did before this field existed. See {@link resolveObservable}.
+ * @typedef {Object} ObservableSpec
+ * @property {string} [entity] the observable name an agent's claim binds (defaults to `<queryName>.<relation>`)
+ * @property {'row-count'|'max-id'|'named-scalar'} [relation] engine-shaped reduction (default per-engine, see above)
+ * @property {string} [field] sqlite/k8s-exec row-object field read for 'max-id' (default 'id') or 'named-scalar' (default: the row's first key)
+ * @property {number} [column] postgres tuple column index read for 'max-id' or 'named-scalar' (default 0)
+ */
+
+/**
  * The out-of-band STORE TAP, engine-discriminated — two disclosed classes:
  *   - sqlite (n8n): a store FILE inside the SUT container. Rollback-journal mode means a
  *     reader can collide with a writer, so busy_timeout_ms is REQUIRED and a transient
@@ -124,6 +141,7 @@ import { join } from 'node:path';
  * @property {string} db_path path to the store file inside the SUT container
  * @property {number} busy_timeout_ms busy-timeout for the out-of-band read (rollback-journal contention)
  * @property {Record<string,string>} queries name -> static read-only query (non-empty)
+ * @property {Record<string,ObservableSpec>} [observables] per-query engine-shaped relation (§6); absent per-query defaults to max-id over 'id'
  * @property {boolean} [transient_lock_is_expected] a transient "database is locked" is expected, cleared by the timeout — never a SUT failure
  */
 
@@ -134,6 +152,7 @@ import { join } from 'node:path';
  * @property {string} user postgres role (docker exec over the local unix socket = trust auth, no password)
  * @property {string} db database name
  * @property {Record<string,string>} queries name -> static read-only query (non-empty); PascalCase identifiers MUST be double-quoted in the query string (Prisma does not remap them to snake_case)
+ * @property {Record<string,ObservableSpec>} [observables] per-query engine-shaped relation (§6); absent per-query defaults to named-scalar over column 0
  * @property {number} [busy_timeout_ms] optional and unused for postgres — MVCC readers never block on writers
  * @property {boolean} [transient_lock_is_expected]
  */
@@ -256,6 +275,47 @@ function validateSteps(steps, field, recipeDir) {
   });
 }
 
+const OBSERVABLE_RELATIONS = ['row-count', 'max-id', 'named-scalar'];
+
+/**
+ * Validate `store_tap.observables` (sqlite | postgres only — k8s-exec has its own nonce-scoped
+ * `entity`): each key must name a declared query, each spec an object with an optional
+ * entity/relation/field/column of the right shape.
+ * @param {any} observables
+ * @param {string[]} queryNames
+ */
+function validateObservables(observables, queryNames) {
+  if (!isObject(observables)) bad('store_tap.observables', 'must be an object of query name -> observable spec when present');
+  for (const [qn, spec] of Object.entries(observables)) {
+    if (!queryNames.includes(qn)) bad(`store_tap.observables.${qn}`, `does not match any store_tap.queries name (${queryNames.join(', ')})`);
+    if (!isObject(spec)) bad(`store_tap.observables.${qn}`, 'must be an object');
+    if (spec.entity !== undefined && (typeof spec.entity !== 'string' || !spec.entity)) bad(`store_tap.observables.${qn}.entity`, 'must be a non-empty string when present');
+    if (spec.relation !== undefined && !OBSERVABLE_RELATIONS.includes(spec.relation)) {
+      bad(`store_tap.observables.${qn}.relation`, `must be one of ${OBSERVABLE_RELATIONS.join('|')} when present (got ${JSON.stringify(spec.relation)})`);
+    }
+    if (spec.field !== undefined && (typeof spec.field !== 'string' || !spec.field)) bad(`store_tap.observables.${qn}.field`, 'must be a non-empty string when present');
+    if (spec.column !== undefined && typeof spec.column !== 'number') bad(`store_tap.observables.${qn}.column`, 'must be a number when present');
+  }
+}
+
+/**
+ * Resolve the OBSERVABLE spec for a named store-tap query (§6) — the recipe-declared override (if
+ * any, `store_tap.observables[queryName]`) merged over an engine-honest default: sqlite defaults to
+ * 'max-id' over the row's 'id' field (n8n's autoincrement shape); postgres defaults to
+ * 'named-scalar' over the first row's first column (documenso's `SELECT count(*) AS n` shape). An
+ * already-shipped recipe with no `observables` block resolves to exactly its prior hardcoded
+ * behavior. PURE — no I/O.
+ * @param {StoreTap} storeTap
+ * @param {string} queryName
+ * @returns {{entity:string, relation:'row-count'|'max-id'|'named-scalar', field?:string, column?:number}}
+ */
+export function resolveObservable(storeTap, queryName) {
+  const override = /** @type {any} */ (storeTap).observables && /** @type {any} */ (storeTap).observables[queryName];
+  const relation = (override && override.relation) || (storeTap.engine === 'postgres' ? 'named-scalar' : 'max-id');
+  const entity = (override && override.entity) || `${queryName}.${relation}`;
+  return { entity, relation, field: override && override.field, column: override && override.column };
+}
+
 /**
  * Load and validate `<recipeDir>/recipe.json` as a pb-recipe-v1. Throws an Error naming
  * the first missing/invalid field; never returns a half-validated recipe.
@@ -362,11 +422,13 @@ export function loadRecipe(recipeDir) {
   if (st.engine === 'sqlite') {
     if (typeof st.db_path !== 'string' || !st.db_path) bad('store_tap.db_path', "is required for engine 'sqlite'");
     if (typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', "is required (a number) for engine 'sqlite' (the rollback-journal busy-timeout)");
+    if (st.observables !== undefined) validateObservables(st.observables, Object.keys(st.queries));
   } else if (st.engine === 'postgres') {
     for (const f of ['container', 'user', 'db']) {
       if (typeof st[f] !== 'string' || !st[f]) bad(`store_tap.${f}`, "is required for engine 'postgres'");
     }
     if (st.busy_timeout_ms !== undefined && typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', 'must be a number when present (optional for postgres — MVCC needs no busy-timeout)');
+    if (st.observables !== undefined) validateObservables(st.observables, Object.keys(st.queries));
   } else if (st.engine === 'k8s-exec') {
     // The out-of-band, store-DIRECT read for the argo/note-DAG leg (LIVE-GATED). It MUST be a store
     // engine, NEVER an app endpoint (requiredFix 4): a url/base_url/endpoint field is rejected so the

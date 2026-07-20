@@ -12,10 +12,12 @@
  *                                 FROZEN at the first reproduction and replayed VERBATIM thereafter
  *   executeWalk                 → map the validated steps to browser-drive ops (find/type/click/…),
  *                                 recording the real walk (TOOL attempt; the app's own surface)
- *   give n8n a beat             → poll the store tap until the execution persists (not a bare sleep)
+ *   give the SUT a beat         → poll the store tap until the recipe-declared OBSERVABLE moves
+ *                                 (§6, engine-shaped: row-count/max-id/named-scalar; not a bare sleep)
  *   storetap AFTER              → the write-set-bound delta (harness ground truth)
- *   fresh REST re-read          → a genuinely FRESH session (new login) re-observes the same
- *                                 execution via the app's OWN API (TOOL confirm leg, §1.1 dual-leg)
+ *   fresh confirm leg           → a genuinely FRESH session walks the recipe's OWN `confirm[]`
+ *                                 REST steps (same schema as `setup`, §6) to re-observe the same
+ *                                 observable via the app's OWN surface (TOOL confirm leg, §1.1 dual-leg)
  *   teardown                    → reap the browser sidecar + the SUT (no orphans)
  *
  * The walk + effect claim are the AGENT's judgement, entering only through the proposer seam and
@@ -37,19 +39,19 @@
  * confirm read. The honesty core (verdict/harness/evidence) stays FROZEN.
  */
 
-import { conjure } from './conjure.mjs';
+import { conjure, resolvePlaceholders, extractJsonPath, extractHtml, absorbSetCookies, encodeSetupBody } from './conjure.mjs';
 import { registerReap, deregisterReap } from './reaper.mjs';
 import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
 import { mintWorkflowAttempt, stampManifest, digestBinds, nonceFromRows } from './argoworkflows.mjs';
 import { resolveCatchSeams, resolveArgoSeams } from './registry.mjs';
 import { proposeWalkAndClaim, ALLOWED_ARGO_OPS } from './proposer.mjs';
-import { loadRecipe } from './recipe.mjs';
+import { loadRecipe, resolveObservable } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
 import { verdict } from './verdict.mjs';
 import { Verdict } from './types.mjs';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -60,8 +62,8 @@ const EXECUTION_POLL_MS = 500; // spacing between store-tap re-reads while settl
 const HTTP_TIMEOUT_MS = 10000;
 const CONFIRM_TEXT_SETTLE_MS = 1500; // best-effort wait for the form's confirmation to render (informational only)
 
-/** The store entity the effect is bound to — the newest execution_entity id (n8n autoincrement). */
-const EFFECT_ENTITY = 'execution_entity.max_id';
+/** The fallback store-effect label when neither the binding iteration nor the claim names one (mirrors assembleArgoBundle's 'argo.effect'). */
+const DEFAULT_EFFECT_ENTITY = 'store.effect';
 
 /** Actor/session identities: the configuring operator vs the anonymous form visitor (distinct). */
 const ACTOR_IDENTITY = 'pb-operator';
@@ -72,17 +74,19 @@ const VISITOR_IDENTITY = 'form-visitor';
  * `executed:false` means the walk could not even run (conjure/drive threw = feature-absent) → it
  * contributes to NEITHER k nor kFail (an honest could-not-execute, not a conviction). `executed:true`
  * with `effectHeld:false` is a real negative (the walk ran, nothing persisted/confirmed) → kFail.
+ *
+ * `before`/`after` are the recipe-declared OBSERVABLE's value (§6, engine-shaped: row-count | max-id |
+ * named-scalar — see recipe.mjs resolveObservable), not an n8n-specific autoincrement id; `entity` is
+ * the observable's name (from the SAME recipe declaration) the store-delta receipt binds.
  * @typedef {Object} CatchIteration
  * @property {boolean} executed the browser walk ran end-to-end against a live SUT
- * @property {boolean} effectHeld a NEW execution persisted AND the fresh app-surface re-read agreed
- * @property {number} beforeId the newest execution id observed BEFORE the walk (0 when none)
- * @property {number} [afterId] the newest execution id observed AFTER (when one persisted)
- * @property {number} [freshObserved] the execution id re-read via a FRESH REST session (== afterId to confirm)
- * @property {number} countBefore rows in execution_entity before
- * @property {number} countAfter rows in execution_entity after
- * @property {string} [workflowId] the persisted execution's workflowId (should match the conjured workflow)
- * @property {string} [status] the persisted execution status (informational)
- * @property {string} [nonce] optional informational marker recorded on the delta/attempt (the typed value itself now lives in the frozen walk)
+ * @property {boolean} effectHeld the observable moved AND a fresh-session re-observation agreed
+ * @property {any} before the observable's value BEFORE the walk
+ * @property {any} [after] the observable's value AFTER the walk (when it changed)
+ * @property {string} [entity] the recipe-declared observable name this reproduction bound (recipe.mjs resolveObservable)
+ * @property {any} [freshObserved] the value re-read via a FRESH, recipe-declared confirm-leg session (== after to confirm)
+ * @property {number} countBefore rows the store-tap query returned before
+ * @property {number} countAfter rows the store-tap query returned after
  * @property {import('./browserdrive.mjs').DriveStep[]} [driveSteps] the recorded browser walk
  * @property {string} [observedText] the confirmation text observed in the DOM (informational)
  * @property {string} [frontDoorUrl] the front door the walk drove
@@ -106,43 +110,35 @@ const VISITOR_IDENTITY = 'form-visitor';
 // ---------------------------------------------------------------------------
 
 /**
- * The newest execution id across store-tap rows (0 when there are none). Coerces the id to a
- * Number so the sqlite id (a number) and the REST id (a string) denote the same execution.
- * @param {any[]} rows sqlite store-tap rows (objects carrying `id`)
- * @returns {number}
+ * Reduce store-tap rows to the ONE comparable value a claim's entity binds, per the recipe-declared,
+ * engine-shaped relation (recipe.mjs resolveObservable) — replacing n8n's hardcoded autoincrement
+ * assumption: `row-count` (rows.length — a listing query), `max-id` (the max of an id-like
+ * field/column, coerced to Number — n8n's autoincrement shape), `named-scalar` (the first row's
+ * first field/column, verbatim). Rows are the raw store-tap shape for the engine: sqlite/k8s-exec
+ * rows are objects (named columns, e.g. sqlite3 -json); postgres rows are string[] tuples (no
+ * column names, tapPostgres). An empty read is a real "nothing yet" (0 for row-count/max-id,
+ * undefined for named-scalar), never a throw.
+ * @param {any[]} rows
+ * @param {{relation:'row-count'|'max-id'|'named-scalar', field?:string, column?:number}} spec
+ * @returns {any}
  */
-export function maxId(rows) {
+export function observedValue(rows, spec) {
+  const list = rows || [];
+  if (spec.relation === 'row-count') return list.length;
+  if (spec.relation === 'named-scalar') {
+    const row = list[0];
+    if (row === undefined) return undefined;
+    if (Array.isArray(row)) return row[spec.column ?? 0];
+    return row[spec.field || Object.keys(row)[0]];
+  }
+  // max-id (default)
   let m = 0;
-  for (const r of rows || []) {
-    const n = Number(r && r.id);
+  for (const row of list) {
+    const raw = Array.isArray(row) ? row[spec.column ?? 0] : row[spec.field || 'id'];
+    const n = Number(raw);
     if (Number.isFinite(n) && n > m) m = n;
   }
   return m;
-}
-
-/**
- * The row for a given id (so the delta can carry its status/workflowId), or undefined.
- * @param {any[]} rows
- * @param {number} id
- * @returns {any}
- */
-export function rowById(rows, id) {
-  return (rows || []).find((r) => Number(r && r.id) === id);
-}
-
-/**
- * Extract the execution id from an n8n `GET /rest/executions/:id` body and coerce it to a Number.
- * n8n wraps most REST responses in `{data:...}`; tolerate both wrapped and bare. Returns undefined
- * when no id is present (a failed/empty read → the confirm leg cannot bind → honest non-confirm).
- * @param {any} body parsed JSON body
- * @returns {number|undefined}
- */
-export function executionIdFrom(body) {
-  const node = body && typeof body === 'object' && 'data' in body ? body.data : body;
-  const id = node && typeof node === 'object' ? node.id : undefined;
-  if (id == null) return undefined;
-  const n = Number(id);
-  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -179,13 +175,17 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
   const effectReceiptIds = [];
 
   if (binding) {
-    const before = binding.beforeId;
-    // A persisted new execution → after = its id (a real increase). Executed but nothing persisted
-    // → after = before (no increase), so op:'increased' FALSIFIES rather than sits NOT_EXECUTED.
-    const after = binding.afterId != null ? binding.afterId : before;
+    const before = binding.before;
+    // A persisted change → after = the observed post-walk value (a real increase/change).
+    // Executed but nothing persisted → after = before (no movement), so op:'increased' FALSIFIES
+    // rather than sits NOT_EXECUTED.
+    const after = binding.after != null ? binding.after : before;
+    // The entity is the recipe-declared observable this reproduction bound (§6), falling back to
+    // the agent's own claim.entity, then a generic label — never a hardcoded n8n-shaped constant.
+    const entity = binding.entity || (claim ? claim.entity : DEFAULT_EFFECT_ENTITY);
     const delta = mintStoreDelta({
       id: 'store-delta',
-      entity: EFFECT_ENTITY,
+      entity,
       before,
       after,
       identity,
@@ -193,9 +193,6 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
       extra: {
         countBefore: binding.countBefore,
         countAfter: binding.countAfter,
-        ...(binding.workflowId !== undefined ? { workflowId: binding.workflowId } : {}),
-        ...(binding.status !== undefined ? { status: binding.status } : {}),
-        ...(binding.nonce !== undefined ? { nonce: binding.nonce } : {}),
       },
     });
     receipts.push(delta);
@@ -210,24 +207,23 @@ export function assembleCatchBundle({ intent, iterations, claim, actorIdentity =
         observed: binding.observedText,
         identity,
         extra: {
-          ...(binding.nonce !== undefined ? { nonce: binding.nonce } : {}),
-          ...(binding.afterId !== undefined ? { executionId: binding.afterId } : {}),
+          ...(binding.after !== undefined ? { after: binding.after } : {}),
         },
       })
     );
     effectReceiptIds.push('browser-drive');
 
-    // Confirm leg (TOOL, fresh-session): a genuinely fresh app-surface re-read of the SAME
-    // execution. `observed` content-binds it to the delta's `after` — a stale read that disagrees
-    // cannot confirm (freshBinds). Emitted only when a persisted execution existed to re-read.
-    if (binding.afterId != null && binding.freshObserved !== undefined) {
+    // Confirm leg (TOOL, fresh-session): a genuinely fresh, recipe-declared re-observation of the
+    // SAME observable. `observed` content-binds it to the delta's `after` — a stale read that
+    // disagrees cannot confirm (freshBinds). Emitted only when a persisted change existed to re-read.
+    if (binding.after != null && binding.freshObserved !== undefined) {
       receipts.push(
         mint({
           id: 'fresh-execution',
           kind: 'fresh-session',
           provenance: 'tool',
           identity,
-          data: { entity: EFFECT_ENTITY, executionId: binding.afterId, observed: binding.freshObserved },
+          data: { entity, after: binding.after, observed: binding.freshObserved },
         })
       );
       effectReceiptIds.push('fresh-execution');
@@ -388,37 +384,44 @@ export async function executeWalk(client, walk) {
 }
 
 /**
- * Give n8n a beat: re-read the store tap until a NEW execution persists (count > countBefore) or
- * the settle window elapses. A polled settle (not a bare sleep) tolerates n8n's async persist
- * without racing it; if nothing new appears the last read is returned and the caller records a
- * real negative (executed but not persisted).
+ * Give the SUT a beat: re-read the store tap until the recipe-declared observable's value MOVES
+ * off `before` (its engine-shaped relation, recipe.mjs resolveObservable) or the settle window
+ * elapses. A polled settle (not a bare sleep) tolerates an async persist without racing it; if
+ * nothing changes the last read is returned and the caller records a real negative (executed but
+ * not persisted).
  * @param {(handle:any, queryName:string) => Promise<any[]>} tapStoreFn
  * @param {any} handle
  * @param {string} queryName
- * @param {number} countBefore
- * @returns {Promise<any[]>}
+ * @param {{relation:'row-count'|'max-id'|'named-scalar', field?:string, column?:number}} spec
+ * @param {any} before
+ * @returns {Promise<{rows:any[], value:any}>}
  */
-async function settleExecutions(tapStoreFn, handle, queryName, countBefore) {
+async function settleObservable(tapStoreFn, handle, queryName, spec, before) {
   const deadline = Date.now() + EXECUTION_SETTLE_MS;
   let rows = await tapStoreFn(handle, queryName);
-  while (rows.length <= countBefore && Date.now() < deadline) {
+  let value = observedValue(rows, spec);
+  while (value === before && Date.now() < deadline) {
     await sleep(EXECUTION_POLL_MS);
     rows = await tapStoreFn(handle, queryName);
+    value = observedValue(rows, spec);
   }
-  return rows;
+  return { rows, value };
 }
 
 /**
- * A single cookie-jar HTTP request (mirrors conjure's minimal jar) — sends accumulated cookies,
- * absorbs Set-Cookie, returns status + parsed JSON. Used only for the fresh confirm read.
+ * A single confirm-leg HTTP request through a minimal cookie jar — mirrors conjure.mjs's setup-step
+ * runner (reusing its exported encodeSetupBody/absorbSetCookies so the wire format stays identical:
+ * 'json' default, 'form' for a Django-style login), but over the INJECTED fetchFn (catch.mjs's seam)
+ * rather than the global fetch, so the confirm leg is exercised network-free in tests.
  * @param {typeof fetch} fetchFn
- * @param {'GET'|'POST'} method
+ * @param {string} method
  * @param {string} url
  * @param {any} body
  * @param {Map<string,string>} jar
- * @returns {Promise<{status:number, json:any}>}
+ * @param {string} [contentType]
+ * @returns {Promise<{status:number, text:string, json:any}>}
  */
-async function jarFetch(fetchFn, method, url, body, jar) {
+async function confirmHttpReq(fetchFn, method, url, body, jar, contentType) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
@@ -429,21 +432,12 @@ async function jarFetch(fetchFn, method, url, body, jar) {
     /** @type {RequestInit} */
     const init = { method, headers, redirect: 'manual', signal: controller.signal };
     if (body !== undefined && body !== null) {
-      headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(body);
+      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body);
+      headers['Content-Type'] = contentTypeHeader;
+      init.body = encoded;
     }
     const res = await fetchFn(url, init);
-    const h = /** @type {any} */ (res.headers);
-    const setCookies = typeof h.getSetCookie === 'function' ? h.getSetCookie() : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : []);
-    for (const c of setCookies) {
-      const first = String(c).split(';')[0];
-      const eq = first.indexOf('=');
-      if (eq > 0) {
-        const name = first.slice(0, eq).trim();
-        const value = first.slice(eq + 1).trim();
-        if (name && value) jar.set(name, value);
-      }
-    }
+    absorbSetCookies(res, jar);
     const text = await res.text();
     let json;
     try {
@@ -451,60 +445,68 @@ async function jarFetch(fetchFn, method, url, body, jar) {
     } catch {
       json = undefined;
     }
-    return { status: res.status, json };
+    return { status: res.status, text, json };
   } finally {
     clearTimeout(t);
   }
 }
 
 /**
- * Re-read an execution from a genuinely FRESH session: a brand-new login (new cookie, distinct from
- * conjure's setup session) then `GET /rest/executions/{id}` via the app's OWN REST API. This is the
- * TOOL confirm leg (§1.1 dual-leg) — an app-surface read that must agree with the out-of-band store
- * delta. n8n's login field changed across versions, so both `emailOrLdapLoginId` and `email` are
- * tried. Returns the re-observed execution id, or undefined when it cannot be confirmed.
- * @param {typeof fetch} fetchFn
- * @param {string} baseUrl
- * @param {{email:string, password:string}} creds
- * @param {number} id
- * @returns {Promise<number|undefined>}
+ * The GENERIC confirm leg (§6): re-observe the persisted effect from a genuinely FRESH session (a
+ * brand-new cookie jar, never conjure's setup jar) by walking the recipe's OWN `confirm[]` steps —
+ * the EXACT setup-step schema (id/method/path/body/content_type/capture, slice A) — never an n8n-
+ * specific REST dance. Auth for the fresh session reuses the recipe's existing auth_preflight
+ * surface (a bootstrap cookie, same as conjure's setup dance); the confirm steps themselves carry
+ * whatever login the recipe declares (its OWN content_type/capture, e.g. a Django form login + CSRF
+ * capture). A `{value}` placeholder in a confirm step's path resolves to the harness-observed AFTER
+ * value (e.g. `GET /rest/executions/{value}`), so a recipe can re-read exactly the entity the
+ * harness saw move. The designated capture named `observed` (JSONPath or HTML regex, same as setup)
+ * supplies the value freshBinds compares to the delta's `after`. No `confirm` steps declared, a
+ * step failing, or no `observed` capture => an honest non-confirm (CND), never a fabricated one.
+ * @param {Object} args
+ * @param {typeof fetch} args.fetchFn
+ * @param {import('./recipe.mjs').Recipe} args.recipe
+ * @param {string} args.recipeDir
+ * @param {string} args.baseUrl
+ * @param {any} args.afterValue the harness-observed post-walk observable value (the `{value}` placeholder)
+ * @returns {Promise<{observed?:any, reason?:string}>}
  */
-async function freshReadExecution(fetchFn, baseUrl, creds, id) {
-  for (const loginBody of [{ emailOrLdapLoginId: creds.email, password: creds.password }, { email: creds.email, password: creds.password }]) {
-    /** @type {Map<string,string>} */
-    const jar = new Map();
-    const login = await jarFetch(fetchFn, 'POST', `${baseUrl}/rest/login`, loginBody, jar);
-    if (login.status < 200 || login.status >= 300 || jar.size === 0) continue; // wrong field / not authed → try the other shape
-    const ex = await jarFetch(fetchFn, 'GET', `${baseUrl}/rest/executions/${encodeURIComponent(String(id))}`, undefined, jar);
-    if (ex.status < 200 || ex.status >= 300) return undefined; // authed but could not read → cannot confirm
-    return executionIdFrom(ex.json);
+async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }) {
+  const steps = recipe.confirm || [];
+  if (steps.length === 0) {
+    return { reason: 'no confirm[] steps declared in the recipe — the fresh-session confirm leg is skipped (effect will CND)' };
   }
-  return undefined;
-}
-
-/**
- * Read the owner credentials from the recipe's disclosed setup — the first setup step whose
- * body_file carries an email + password (n8n's owner setup). Returns null when none is present
- * (then the confirm leg is skipped and the effect honestly CNDs rather than over-claim).
- * @param {string} recipeDir
- * @param {import('./recipe.mjs').Recipe} recipe
- * @returns {{email:string, password:string}|null}
- */
-function readOwnerCreds(recipeDir, recipe) {
-  for (const step of recipe.setup || []) {
-    if (!step.body_file) continue;
-    const p = join(recipeDir, step.body_file);
-    if (!existsSync(p)) continue;
+  /** @type {Map<string,string>} */
+  const jar = new Map();
+  if (recipe.auth_preflight) {
+    await confirmHttpReq(fetchFn, recipe.auth_preflight.method, `${baseUrl}${recipe.auth_preflight.path}`, undefined, jar);
+  }
+  /** @type {Record<string,any>} */
+  const captures = {};
+  for (const step of steps) {
+    let path;
     try {
-      const body = JSON.parse(readFileSync(p, 'utf8'));
-      if (body && typeof body.email === 'string' && typeof body.password === 'string') {
-        return { email: body.email, password: body.password };
+      path = resolvePlaceholders(step.path, (n) => (n === 'value' ? afterValue : captures[n]));
+    } catch (e) {
+      return { reason: `confirm step "${step.id}" could not resolve its path: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    let body;
+    if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
+    else if (step.body !== undefined) body = step.body;
+    const res = await confirmHttpReq(fetchFn, step.method, `${baseUrl}${path}`, body, jar, step.content_type);
+    if (res.status < 200 || res.status >= 300) {
+      return { reason: `confirm step "${step.id}" failed: HTTP ${res.status}` };
+    }
+    if (step.capture) {
+      for (const [name, cap] of Object.entries(step.capture)) {
+        captures[name] = typeof cap === 'string' ? extractJsonPath(res.json, cap) : extractHtml(res.text, cap.pattern);
       }
-    } catch {
-      /* not JSON / unreadable — keep looking */
     }
   }
-  return null;
+  if (!('observed' in captures) || captures.observed === undefined) {
+    return { reason: "confirm[] steps ran but none captured a value named 'observed' — nothing to bind the confirm leg to" };
+  }
+  return { observed: captures.observed };
 }
 
 /**
@@ -548,11 +550,14 @@ export async function runCatch(opts) {
   const { conjureFn, tapStoreFn, openBrowserFn } = resolveCatchSeams(opts, recipe);
   const sha = buildSha || /** @type {import('./recipe.mjs').FromTreeIdentity} */ (recipe.code_identity).sha || '';
   const queryName = Object.keys(recipe.store_tap.queries)[0];
-  const creds = readOwnerCreds(recipeDir, recipe);
+  // The observable spec (§6) — the recipe-declared, engine-shaped relation (recipe.mjs
+  // resolveObservable) this Catch taps and binds its effect claim to, replacing the hardcoded
+  // n8n execution_entity.max_id assumption.
+  const spec = resolveObservable(recipe.store_tap, queryName);
   const intent = opts.intent || `A visitor submitting the ${recipe.name} front door persists an execution, reproduced across fresh worlds (SHA ${sha.slice(0, 7)}).`;
-  // The harness-enumerated observable menu — EXACTLY the execution/max_id reading the fresh-session
-  // confirm leg binds to. The agent's claim entity must come from here (FW-P1-C).
-  const observables = [EFFECT_ENTITY];
+  // The harness-enumerated observable menu — EXACTLY the reading the fresh-session confirm leg
+  // binds to. The agent's claim entity must come from here (FW-P1-C).
+  const observables = [spec.entity];
 
   /** @type {string[]} */
   const diagnosis = [];
@@ -571,13 +576,21 @@ export async function runCatch(opts) {
       handle = await conjureFn(recipeDir, buildSha ? { buildSha } : {});
       const beforeRows = await tapStoreFn(handle, queryName);
       const countBefore = beforeRows.length;
-      const beforeId = maxId(beforeRows);
+      const before = observedValue(beforeRows, spec);
 
       client = await openBrowserFn({ hostPort: 4444 + i });
       // Reap the browser sidecar on interrupt too: a SIGINT/SIGTERM bypasses the finally below and
       // leaks pb-chromium-*. Register a best-effort teardown (de-registered on normal teardown) — the
       // same register-on-bring-up / drop-on-teardown pattern conjure uses for the SUT. See reaper.mjs.
       browserReap = registerReap(async () => { try { await client?.teardown(); } catch { /* sidecar already gone */ } });
+      // Cookie-inject (§6): a login-gated front door needs the setup dance's session cookies in the
+      // BROWSER before it navigates there — W3C Add Cookie is origin-scoped, so land on the SUT's
+      // origin first. A no-op when the recipe's setup minted no cookies (n8n) or the seam predates
+      // addCookie (older BrowserClient mocks).
+      if (handle.cookies && handle.cookies.length && typeof client.addCookie === 'function') {
+        await client.navigate(handle.baseUrl);
+        for (const cookie of handle.cookies) await client.addCookie(cookie);
+      }
       // The HARNESS reaches the front door and reads it; the agent neither navigates nor runs the read.
       await client.navigate(handle.frontDoorUrl);
       const introspection = await introspect(client);
@@ -600,36 +613,36 @@ export async function runCatch(opts) {
         /* the confirmation text is informational only */
       }
 
-      const afterRows = await settleExecutions(tapStoreFn, handle, queryName, countBefore);
+      const { rows: afterRows, value: after } = await settleObservable(tapStoreFn, handle, queryName, spec, before);
       const countAfter = afterRows.length;
-      const persisted = countAfter > countBefore;
-      const afterId = persisted ? maxId(afterRows) : undefined;
-      const row = afterId != null ? rowById(afterRows, afterId) : undefined;
+      const changed = after !== before;
 
       let freshObserved;
-      if (afterId != null) {
-        if (creds) freshObserved = await freshReadExecution(fetchFn, handle.baseUrl, creds, afterId);
-        else diagnosis.push('catch: no owner credentials in the recipe setup — the fresh-session confirm leg is skipped (effect will CND).');
+      let confirmReason;
+      if (changed) {
+        const confirm = await runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl: handle.baseUrl, afterValue: after });
+        freshObserved = confirm.observed;
+        confirmReason = confirm.reason;
+        if (confirmReason) diagnosis.push(`catch: ${confirmReason}`);
       }
-      const effectHeld = afterId != null && freshObserved === afterId;
+      const effectHeld = changed && freshObserved !== undefined && freshObserved === after;
       const reason = effectHeld
         ? undefined
-        : afterId == null
-          ? 'the walk ran but no execution persisted in execution_entity'
+        : !changed
+          ? 'the walk ran but the bound observable did not change'
           : freshObserved === undefined
-            ? 'a fresh REST re-read could not re-observe the execution (confirm leg absent)'
-            : `the fresh REST re-read (${freshObserved}) disagreed with the store delta (${afterId})`;
+            ? confirmReason || 'a fresh re-observation could not confirm the effect (confirm leg absent)'
+            : `the fresh re-observation (${freshObserved}) disagreed with the store delta (${after})`;
 
       iterations.push({
         executed: true,
         effectHeld,
-        beforeId,
-        afterId,
+        before,
+        after,
+        entity: spec.entity,
         freshObserved,
         countBefore,
         countAfter,
-        workflowId: row ? row.workflowId : undefined,
-        status: row ? row.status : undefined,
         driveSteps: client.steps,
         observedText,
         frontDoorUrl: handle.frontDoorUrl,
@@ -637,14 +650,14 @@ export async function runCatch(opts) {
         reason,
       });
       if (effectHeld) {
-        diagnosis.push(`catch: reproduction ${i} — execution ${afterId} persisted (status=${row ? row.status : '?'}, workflowId=${row ? row.workflowId : '?'}); a fresh REST session re-observed the same id (confirm leg agrees).`);
+        diagnosis.push(`catch: reproduction ${i} — ${spec.entity} ${before} → ${after}; a fresh re-observation agreed (confirm leg holds).`);
       } else {
         diagnosis.push(`catch: reproduction ${i} executed the walk but did not confirm the effect: ${reason}.`);
       }
     } catch (e) {
       const reason = String((e && /** @type {any} */ (e).message) || e);
       diagnosis.push(`catch: reproduction ${i} could not execute the walk (feature-absent / conjure-drive error, not evidence against the change): ${reason}`);
-      iterations.push({ executed: false, effectHeld: false, beforeId: 0, countBefore: 0, countAfter: 0, reason });
+      iterations.push({ executed: false, effectHeld: false, before: 0, countBefore: 0, countAfter: 0, reason });
     } finally {
       if (client) {
         try {

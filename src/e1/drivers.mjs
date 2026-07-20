@@ -124,7 +124,7 @@ function honestSpec(overrides = {}) {
   };
 }
 
-/** The store entity the real Catch binds its effect to (mirrors src/catch.mjs EFFECT_ENTITY). */
+/** The store entity the real n8n Catch binds its effect to (a recipe-declared observable, §6 — see recipes/n8n-form-trigger-pr7130/recipe.json store_tap.observables). */
 const CATCH_ENTITY = 'execution_entity.max_id';
 
 /**

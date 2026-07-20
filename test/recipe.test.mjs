@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'no
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { loadRecipe } from '../src/recipe.mjs';
+import { loadRecipe, resolveObservable } from '../src/recipe.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const N8N_RECIPE = join(ROOT, 'recipes', 'n8n-form-trigger-pr7130');
@@ -59,6 +59,14 @@ test('recipe: the n8n Form Trigger recipe validates and its load-bearing fields 
   );
   // out-of-band store tap query present
   assert.ok(r.store_tap.queries.executions, 'store_tap.queries.executions present');
+  // §6 generic effect binding: the recipe declares its observable relation explicitly, preserving
+  // the exact entity string the pre-existing confirm leg bound to.
+  assert.equal(resolveObservable(r.store_tap, 'executions').entity, 'execution_entity.max_id');
+  assert.equal(resolveObservable(r.store_tap, 'executions').relation, 'max-id');
+  // §6 generic confirm leg: a recipe-declared fresh-session re-observation (same schema as setup)
+  assert.ok(r.confirm);
+  assert.equal(r.confirm.length, 2);
+  assert.equal(r.confirm[1].capture?.observed, '$.data.id');
   // front door is a template carrying a minted id
   assert.match(r.front_door.url_template, /\{[^}]+\}/);
   // every referenced body_file resolves on disk
@@ -212,6 +220,33 @@ test('recipe: confirm is validated with the exact setup step schema and defaults
   }
 });
 
+test('recipe: store_tap.observables — absent per-query falls back to an engine-honest default (§6)', () => {
+  // sqlite: max-id over 'id' (n8n's autoincrement shape, unchanged when the recipe declares nothing).
+  const sqlite = /** @type {import('../src/recipe.mjs').SqliteStoreTap} */ (/** @type {any} */ ({ engine: 'sqlite', queries: { q: 'SELECT id FROM t;' } }));
+  assert.deepEqual(resolveObservable(sqlite, 'q'), { entity: 'q.max-id', relation: 'max-id', field: undefined, column: undefined });
+  // postgres: named-scalar over column 0 (documenso's `SELECT count(*) AS n` shape).
+  const postgres = /** @type {import('../src/recipe.mjs').PostgresStoreTap} */ (/** @type {any} */ ({ engine: 'postgres', queries: { fields: 'SELECT count(*) AS n FROM "Field";' } }));
+  assert.deepEqual(resolveObservable(postgres, 'fields'), { entity: 'fields.named-scalar', relation: 'named-scalar', field: undefined, column: undefined });
+});
+
+test('recipe: store_tap.observables — an explicit per-query override wins over the engine default', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.store_tap = {
+    engine: 'sqlite',
+    db_path: '/db.sqlite',
+    busy_timeout_ms: 3000,
+    queries: { q: 'SELECT id FROM t;' },
+    observables: { q: { entity: 'thing.count', relation: 'row-count' } },
+  };
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.deepEqual(resolveObservable(r.store_tap, 'q'), { entity: 'thing.count', relation: 'row-count', field: undefined, column: undefined });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('recipe: front_door.url_template with no {placeholder} validates and is used verbatim (optional per §5)', () => {
   const o = /** @type {any} */ (validRecipe());
   o.front_door = { url_template: '/static/create' };
@@ -250,6 +285,9 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'store_tap with empty queries', mutate: (o) => (o.store_tap.queries = {}), match: /store_tap\.queries/ },
     { label: 'bogus store_tap.engine', mutate: (o) => (o.store_tap = { engine: 'mysql', queries: { q: 'SELECT 1;' } }), match: /store_tap\.engine/ },
     { label: 'postgres tap missing container', mutate: (o) => (o.store_tap = { engine: 'postgres', user: 'u', db: 'd', queries: { q: 'SELECT 1;' } }), match: /store_tap\.container/ },
+    { label: 'observables key not a declared query', mutate: (o) => (o.store_tap.observables = { bogus: { relation: 'row-count' } }), match: /store_tap\.observables\.bogus/ },
+    { label: 'observables bogus relation', mutate: (o) => (o.store_tap.observables = { q: { relation: 'sum' } }), match: /store_tap\.observables\.q\.relation/ },
+    { label: 'observables non-number column', mutate: (o) => (o.store_tap.observables = { q: { column: 'zero' } }), match: /store_tap\.observables\.q\.column/ },
     { label: 'bogus drive.mode', mutate: (o) => (o.drive = { mode: 'telepathy' }), match: /drive\.mode/ },
   ];
   for (const { label, mutate, match } of cases) {

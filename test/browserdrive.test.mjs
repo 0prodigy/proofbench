@@ -185,6 +185,17 @@ test('browserdrive: pointer drives a raw W3C pointer-action sequence and records
   assert.deepEqual(client.steps[0], { op: 'pointer', pointerType: 'mouse', actions: seq });
 });
 
+test('browserdrive: addCookie issues W3C Add Cookie with the name+value and records only the name', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
+  const fetchFn = fakeFetch(happyRouter);
+  const client = await openBrowser({ docker: asAny(docker), fetchFn: asAny(fetchFn) });
+  await client.addCookie({ name: 'n8n-auth', value: 'super-secret-session-token' });
+  const call = fetchFn.calls.find((c) => c.path === '/session/sess-1/cookie' && c.method === 'POST');
+  assert.deepEqual(call?.body, { cookie: { name: 'n8n-auth', value: 'super-secret-session-token' } });
+  // the recorded step carries the cookie NAME only — the value is a live session token, not evidence
+  assert.deepEqual(client.steps[0], { op: 'addCookie', name: 'n8n-auth' });
+});
+
 test('browserdrive: teardown DELETEs the session then `docker rm -f`s the sidecar', async () => {
   const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
   const fetchFn = fakeFetch(happyRouter);

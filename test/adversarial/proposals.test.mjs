@@ -49,13 +49,11 @@ function heldIteration(/** @type {number} */ _i) {
   return {
     executed: true,
     effectHeld: true,
-    beforeId: 0,
-    afterId: 1,
+    before: 0,
+    after: 1,
     freshObserved: 1,
     countBefore: 0,
     countAfter: 1,
-    workflowId: 'wf-7130',
-    status: 'success',
     driveSteps: [{ op: 'navigate', url: FRONT_DOOR }, { op: 'click', elementId: 'el' }],
     observedText: 'recorded',
     frontDoorUrl: FRONT_DOOR,
@@ -69,8 +67,8 @@ function nullDeltaIteration() {
   return {
     executed: true,
     effectHeld: false,
-    beforeId: 0,
-    afterId: undefined,
+    before: 0,
+    after: undefined,
     freshObserved: undefined,
     countBefore: 0,
     countAfter: 0,
@@ -86,8 +84,8 @@ function seededNoOpIteration(/** @type {number} */ v) {
   return {
     executed: true,
     effectHeld: false,
-    beforeId: v,
-    afterId: undefined,
+    before: v,
+    after: undefined,
     freshObserved: undefined,
     countBefore: v,
     countAfter: v,
@@ -100,7 +98,7 @@ function seededNoOpIteration(/** @type {number} */ v) {
 
 /** A reproduction the walk could not even run. */
 function absentIteration() {
-  return { executed: false, effectHeld: false, beforeId: 0, countBefore: 0, countAfter: 0, reason: 'feature-absent' };
+  return { executed: false, effectHeld: false, before: 0, countBefore: 0, countAfter: 0, reason: 'feature-absent' };
 }
 
 /**

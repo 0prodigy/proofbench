@@ -102,6 +102,7 @@ const SESSION_BODY = Object.freeze({
  * @property {(script:string, args?:any[])=>Promise<any>} execute run JS in the page (the JS escape hatch)
  * @property {(x:number, y:number)=>Promise<void>} clickAt left-click at VIEWPORT coords — the canvas placement gesture (move→down→up)
  * @property {(actions:Array<Record<string,any>>, pointerType?:string)=>Promise<void>} pointer drive a raw W3C pointer-action sequence (the coordinate/canvas escape hatch)
+ * @property {(cookie:{name:string, value:string})=>Promise<void>} addCookie W3C Add Cookie into the CURRENT page's origin (navigate to the origin first) — how a setup-session cookie reaches the drive
  * @property {()=>Promise<void>} teardown DELETE the session then `docker rm -f` the sidecar (idempotent)
  */
 
@@ -365,6 +366,14 @@ export async function openBrowser(opts = {}) {
       async pointer(actions, pointerType = 'mouse') {
         await pointerSeq(actions, pointerType);
         steps.push({ op: 'pointer', pointerType, actions });
+      },
+      async addCookie(cookie) {
+        // W3C Add Cookie (POST /session/{id}/cookie) sets the cookie on the CURRENT document's
+        // origin — the caller navigates to the front-door origin first, adds each setup-session
+        // cookie, then navigates to the real front door. The recorded step carries the cookie NAME
+        // only (the value is a live session token; evidence needs the gesture, not the secret).
+        await wd(fetchFn, 'POST', `${base}/cookie`, { cookie: { name: cookie.name, value: cookie.value } });
+        steps.push({ op: 'addCookie', name: cookie.name });
       },
       async teardown() {
         try {

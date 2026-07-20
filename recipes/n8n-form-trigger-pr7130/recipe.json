@@ -60,8 +60,15 @@
     "queries": {
       "executions": "SELECT id, workflowId, status, finished FROM execution_entity ORDER BY id;"
     },
+    "observables": {
+      "executions": { "entity": "execution_entity.max_id", "relation": "max-id" }
+    },
     "transient_lock_is_expected": true
   },
+  "confirm": [
+    { "id": "login", "method": "POST", "path": "/rest/login", "body_file": "owner.json" },
+    { "id": "read", "method": "GET", "path": "/rest/executions/{value}", "capture": { "observed": "$.data.id" } }
+  ],
   "drive": {
     "mode": "http",
     "reason": "the Form Trigger front door is server-rendered HTML plus a multipart POST — driven over HTTP"

@@ -10,19 +10,19 @@
  *   - the walk ran but nothing persisted, reproduced → the delta FALSIFIES → DOES_NOT_WORK
  *   - a single confirmed walk (k=1) → CND (a single walk is never WORKS, FW-6)
  *   - a fresh re-read that DISAGREES with the store cannot confirm → CND (the dual-leg guard)
- * plus the pure helpers (maxId / rowById / executionIdFrom) the live path relies on, and a
- * seam-driven runCatch (mock llmFn + docker-free seams) that seals + persists + judges the on-disk
- * artifact.
+ * plus the pure `observedValue` helper (the generic, engine-shaped relation reducer — §6) the live
+ * path relies on, and a seam-driven runCatch (mock llmFn + docker-free seams) that seals + persists
+ * + judges the on-disk artifact.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleCatchBundle, maxId, rowById, executionIdFrom, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
+import { assembleCatchBundle, observedValue, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
@@ -57,21 +57,18 @@ function fingerprint(sha) {
 /**
  * A reproduction where the form submit persisted an execution and the fresh re-read agreed.
  * @param {number} i
- * @param {{afterId?:number, freshObserved?:number, sha?:string}} [o]
+ * @param {{after?:number, freshObserved?:number, sha?:string}} [o]
  * @returns {import('../src/catch.mjs').CatchIteration}
  */
-function heldIteration(i, { afterId = 1, freshObserved = afterId, sha = 'MERGE' } = {}) {
+function heldIteration(i, { after = 1, freshObserved = after, sha = 'MERGE' } = {}) {
   return {
     executed: true,
-    effectHeld: freshObserved === afterId,
-    beforeId: 0,
-    afterId,
+    effectHeld: freshObserved === after,
+    before: 0,
+    after,
     freshObserved,
     countBefore: 0,
     countAfter: 1,
-    workflowId: 'wf-123',
-    status: 'success',
-    nonce: `nonce-${i}`,
     driveSteps: [
       { op: 'navigate', url: 'http://host.docker.internal:5678/webhook/abc/n8n-form' },
       { op: 'type', elementId: 'el-1', text: `nonce-${i}` },
@@ -90,7 +87,7 @@ function heldIteration(i, { afterId = 1, freshObserved = afterId, sha = 'MERGE' 
  * @returns {import('../src/catch.mjs').CatchIteration}
  */
 function absentIteration(reason = 'the front door served no fillable form field — the Form Trigger is absent at this SHA') {
-  return { executed: false, effectHeld: false, beforeId: 0, countBefore: 0, countAfter: 0, reason };
+  return { executed: false, effectHeld: false, before: 0, countBefore: 0, countAfter: 0, reason };
 }
 
 /**
@@ -103,12 +100,11 @@ function ranButUnpersistedIteration(i, { sha = 'MERGE' } = {}) {
   return {
     executed: true,
     effectHeld: false,
-    beforeId: 0,
-    afterId: undefined,
+    before: 0,
+    after: undefined,
     freshObserved: undefined,
     countBefore: 0,
     countAfter: 0,
-    nonce: `nonce-${i}`,
     driveSteps: [{ op: 'navigate', url: 'http://host.docker.internal:5678/webhook/abc/n8n-form' }],
     frontDoorUrl: 'http://localhost:5678/webhook/abc/n8n-form',
     fingerprint: fingerprint(sha),
@@ -116,15 +112,26 @@ function ranButUnpersistedIteration(i, { sha = 'MERGE' } = {}) {
   };
 }
 
-test('catch helpers: maxId / rowById / executionIdFrom coerce ids and tolerate empty/wrapped shapes', () => {
-  assert.equal(maxId([]), 0); // no executions
-  assert.equal(maxId([{ id: 1 }, { id: 3 }, { id: 2 }]), 3);
-  assert.equal(maxId([{ id: '5' }, { id: '2' }]), 5); // string ids coerced
-  assert.deepEqual(rowById([{ id: 1, status: 'success' }, { id: 2, status: 'error' }], 2), { id: 2, status: 'error' });
-  assert.equal(executionIdFrom({ data: { id: '7' } }), 7); // n8n wraps in {data:...}; id is a string
-  assert.equal(executionIdFrom({ id: 9 }), 9); // bare
-  assert.equal(executionIdFrom({ data: {} }), undefined); // no id → cannot confirm
-  assert.equal(executionIdFrom(null), undefined);
+test('catch helpers: observedValue reduces store-tap rows per the engine-shaped relation (row-count | max-id | named-scalar)', () => {
+  // row-count: engine-agnostic — just how many rows the query returned.
+  assert.equal(observedValue([], { relation: 'row-count' }), 0);
+  assert.equal(observedValue([{ id: 1 }, { id: 2 }], { relation: 'row-count' }), 2);
+  assert.equal(observedValue([[1], [2], [3]], { relation: 'row-count' }), 3); // postgres tuples count the same
+  // max-id: sqlite/k8s-exec object rows, default field 'id', coerced to Number.
+  assert.equal(observedValue([], { relation: 'max-id' }), 0);
+  assert.equal(observedValue([{ id: 1 }, { id: 3 }, { id: 2 }], { relation: 'max-id' }), 3);
+  assert.equal(observedValue([{ id: '5' }, { id: '2' }], { relation: 'max-id' }), 5); // string ids coerced
+  assert.equal(observedValue([{ pk: 7 }], { relation: 'max-id', field: 'pk' }), 7); // recipe-declared field override
+  // max-id: postgres tuples, default column 0.
+  assert.equal(observedValue([['1'], ['9'], ['4']], { relation: 'max-id' }), 9);
+  assert.equal(observedValue([['x', '2']], { relation: 'max-id', column: 1 }), 2);
+  // named-scalar: sqlite object row — the sole value of the first row's first field (or a declared one).
+  assert.equal(observedValue([], { relation: 'named-scalar' }), undefined);
+  assert.equal(observedValue([{ n: '3' }], { relation: 'named-scalar' }), '3'); // documenso's SELECT count(*) AS n shape
+  assert.equal(observedValue([{ a: 1, b: 2 }], { relation: 'named-scalar', field: 'b' }), 2);
+  // named-scalar: postgres tuple — column 0 (or a declared one), verbatim (no coercion).
+  assert.equal(observedValue([['3']], { relation: 'named-scalar' }), '3');
+  assert.equal(observedValue([['x', '9']], { relation: 'named-scalar', column: 1 }), '9');
 });
 
 test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes (claim FROM the proposal)', () => {
@@ -143,8 +150,6 @@ test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the ex
   assert.equal(delta.data.before, 0);
   assert.equal(delta.data.after, 1);
   assert.equal(delta.data.entity, 'execution_entity.max_id');
-  assert.equal(delta.data.workflowId, 'wf-123');
-  assert.equal(delta.data.status, 'success');
   assert.ok(isMinted(delta));
   // confirm leg: TOOL fresh-session, observed content-bound to the delta's after
   const fresh = byId('fresh-execution');
@@ -206,8 +211,8 @@ test('catch assembly: a single confirmed walk (k=1) => CND (a single walk is nev
 });
 
 test('catch assembly: a fresh re-read that DISAGREES with the store cannot confirm => CND (dual-leg guard)', () => {
-  // afterId=1 persisted, but the fresh REST re-read observed a different id (2) — stale/inconsistent.
-  const stale = [heldIteration(0, { afterId: 1, freshObserved: 2 }), heldIteration(1, { afterId: 1, freshObserved: 2 })];
+  // after=1 persisted, but the fresh re-observation observed a different value (2) — stale/inconsistent.
+  const stale = [heldIteration(0, { after: 1, freshObserved: 2 }), heldIteration(1, { after: 1, freshObserved: 2 })];
   const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSED_CLAIM, iterations: stale });
   const v = verdict(bundle);
   assert.equal(v.state, Verdict.COULD_NOT_DETERMINE, v.reasons.join(' | ')); // NOT_EXECUTED (no valid confirm leg), never WORKS
