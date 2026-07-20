@@ -501,7 +501,9 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }
       }
     }
     const res = await confirmHttpReq(fetchFn, step.method, `${baseUrl}${path}`, body, jar, step.content_type);
-    if (res.status < 200 || res.status >= 300) {
+    // 2xx and 3xx both mean "the app accepted the request" (mirrors conjure.mjs's setup-step
+    // acceptance — a Django-style form login answers success with a 302 redirect).
+    if (res.status < 200 || res.status >= 400) {
       return { reason: `confirm step "${step.id}" failed: HTTP ${res.status}` };
     }
     if (step.capture) {

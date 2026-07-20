@@ -702,7 +702,11 @@ export async function conjure(recipeDir, opts = {}) {
       if (body !== undefined) body = resolveBodyPlaceholders(body, (n) => captures[n]);
       if (body !== undefined) collectScalars(body, bodyDerived);
       const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar, step.content_type);
-      if (res.status < 200 || res.status >= 300) {
+      // 2xx and 3xx both mean "the app accepted the request" (redirect: manual, so a 3xx here is
+      // an unfollowed redirect, not a client error) — a Django-style form login answers a SUCCESSFUL
+      // POST with 302 to LOGIN_REDIRECT_URL and only re-renders 200-with-errors on failure; treating
+      // 3xx as a step failure would misreport that success as a setup error. Only 4xx/5xx fail.
+      if (res.status < 200 || res.status >= 400) {
         throw new Error(`conjure: setup step "${step.id}" failed: HTTP ${res.status} ${tail(res.text, 300)}`);
       }
       if (step.capture) {
