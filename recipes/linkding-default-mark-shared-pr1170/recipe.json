@@ -85,7 +85,7 @@
       "id": "read",
       "method": "GET",
       "path": "/api/bookmarks/",
-      "capture": { "observed": "$.0.shared" }
+      "capture": { "observed": "$.results.0.shared" }
     }
   ],
   "drive": {
