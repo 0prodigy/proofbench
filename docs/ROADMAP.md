@@ -47,6 +47,21 @@ evidence committed, README/site contain no claim without evidence.
 The one blocker between "engine" and "product": de-n8n the Catch. A stranger with a
 docker/compose-runnable web repo gets a real verdict.
 
+*Empirically grounded 2026-07-20: a cold Sonnet agent attempted linkding PR #1170
+(Django/sqlite/session-auth — a normal self-hosted app) with src/ frozen. Blockers hit
+for real, ranked by the agent-as-customer: (1) no `docker build --target` (killed the
+run — multi-stage Dockerfile whose default stage isn't last), (2) setup steps are
+JSON-only → Django CSRF form login returns 403 (needs form encoding + HTML token
+capture), (3) setup-session cookies never reach the browser drive → every login-gated
+front door lands on the login page, (4) `front_door.url_template` hard-requires a
+placeholder (schema theater for static creation forms), (5) the n8n-shaped effect
+menu/confirm leg (below) were never even reached. `recipes/linkding-default-mark-shared-
+pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merge=WORKS
+∧ parent=DOES_NOT_WORK (default_mark_shared absent at parent → persisted shared=0).*
+
+- [ ] **Conjure/recipe surface (slice A):** `code_identity.target`, setup-step
+      `content_type: form` + HTML-regex capture (CSRF), cookies exposed on the SUT
+      handle, optional front-door placeholder, `confirm` schema.
 - [ ] **Generic effect binding:** the observable menu comes from the recipe's
       `store_tap.queries` (already recipe-declared data), not `EFFECT_ENTITY`
       (`catch.mjs:64`). Delta relations become engine-shaped (sqlite/postgres row-count,
