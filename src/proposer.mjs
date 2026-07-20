@@ -270,7 +270,10 @@ export function buildProposeTool(observables) {
             entity: { type: 'string', enum: [...observables] },
             expectedAfterRelation: {
               type: 'object',
-              properties: { op: { type: 'string', enum: [...ALLOWED_RELATION_OPS] }, value: {} },
+              properties: {
+                op: { type: 'string', enum: [...ALLOWED_RELATION_OPS] },
+                value: { description: "REQUIRED when op is 'equals' — the exact value the entity must equal after the walk (e.g. true, 1, \"some-string\"). Unused by increased/decreased/changed/unchanged." },
+              },
               required: ['op'],
             },
             scope: { type: 'string' },
@@ -402,7 +405,7 @@ export function buildCliPrompt({ intent, introspection, observables }) {
     `  "walk": [ { "op": one of ${ALLOWED_WALK_OPS.join('|')}, "args": { ... } }, ... ],`,
     '  "claim": {',
     `    "entity": one of ${menu.join('|') || '(none)'},`,
-    `    "expectedAfterRelation": { "op": one of ${ALLOWED_RELATION_OPS.join('|')} },`,
+    `    "expectedAfterRelation": { "op": one of ${ALLOWED_RELATION_OPS.join('|')}, "value": REQUIRED when op is 'equals' (the exact value, e.g. true/1/"some-string") — omit for increased/decreased/changed/unchanged },`,
     '    "scope": a short human-readable scope string,',
     '    "quantified": optional boolean (true only for a universal any/all/every claim)',
     '  }',

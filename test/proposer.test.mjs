@@ -275,4 +275,14 @@ test('buildCliPrompt: encodes the op enum, the entity menu (=observables), the r
   assert.match(p, /ONLY a single JSON object/);
   // No forced tool in `claude -p`: the prompt explicitly neutralizes the tool clause and mandates raw JSON.
   assert.match(p, /ignore any instruction above to reply via a tool/);
+  // linkding #1170 surfaced a real gap: the prompt never told the model 'equals' needs a value,
+  // so it proposed {op:'equals'} with none — an unsatisfiable claim (deepEqual(x, undefined) is
+  // always false). The prompt must say so explicitly.
+  assert.match(p, /REQUIRED when op is 'equals'/);
+});
+
+test("buildProposeTool: expectedAfterRelation.value's description flags it REQUIRED for 'equals' (the same gap, API tool-call path)", () => {
+  const tool = buildProposeTool(OBSERVABLES);
+  const props = tool.input_schema.properties;
+  assert.match(props.claim.properties.expectedAfterRelation.properties.value.description, /REQUIRED when op is 'equals'/);
 });
