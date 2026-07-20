@@ -4,9 +4,10 @@
 > can actually do the thing — across every service it touches — as a verdict the agent
 > **cannot fake**, with evidence you can **replay**.
 
-**Status:** clean-scratch branch `product-v1`. **Plan only — nothing is built yet.**
-Greenfield: prior code and ADRs are deliberately *not* carried over (they live on `main` /
-`ENG-17397-proofbench-k8s-attach`).
+**Status:** built and green on branch `product-v1` — honesty core frozen, one live
+differential Catch executed (n8n #7130). What is proven vs pending is tracked in
+`docs/ROADMAP.md`; agents read `CLAUDE.md` first. Prior code and ADRs live on `main` /
+`ENG-17397-proofbench-k8s-attach` and are historical only.
 
 ---
 
