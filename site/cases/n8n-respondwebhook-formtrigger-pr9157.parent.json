@@ -1,0 +1,133 @@
+{
+  "intent": "A visitor submitting the n8n Respond to Webhook / Form Trigger (PR #9157) front door persists an execution, reproduced across fresh worlds (SHA 91e5912).",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "a visitor submitting the form trigger front door",
+      "effectCheck": {
+        "entity": "execution_entity.max_id",
+        "expectedAfterRelation": {
+          "op": "increased"
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": [
+        "store-delta",
+        "browser-drive"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "id": "fingerprint",
+      "kind": "fingerprint",
+      "provenance": "harness",
+      "data": {
+        "mode": "from_tree",
+        "sha": "91e59120c49802bbeb545809527d223af1967f9d",
+        "image_digest": "sha256:453ee0e77eb77c9f3516027e029d14806a67037057364d5ea130e24d3c7fb936",
+        "version_label": "1.38.0",
+        "image_ref_or_tag": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-91e5912",
+        "container": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-mrt5v4s7"
+      },
+      "sha256": "31a5f493118b7de2ddefd37f858617ab1f0e046a2b70b38877d6b7095a9d5cf2"
+    },
+    {
+      "id": "store-delta",
+      "kind": "delta",
+      "provenance": "harness",
+      "identity": "form-visitor",
+      "sourcePR": false,
+      "data": {
+        "entity": "execution_entity.max_id",
+        "before": 0,
+        "after": 0,
+        "countBefore": 0,
+        "countAfter": 0
+      },
+      "sha256": "634f86d9abd2049df69b7f552b9820c4e0ce65dd5d3a41a9aa21f495f2e3fee9"
+    },
+    {
+      "id": "browser-drive",
+      "kind": "attempt",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "request": "browser-drive http://localhost:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form",
+        "frontDoorUrl": "http://localhost:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form",
+        "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form"
+          },
+          {
+            "op": "execute",
+            "script": "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerC…",
+            "value": [
+              {
+                "name": "field-0",
+                "tag": "input",
+                "type": "text"
+              },
+              {
+                "name": null,
+                "tag": "input",
+                "type": "text"
+              }
+            ]
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2"
+          },
+          {
+            "op": "type",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2",
+            "text": "Test User"
+          },
+          {
+            "op": "find",
+            "css": "input[type=\"text\"]",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2"
+          },
+          {
+            "op": "type",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2",
+            "text": "test@example.com"
+          },
+          {
+            "op": "find",
+            "css": "button[type=\"submit\"]",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.8"
+          },
+          {
+            "op": "click",
+            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.8"
+          },
+          {
+            "op": "execute",
+            "script": "return document.body ? document.body.innerText : \"\"",
+            "value": "{\"message\":\"Error in workflow\"}"
+          }
+        ],
+        "observed": "{\"message\":\"Error in workflow\"}"
+      },
+      "sha256": "3077078e743a5d711beecb2114e38dd350de3dbc1572bd785644ef9a2fd8dd9c"
+    }
+  ],
+  "reproduce": {
+    "k": 0,
+    "n": 2,
+    "kFail": 2
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "2ee8201ffeb851f0160f5fd77d28ec4f8e70eeb7037a23b8404c07bdaf011b11",
+    "signature": "NYChLKU2iuFY98wGT/LtBRJAL8uuFLJ14lurj/2t0eapNp3OO9iJzTjOSPPTWy5Ih/XBVShjnbRBHNgkcSajCA==",
+    "publicKey": "MCowBQYDK2VwAyEAt9zI4sBIaIzgI+4lg2bCQ9dxGgxa9PocbejlwF5vx5s="
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "kind": "pb-recipe-v1",
+  "name": "n8n Respond to Webhook / Form Trigger (PR #9157)",
+  "notes": "MODIFYING/bugfix-PR differential (structurally distinct from the additive #7130). PR #9157 is a 2-line fix to the already-shipped Respond to Webhook node: it adds 'n8n-nodes-base.formTrigger' to the RespondToWebhook.node.ts WEBHOOK_NODE_TYPES allow-list, and the buggy check is gated on `if (nodeVersion >= 1.1)` (verified at merge SHA: RespondToWebhook version [1, 1.1], execute() throws NodeOperationError('No Webhook node found in the workflow') when no connected parent node type is in WEBHOOK_NODE_TYPES). At the MERGE sha the formTrigger parent IS in the allow-list → the run succeeds; at the PARENT sha it is NOT → execute() throws → run status=error. The recipe turns that error into a MISSING execution row (not just a wrong status) via the workflow's own settings {saveDataErrorExecution:'none', saveDataSuccessExecution:'all'}, so pb's row-count/max_id effect check sees it: MERGE => success => row written => execution_entity.max_id increased => WORKS; PARENT => error => no row => max_id unchanged => 'increased' FALSIFIES => executed:true, effectHeld:false => DOES_NOT_WORK. front_door.url_template's {webhook_id} resolves to the Form Trigger node's webhookId UUID, and workflow.json sets parameters.path to that SAME UUID on purpose: the V1 formTrigger registers its webhook at $parameter[\"path\"]/n8n-form, NOT at the node's webhookId (disproven live 2026-07-20 — webhook_entity showed the registered path is parameters.path; FORM_TRIGGER_PATH_IDENTIFIER='n8n-form' verified at the merge SHA). The runner reads that webhookId out of workflow.json (collectScalars→camelize) and substitutes it for {webhook_id}. The RespondToWebhook node MUST be typeVersion 1.1 (1.0 skips the buggy branch → no differential). code_identity: merge sha 6c63cd97 self-reports version 1.38.0 (version_label); parent_sha 91e59120 is the merge's VERIFIED single parent — same FormTrigger-rendering code, so the walk renders+submits identically on both legs and only the persisted effect differs. build_overlay is the proven #7130 corepack fix (['npm install -g corepack@latest','ENV COREPACK_INTEGRITY_KEYS=0']): the from-tree build fails at BOTH SHAs on `RUN … pnpm install --frozen-lockfile` with a corepack integrity error ('Cannot find matching keyid' — n8nio/base:18 ships a corepack with stale npm-registry signing keys). This SHA's Dockerfile has no corepack line to anchor on, so conjure.overlayDockerfile lands the overlay via its fallback — immediately before the first package-manager install RUN, in the same build stage. OVERLAY ADDENDUM (2026-07-20): a third overlay line 'corepack install -g pnpm@8.14.3' pins the RUNTIME stage's pnpm — the runtime `pnpm rebuild sqlite3` runs from /home/node where no package.json/packageManager pin exists, so corepack@latest resolves pnpm to latest (11.x), which refuses Node 18 ('This version of pnpm requires at least Node.js v22.13'); 8.14.3 is the tree's own packageManager pin, verified identical at BOTH shas.",
+  "code_identity": {
+    "mode": "from_tree",
+    "repo": "https://github.com/n8n-io/n8n.git",
+    "sha": "6c63cd971162d3f018b210d221ffc2a56535550a",
+    "parent_sha": "91e59120c49802bbeb545809527d223af1967f9d",
+    "dockerfile": "docker/images/n8n-custom/Dockerfile",
+    "context": ".",
+    "build_overlay": [
+      "npm install -g corepack@latest",
+      "ENV COREPACK_INTEGRITY_KEYS=0",
+      "corepack install -g pnpm@8.14.3"
+    ],
+    "version_label": "1.38.0"
+  },
+  "conjure": {
+    "env": {
+      "DB_TYPE": "sqlite",
+      "N8N_SECURE_COOKIE": "false",
+      "N8N_DIAGNOSTICS_ENABLED": "false"
+    },
+    "container_port": 5678,
+    "published_port": 5678,
+    "ready_signal": {
+      "path": "/healthz",
+      "expect_status": 200
+    },
+    "setup_overlay": [
+      "apk add --no-cache sqlite"
+    ]
+  },
+  "fresh_world": {
+    "strategy": "recreate"
+  },
+  "auth_preflight": {
+    "method": "GET",
+    "path": "/rest/login"
+  },
+  "setup": [
+    {
+      "id": "owner",
+      "method": "POST",
+      "path": "/rest/owner/setup",
+      "body_file": "owner.json"
+    },
+    {
+      "id": "workflow",
+      "method": "POST",
+      "path": "/rest/workflows",
+      "body_file": "workflow.json",
+      "capture": {
+        "workflow_id": "$.data.id"
+      }
+    },
+    {
+      "id": "activate",
+      "method": "PATCH",
+      "path": "/rest/workflows/{workflow_id}",
+      "body": {
+        "active": true
+      }
+    }
+  ],
+  "front_door": {
+    "url_template": "/webhook/{webhook_id}/n8n-form",
+    "serves": "the server-rendered Form Trigger page (GET) and the multipart form submit (POST) — with responseMode 'responseNode' the submit is answered by the Respond to Webhook node"
+  },
+  "store_tap": {
+    "engine": "sqlite",
+    "db_path": "/home/node/.n8n/database.sqlite",
+    "busy_timeout_ms": 3000,
+    "queries": {
+      "executions": "SELECT id, workflowId, status, finished FROM execution_entity ORDER BY id;"
+    },
+    "transient_lock_is_expected": true
+  },
+  "drive": {
+    "mode": "browser",
+    "reason": "runCatch drives the Form Trigger front door through the browser sidecar (navigate GET the form → introspect → type the text field → click Submit); the same proven browser walk as #7130"
+  }
+}

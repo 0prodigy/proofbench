@@ -1,0 +1,65 @@
+{
+ "name": "PR9157 RespondToWebhook Form Trigger",
+ "nodes": [
+  {
+   "parameters": {
+    "formTitle": "PR9157 Form",
+    "formDescription": "proofbench differential probe",
+    "formFields": {
+     "values": [
+      {
+       "fieldLabel": "Your name",
+       "fieldType": "text",
+       "requiredField": true
+      }
+     ]
+    },
+    "responseMode": "responseNode",
+    "options": {},
+    "path": "ee8a5b73-acd0-498d-a987-835de67ad1c7"
+   },
+   "id": "94f60ad3-fb09-448c-9b1e-3aee4d1afa07",
+   "name": "n8n Form Trigger",
+   "type": "n8n-nodes-base.formTrigger",
+   "typeVersion": 1,
+   "position": [
+    260,
+    300
+   ],
+   "webhookId": "ee8a5b73-acd0-498d-a987-835de67ad1c7"
+  },
+  {
+   "parameters": {
+    "respondWith": "text",
+    "responseBody": "Your response has been recorded",
+    "options": {}
+   },
+   "id": "b1e2c3d4-5f60-4a71-8b92-0c1d2e3f4a5b",
+   "name": "Respond to Webhook",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    520,
+    300
+   ]
+  }
+ ],
+ "connections": {
+  "n8n Form Trigger": {
+   "main": [
+    [
+     {
+      "node": "Respond to Webhook",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "saveDataErrorExecution": "none",
+  "saveDataSuccessExecution": "all"
+ },
+ "active": false
+}
