@@ -3,7 +3,57 @@
 *Living checkpoint. Update it at the end of every working session. Git is the durable
 checkpoint (every milestone is committed); this doc is the human/agent handoff on top of it.*
 
-**Last updated:** 2026-07-18 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+**Last updated:** 2026-07-20 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+
+---
+
+## SESSION 2026-07-20 — READ THIS BLOCK FIRST (governance now binding + spend-limit interrupt)
+
+**Governance:** repo-root `CLAUDE.md` (agent constitution) and `docs/ROADMAP.md` (R0–R4 gates)
+are now BINDING and committed (`d107bed`). Work ONLY the current gate. Do not pivot, do not
+redesign, do not touch the frozen core. Current gate: **finish G0 remainder, then G1 (R1)**.
+
+**DONE this session (all committed, main tree green 163/0 + gate PASS + typecheck clean):**
+- `d107bed` constitution + roadmap + README truth fix · `ffacf74` R0 mechanical (package renamed
+  **proofbench** (npm-free, bin `pb`), `private:true` dropped, Apache-2.0 LICENSE, DEFERRED.md,
+  dead-code deleted: orgconfig.mjs + lyric/manifest-adapter.mjs — resurrect from `6c1754d` at R3).
+- `655c794` **G0 KEY ITEM: the FIRST parent=DOES_NOT_WORK catch EXECUTED LIVE** — n8n #9157:
+  merge `6c63cd97`=WORKS (k=2, fresh-REST confirm) ∧ parent `91e59120`=DOES_NOT_WORK (same walk
+  ran, no execution row, FALSIFIED kFail=2/2, NOT CND). Sealed receipts committed at
+  `site/cases/n8n-respondwebhook-formtrigger-pr9157.{merge,parent}.json`. **CORRECTION to the
+  2026-07-18 note below:** the n8n-1.38 build blocker was NEVER a sqlite3 native-rebuild quirk —
+  root cause = the runtime stage's `pnpm rebuild` runs from /home/node with no packageManager
+  pin, so `corepack@latest` resolves pnpm 11.x which refuses Node 18; fix = 3rd build_overlay
+  line `corepack install -g pnpm@8.14.3` (the tree's own pin). Also: the V1 formTrigger serves
+  at `$parameter["path"]/n8n-form`, NOT the node webhookId — workflow.json sets path=UUID.
+- `2320b05` ROADMAP R1 empirically grounded + `24f60a7` **linkding #1170 recipe = the R1 proof
+  case** (cold-Sonnet trial, src/ frozen): blockers hit for real = no `docker build --target`
+  (fatal), JSON-only setup steps (Django CSRF 403 — needs form encoding + HTML token capture),
+  setup cookies never reach the browser drive, placeholder hard-required in front_door. Full
+  ranked list in ROADMAP R1.
+
+**INTERRUPTED by the org monthly spend limit (3 agents killed mid-flight) — WIP banked:**
+- Branch `r1-slice-a` @ `18de342` — R1 slice A (conjure/recipe: --target, form/html-capture
+  setup, cookie handle contract, optional placeholder, confirm schema). State: 173/173 tests
+  passed at interrupt; remaining = typecheck fixes in test/recipe.test.mjs (possibly-undefined
+  guards at lines ~183-197) + final commit polish. NEARLY DONE.
+- Branch `worktree-agent-aabff673d6f3ed387` @ `928b5f4` — R1 slice B (generic effect binding).
+  State: browserdrive cookie-inject done; **catch.mjs is MID-REFACTOR AND BROKEN** (dangling
+  EFFECT_ENTITY/SETTLE refs). Early WIP — consider restarting slice B from the brief in
+  ROADMAP R1 rather than untangling, reusing its browserdrive.mjs part.
+- `git stash@{0}` on product-v1 — partial site truth pass (site/index.html mid-edit; branch
+  `wip-site-truth-pass` marks the base). R0 site+README truth pass NOT done.
+- Worktree checkouts were removed (they polluted `node --test` globbing); the branches hold
+  everything. NOTE: never leave a broken worktree under .claude/worktrees/ — `node --test`
+  sweeps it.
+
+**RESUME ORDER (next session):** (1) finish slice A on `r1-slice-a` (typecheck) → merge to
+product-v1; (2) redo/finish slice B against the merged slice-A contract (handle.cookies =
+[{name,value}]; confirm[] schema = setup[] schema) → merge; (3) migrate BOTH n8n recipes'
+confirm arrays (slice B's report must specify; else derive from freshReadExecution semantics);
+(4) LIVE validations: `pb prove` linkding (expect merge=WORKS ∧ parent=DNW), re-gate #7130 +
+#9157 byte-identical; (5) finish site+README truth pass (stash@{0}); (6) then G1 remainder
+(second engine, npm publish, getting-started, launch page).
 
 ---
 
