@@ -163,6 +163,37 @@ export function normalizeEqualsClaimValue(rel, observed) {
 }
 
 /**
+ * A LOCAL, read-only mirror of verdict.mjs's relationHolds — never imported, verdict.mjs stays
+ * frozen and unmodified — used ONLY to decide the iteration-level effectHeld/kFail bookkeeping
+ * (see the call site in runCatch for why increased/decreased alone don't need this). Scalars only
+ * (observedValue never returns anything else), so `===`/`Number()` mirrors verdict.mjs's
+ * stableStringify-based deepEqual exactly for every value this ever sees. No claim to check
+ * against (`rel` absent/malformed) => don't gate on it here (verdict.mjs still independently
+ * judges the real claim from the receipts regardless of this bookkeeping).
+ * @param {{op:string, value?:any}|undefined} rel
+ * @param {any} before
+ * @param {any} after
+ * @returns {boolean}
+ */
+function claimRelationHolds(rel, before, after) {
+  if (!rel || typeof rel.op !== 'string') return true;
+  switch (rel.op) {
+    case 'increased':
+      return Number(after) > Number(before);
+    case 'decreased':
+      return Number(after) < Number(before);
+    case 'changed':
+      return before !== after;
+    case 'unchanged':
+      return before === after;
+    case 'equals':
+      return after === rel.value;
+    default:
+      return true;
+  }
+}
+
+/**
  * Compare the fresh confirm-leg observation to the store-tap's AFTER value, coercing the SAME
  * boolean-shaped column's two honest representations: SQLite has no BOOLEAN type, so the store
  * tap reads a Django BooleanField column back as an INTEGER 0/1, while a JSON confirm capture off
@@ -705,14 +736,25 @@ export async function runCatch(opts) {
         confirmReason = confirm.reason;
         if (confirmReason) diagnosis.push(`catch: ${confirmReason}`);
       }
-      const effectHeld = changed && freshObserved !== undefined && confirmAgrees(freshObserved, after);
+      // For increased/decreased, "confirm leg agrees with the store" already implies the claim's
+      // relation held (the store either moved or it didn't). For equals/changed/unchanged — a
+      // scalar settling at a SPECIFIC or STABLE value rather than monotonically moving — those two
+      // checks are NOT the same test: a persisted-but-wrong value can still content-bind a confirm
+      // leg while genuinely failing the claim. Without this, a claim that deterministically
+      // FALSIFIES on every reproduction would never accumulate kFail>=2 to convict (DNW) — it would
+      // sit at CND forever ("a single unreproduced failure"), even though it reproduced every time.
+      const claimRel = proposal ? normalizeEqualsClaimValue(proposal.claim.expectedAfterRelation, after) : undefined;
+      const claimHolds = claimRelationHolds(claimRel, before, after);
+      const effectHeld = changed && freshObserved !== undefined && confirmAgrees(freshObserved, after) && claimHolds;
       const reason = effectHeld
         ? undefined
         : !changed
           ? 'the walk ran but the bound observable did not change'
           : freshObserved === undefined
             ? confirmReason || 'a fresh re-observation could not confirm the effect (confirm leg absent)'
-            : `the fresh re-observation (${freshObserved}) disagreed with the store delta (${after})`;
+            : !confirmAgrees(freshObserved, after)
+              ? `the fresh re-observation (${freshObserved}) disagreed with the store delta (${after})`
+              : `the persisted value (${after}) did not satisfy the claimed relation${claimRel ? ` (${claimRel.op}${'value' in claimRel ? ' ' + JSON.stringify(claimRel.value) : ''})` : ''}`;
 
       iterations.push({
         executed: true,

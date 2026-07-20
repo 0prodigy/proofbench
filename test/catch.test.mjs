@@ -400,6 +400,27 @@ test('runCatch: seals + persists the Catch bundle and computes the verdict from 
   }
 });
 
+test('runCatch: an "equals" claim whose value never matches the persisted value reproducibly FALSIFIES to DOES_NOT_WORK, not stuck at CND (linkding shape)', async () => {
+  // Root-cause regression: for increased/decreased, "confirm leg agrees with the store" already
+  // implies the claim held. For equals — a scalar settling at a SPECIFIC value — those are NOT the
+  // same test: the store here genuinely, reproducibly disagrees with the claimed value (999) on
+  // EVERY reproduction, so kFail must reach 2/2 to convict, not sit at CND forever.
+  const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
+  try {
+    const seams = catchSeams();
+    const wrongEqualsProposal = {
+      walk: goodRawProposal().walk,
+      claim: { entity: 'execution_entity.max_id', expectedAfterRelation: { op: 'equals', value: 999 }, scope: 'a visitor submits the form' },
+    };
+    seams.llmFn = asAny(async () => wrongEqualsProposal);
+    const result = await runCatch({ recipeDir: N8N_RECIPE, runDir, ...seams });
+    assert.equal(result.bundle.reproduce.kFail, 2, 'both reproductions count toward kFail, not "observed once, could not reproduce"');
+    assert.equal(result.verdict.state, Verdict.DOES_NOT_WORK, result.verdict.reasons.join(' | '));
+  } finally {
+    rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
 /**
  * PARENT-leg seams: a feature-absent world — the front door serves no fillable field and the frozen
  * merge selector matches nothing (find throws), so the replayed walk cannot execute. Nothing persists.
