@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleCatchBundle, observedValue, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
+import { assembleCatchBundle, observedValue, confirmAgrees, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
@@ -132,6 +132,18 @@ test('catch helpers: observedValue reduces store-tap rows per the engine-shaped 
   // named-scalar: postgres tuple — column 0 (or a declared one), verbatim (no coercion).
   assert.equal(observedValue([['3']], { relation: 'named-scalar' }), '3');
   assert.equal(observedValue([['x', '9']], { relation: 'named-scalar', column: 1 }), '9');
+});
+
+test('catch helpers: confirmAgrees coerces the SAME boolean-shaped column\'s two honest representations (sqlite INTEGER 0/1 vs a JSON API boolean), never a real disagreement', () => {
+  assert.equal(confirmAgrees(1, 1), true); // exact match, no coercion needed
+  assert.equal(confirmAgrees(true, 1), true); // linkding: API returns JSON boolean, store tap reads sqlite INTEGER
+  assert.equal(confirmAgrees(false, 0), true);
+  assert.equal(confirmAgrees(true, 0), false); // a genuine disagreement still fails
+  assert.equal(confirmAgrees(false, 1), false);
+  assert.equal(confirmAgrees('1', 1), true); // an HTML-regex capture returning a numeral string
+  assert.equal(confirmAgrees('0', 1), false);
+  assert.equal(confirmAgrees(undefined, 1), false);
+  assert.equal(confirmAgrees('abc', 1), false); // non-numeric string never silently agrees
 });
 
 test('catch assembly: two confirmed persists (merge-shaped) => WORKS with the exact receipt + claim shapes (claim FROM the proposal)', () => {

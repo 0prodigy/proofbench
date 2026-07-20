@@ -41,7 +41,7 @@
     {
       "id": "profile_page",
       "method": "GET",
-      "path": "/settings/",
+      "path": "/settings",
       "capture": { "csrf_token": { "from": "html", "pattern": "name=\"csrfmiddlewaretoken\" value=\"([^\"]+)\"" } }
     },
     {
@@ -84,8 +84,8 @@
     {
       "id": "read",
       "method": "GET",
-      "path": "/bookmarks/",
-      "capture": { "observed": { "from": "html", "pattern": "bookmark-item[\\s\\S]{0,400}?data-shared=\"(true|false|1|0)\"" } }
+      "path": "/api/bookmarks/",
+      "capture": { "observed": "$.0.shared" }
     }
   ],
   "drive": {

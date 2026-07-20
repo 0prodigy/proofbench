@@ -142,6 +142,28 @@ export function observedValue(rows, spec) {
 }
 
 /**
+ * Compare the fresh confirm-leg observation to the store-tap's AFTER value, coercing the SAME
+ * boolean-shaped column's two honest representations: SQLite has no BOOLEAN type, so the store
+ * tap reads a Django BooleanField column back as an INTEGER 0/1, while a JSON confirm capture off
+ * a REST endpoint serializing that same field returns a real boolean — a representation gap, not
+ * a disagreement. An actual mismatch (e.g. a non-numeric string) still correctly falls through to
+ * false — this never turns a genuine disagreement into an agreement.
+ * @param {any} freshObserved
+ * @param {any} after
+ * @returns {boolean}
+ */
+export function confirmAgrees(freshObserved, after) {
+  if (freshObserved === after) return true;
+  if (typeof after === 'number' && typeof freshObserved === 'boolean') return freshObserved === (after !== 0);
+  if (typeof after === 'boolean' && typeof freshObserved === 'number') return after === (freshObserved !== 0);
+  if (typeof after === 'number' && typeof freshObserved === 'string') {
+    const n = Number(freshObserved);
+    return Number.isFinite(n) && n === after;
+  }
+  return false;
+}
+
+/**
  * Assemble the evidence bundle from the reproduction outcomes — PURE, mirroring phase3's
  * receipt/claim block. The binding iteration is the FIRST that executed the walk: if it persisted
  * an execution the store-delta is a real increase (before < after) confirmed by the fresh leg
@@ -634,7 +656,7 @@ export async function runCatch(opts) {
         confirmReason = confirm.reason;
         if (confirmReason) diagnosis.push(`catch: ${confirmReason}`);
       }
-      const effectHeld = changed && freshObserved !== undefined && freshObserved === after;
+      const effectHeld = changed && freshObserved !== undefined && confirmAgrees(freshObserved, after);
       const reason = effectHeld
         ? undefined
         : !changed
