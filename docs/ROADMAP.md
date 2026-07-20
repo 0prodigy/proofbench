@@ -8,15 +8,20 @@ report. Decisions logged here are settled; do not reopen them.*
 Agents implement; pb verifies with unfakeable evidence; a human (later: policy) approves;
 prod deploys. pb is the verification layer — it never implements, never owns the deploy.
 
-**Where we are (2026-07-20, honest):** the honesty core is done, frozen, and green
-(tests + gate + typecheck). One full differential Catch has executed live — n8n #7130,
-an additive PR whose parent lands CND. Nothing else has ever produced a real verdict:
-the effect observable and confirm leg are hardcoded to n8n (`catch.mjs:64,472-483`),
-documenso is drive-deferred, the Lyric/argo path's store tap throws, orgconfig is
-unwired, the package is unpublishable (`private:true`), and the landing page shows a
-green PASS with raw SHAs instead of the product's actual promise (the catch). The
-enterprise substrate is designed on paper with zero running code; all pipeline glue was
-explicitly cut from v1. Full issue register at the bottom.
+**Where we are (2026-07-21, honest):** the honesty core is done, frozen, and green
+(tests + gate + typecheck). Three differential Catches have executed live: n8n #7130
+(additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK catch — a
+real regression, not absent code), and linkding #1170 (the first non-n8n stack —
+Django/sqlite — parent=DOES_NOT_WORK). The effect observable and confirm leg are no
+longer n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the recipe's own
+`store_tap.observables` + `confirm[]` (engine-shaped delta relations, not n8n's
+autoincrement assumption). README and site now lead with the #9157 catch, not a green
+PASS, with all three cases linked to committed `site/cases/*.json` evidence. Still open:
+documenso's differential is drive-blocked (PR #3031's walk is non-discriminating), the
+Lyric/argo path's store tap throws, orgconfig is unwired, the package is unpublishable
+(`private:true`), no getting-started doc, no npm distribution. The enterprise substrate
+is designed on paper with zero running code; all pipeline glue was explicitly cut from
+v1. Full issue register at the bottom.
 
 ---
 
@@ -42,16 +47,21 @@ A gate does not pass on honesty alone; each gate reports all four.
 
 Make every claim match reality; land the catch with teeth.
 
-- [ ] **Execute n8n #9157** (`pb prove recipes/n8n-respondwebhook-formtrigger-pr9157`) —
+- [x] **Execute n8n #9157** (`pb prove recipes/n8n-respondwebhook-formtrigger-pr9157`) —
       the first modifying-PR differential where parent = DOES NOT WORK (walk runs, row
       missing). This is the product's first real CATCH. Commit the recipe dir (currently
       untracked) + the sealed evidence + a case JSON under `site/cases/`.
-- [ ] **README truth pass:** delete "Plan only — nothing is built yet"; state exactly
+      Executed `655c794` (merge=WORKS ∧ parent=DOES_NOT_WORK, kFail=2/2); re-gated
+      post-migration `faeee96` with fresh sealed receipts, same verdicts.
+- [x] **README truth pass:** delete "Plan only — nothing is built yet"; state exactly
       what is proven (two n8n differentials, engines/classes supported, everything else
       honest-CND) with links to committed evidence.
-- [ ] **Site truth pass (minimum):** hero leads with the #9157 CATCH (DOES NOT WORK +
+      Done `caca762`.
+- [x] **Site truth pass (minimum):** hero leads with the #9157 CATCH (DOES NOT WORK +
       receipt), not the green PASS; raw SHAs and jargon (CND, kFail, execution_entity)
       move behind progressive disclosure; keep only claims with committed evidence.
+      Done `caca762`: hero + cert lead with #9157, three case blocks (#9157, #1170, #7130)
+      each linked to `site/cases/*.json`.
 - [ ] **Wire-or-delete:** `orgconfig.mjs` (unwired) and `lyric/manifest-adapter.mjs`
       (unwired) — either a CLI path exercises them or they move to `docs/` as design
       notes and out of `src/`. No dead code in src/ (CLAUDE.md pattern 1).
@@ -77,17 +87,20 @@ menu/confirm leg (below) were never even reached. `recipes/linkding-default-mark
 pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merge=WORKS
 ∧ parent=DOES_NOT_WORK (default_mark_shared absent at parent → persisted shared=0).*
 
-- [ ] **Conjure/recipe surface (slice A):** `code_identity.target`, setup-step
+- [x] **Conjure/recipe surface (slice A):** `code_identity.target`, setup-step
       `content_type: form` + HTML-regex capture (CSRF), cookies exposed on the SUT
       handle, optional front-door placeholder, `confirm` schema.
-- [ ] **Generic effect binding:** the observable menu comes from the recipe's
+      Done `e7d69eb`/`04e8d21` (branch `r1-slice-a`, now merged — ancestor of HEAD).
+- [x] **Generic effect binding:** the observable menu comes from the recipe's
       `store_tap.queries` (already recipe-declared data), not `EFFECT_ENTITY`
       (`catch.mjs:64`). Delta relations become engine-shaped (sqlite/postgres row-count,
       max-id, named-scalar), not n8n's autoincrement assumption (`catch.mjs:114-121`).
-- [ ] **Generic confirm leg:** replace the n8n REST confirm (`catch.mjs:472-483`) with a
+      Done `18f579f` + recipe migration `01a9f24`.
+- [x] **Generic confirm leg:** replace the n8n REST confirm (`catch.mjs:472-483`) with a
       recipe-declared fresh-session re-observation (front-door or REST steps from the
       recipe, same mint rules). Auth for it = the recipe's existing `auth_preflight` /
       setup surface; cookie-inject lands here (it has a surface now — documenso).
+      Done `18f579f` (cookie-inject wired into `runCatch`) + recipe migration `01a9f24`.
 - [ ] **Second engine EXECUTED:** one discriminating Postgres-repo differential live —
       documenso with the multiselect-specific walk, or a better-discriminating PR from
       the 12-PR corpus. `pb prove --random` gate runs the full pool.

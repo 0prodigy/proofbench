@@ -3,11 +3,63 @@
 *Living checkpoint. Update it at the end of every working session. Git is the durable
 checkpoint (every milestone is committed); this doc is the human/agent handoff on top of it.*
 
-**Last updated:** 2026-07-20 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+**Last updated:** 2026-07-21 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
 
 ---
 
-## SESSION 2026-07-20 — READ THIS BLOCK FIRST (governance now binding + spend-limit interrupt)
+## SESSION 2026-07-21 — READ THIS BLOCK FIRST (2026-07-20's interrupted resume order is now ALL DONE)
+
+**Governance unchanged:** repo-root `CLAUDE.md` + `docs/ROADMAP.md` stay binding. Current gate:
+**G1 tail only** (second engine, npm distribution, getting-started doc, launch-page stacks matrix)
+— G0 is now fully closed.
+
+**DONE this session (all committed, tree green throughout: 182/182 tests + gate PASS + typecheck
+clean):**
+- Finished R1 slice A + landed slice B directly on `product-v1` (not merged from the banked
+  branches below — those turned out stale, rebuilt clean instead): `04e8d21` slice A typecheck fix
+  · `18f579f` generic effect binding + generic confirm leg in `catch.mjs` (recipe-declared
+  `store_tap.observables`, engine-shaped delta relations, browserdrive cookie-inject wired into
+  `runCatch`) · `01a9f24` migrate n8n #7130/#9157 + linkding recipes to the slice-B contract.
+- Linkding gap-closing fixes to make the recipe actually run live (form+CSRF capture instead of
+  JSON-only POSTs, confirm-leg type coercion, quantifier-lint guidance, pagination-aware JSONPath):
+  `bcc9dbe`..`6f4b0b3`.
+- **R1 proof case EXECUTED LIVE** (`4d9fd37`): `pb prove recipes/linkding-default-mark-shared-pr1170`
+  → merge `6c874aff`=WORKS (k=2, fresh worlds) ∧ parent `723b843c`=DOES_NOT_WORK (kFail=2/2,
+  falsified) — the first non-n8n differential Catch (Django/sqlite stack), closing R1's proof-case
+  bar. Sealed receipts committed under `site/cases/`.
+- **Re-gate n8n #7130 + #9157 post-migration** (`faeee96`): both differentials re-run on the new
+  generic path — fresh sealed receipts, byte-different but same verdicts (the migration didn't
+  change the answer).
+- **Site + README truth pass** (`caca762`): hero + certificate lead with the #9157 catch, not a
+  green PASS; three real case blocks (#9157 catch, #1170 second catch, #7130 earned-green/CND) each
+  linked to committed `site/cases/*.json`; README verdicts traced to committed evidence.
+- **ROADMAP checked off:** R0 "Execute n8n #9157" (this one was actually executed live back in the
+  *prior* session's `655c794` — the checkbox had simply never been ticked, a pre-existing instance
+  of the same drift this pass is fixing), "README truth pass", "Site truth pass"; R1 "Conjure/recipe
+  surface (slice A)", "Generic effect binding", "Generic confirm leg". G0 is now fully checked off.
+
+**Stale WIP banked from the 2026-07-20 interrupt — superseded, no action needed:**
+- Branch `r1-slice-a` (tip `04e8d21`) — fully merged, ancestor of `product-v1` HEAD. Its real finish
+  landed as fresh commits directly on `product-v1`.
+- Branch `worktree-agent-aabff673d6f3ed387` (tip `928b5f4`, broken mid-refactor slice B) — **NOT**
+  merged, abandoned as planned; slice B was rebuilt clean on `product-v1` (`18f579f`) rather than
+  untangled. Safe to delete whenever convenient.
+- Branch `wip-site-truth-pass` — fully merged, ancestor of HEAD; the real site pass landed as
+  `caca762` instead.
+- `git stash@{0}` referenced by the 2026-07-20 block — no longer relevant; superseded by the above.
+
+**RESUME ORDER (next session) — items (1)-(5) from 2026-07-20 below are ALL DONE. What's left is
+G1's tail:** (1) second engine EXECUTED — documenso PR #3031's walk is non-discriminating (merge=
+WORKS ∧ parent=WORKS even without the fix), so either land the multiselect-specific walk or pick a
+better-discriminating Postgres PR from the 12-PR corpus; (2) npm distribution (publish as
+`proofbench`, drop `private:true`, version from git tag, `npx proofbench gate` cold); (3)
+getting-started doc (recipe-authoring guide, two shipped recipes as examples); (4) launch page's one
+remaining piece — a supported-stacks matrix (the three-case layout itself is done, `caca762`). Then
+move to G2.
+
+---
+
+## SESSION 2026-07-20 — spend-limit interrupt (superseded — see 2026-07-21 block above)
 
 **Governance:** repo-root `CLAUDE.md` (agent constitution) and `docs/ROADMAP.md` (R0–R4 gates)
 are now BINDING and committed (`d107bed`). Work ONLY the current gate. Do not pivot, do not
