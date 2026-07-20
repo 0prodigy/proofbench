@@ -1,8 +1,12 @@
 {
-  "name": "pb",
+  "name": "proofbench",
   "version": "0.1.0",
-  "description": "Proof-of-work for AI change — the honesty core + E1 malicious-driver gate (Phase 3).",
-  "private": true,
+  "description": "Proof-of-work for AI change — sealed, tri-state verdicts (WORKS / DOES NOT WORK / COULD NOT DETERMINE) an agent cannot fake.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0prodigy/proofbench.git"
+  },
   "type": "module",
   "bin": {
     "pb": "src/cli.mjs"

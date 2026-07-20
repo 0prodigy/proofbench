@@ -117,6 +117,9 @@ cheapest, each step ending in an executed run. This is where the Lyric blockers
 **G3 passed when:** one live, sealed, differential verdict exists on the Lyric cluster
 with harness provenance (no self-attested manifests) and the base-coherence gate held.
 
+*Note (R0): `orgconfig.mjs` and `lyric/manifest-adapter.mjs` were removed from `src/`
+at R0 (dead-code rule); resurrect from git history commit 6c1754d when R3 starts.*
+
 ## R4 — The deploy-gate product (after G2 adoption + G3 proof) · GATE G4
 
 Only now does the daily jira-to-deploy vision get built — on proven demand.
