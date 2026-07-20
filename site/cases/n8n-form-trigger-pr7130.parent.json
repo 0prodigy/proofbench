@@ -5,7 +5,7 @@
     {
       "id": "form-submit-persists-execution",
       "kind": "effect",
-      "scope": "a visitor submitting the n8n Form Trigger front-door form",
+      "scope": "visitor submitting the n8n Form Trigger front door",
       "effectCheck": {
         "entity": "execution_entity.max_id",
         "expectedAfterRelation": {
@@ -25,8 +25,8 @@
   },
   "seal": {
     "algorithm": "ed25519",
-    "digest": "225e90bf46eec1fa3816e3ae3ebb50dcf29160b909ffd08a50cabef9f364c1ab",
-    "signature": "NfW2Ragdc7TanVUQF8V+YfJ8xipvDd9AnsE95eF5Chy9wI/w3T+NbozLsU5dT+BED0PWNvysrHHqJdC26fw0DA==",
-    "publicKey": "MCowBQYDK2VwAyEA8KzQLc9qLgdqYXXQYtg6OEbhkc9SmNqVepv3nCQp7Fc="
+    "digest": "bae7938112c1d0f4b69e4dbd3d59e313963844da27f3a8b9ea9f641920663abc",
+    "signature": "q1TD3A1SmncnCvmozt51jLR+SqCEPBvknTSTY5wcJBdb8WlZDvfx2fYQKDgAJRBCch0pvXthnSMjpAxRLdS9BQ==",
+    "publicKey": "MCowBQYDK2VwAyEAboo9H6UQJtH9cnOLOPaHW5zytkoVkgV7SBT3Lw5ZFco="
   }
 }

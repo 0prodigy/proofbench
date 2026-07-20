@@ -5,7 +5,7 @@
     {
       "id": "form-submit-persists-execution",
       "kind": "effect",
-      "scope": "a visitor submitting the form trigger front door",
+      "scope": "submitting the form trigger front door creates a new workflow execution",
       "effectCheck": {
         "entity": "execution_entity.max_id",
         "expectedAfterRelation": {
@@ -31,9 +31,9 @@
         "image_digest": "sha256:453ee0e77eb77c9f3516027e029d14806a67037057364d5ea130e24d3c7fb936",
         "version_label": "1.38.0",
         "image_ref_or_tag": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-91e5912",
-        "container": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-mrt5v4s7"
+        "container": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-mrto5jrr"
       },
-      "sha256": "31a5f493118b7de2ddefd37f858617ab1f0e046a2b70b38877d6b7095a9d5cf2"
+      "sha256": "46745ac347e5129af48b09a686a6cd99c777c607224763af0a29bf018f8f69d1"
     },
     {
       "id": "store-delta",
@@ -61,6 +61,14 @@
         "steps": [
           {
             "op": "navigate",
+            "url": "http://host.docker.internal:5678"
+          },
+          {
+            "op": "addCookie",
+            "name": "n8n-auth"
+          },
+          {
+            "op": "navigate",
             "url": "http://host.docker.internal:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form"
           },
           {
@@ -82,31 +90,26 @@
           {
             "op": "find",
             "css": "input[name=\"field-0\"]",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2"
+            "elementId": "f.5398BDFC310A49E0FDB3C995BB41B7DB.d.05F29976DB33251753D9C4E243FB466F.e.13"
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.5398BDFC310A49E0FDB3C995BB41B7DB.d.05F29976DB33251753D9C4E243FB466F.e.13"
           },
           {
             "op": "type",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2",
+            "elementId": "f.5398BDFC310A49E0FDB3C995BB41B7DB.d.05F29976DB33251753D9C4E243FB466F.e.13",
             "text": "Test User"
           },
           {
             "op": "find",
-            "css": "input[type=\"text\"]",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2"
-          },
-          {
-            "op": "type",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.2",
-            "text": "test@example.com"
-          },
-          {
-            "op": "find",
             "css": "button[type=\"submit\"]",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.8"
+            "elementId": "f.5398BDFC310A49E0FDB3C995BB41B7DB.d.05F29976DB33251753D9C4E243FB466F.e.18"
           },
           {
             "op": "click",
-            "elementId": "f.23FFE82387C4773084945E58FFDFC2A5.d.A04867E3F6F4E317614630C2168E5A77.e.8"
+            "elementId": "f.5398BDFC310A49E0FDB3C995BB41B7DB.d.05F29976DB33251753D9C4E243FB466F.e.18"
           },
           {
             "op": "execute",
@@ -114,9 +117,10 @@
             "value": "{\"message\":\"Error in workflow\"}"
           }
         ],
-        "observed": "{\"message\":\"Error in workflow\"}"
+        "observed": "{\"message\":\"Error in workflow\"}",
+        "after": 0
       },
-      "sha256": "3077078e743a5d711beecb2114e38dd350de3dbc1572bd785644ef9a2fd8dd9c"
+      "sha256": "7833bcbeb738242dd65bb743f5e6096adc7d14f0d35014145b6687b8b9fcde0b"
     }
   ],
   "reproduce": {
@@ -126,8 +130,8 @@
   },
   "seal": {
     "algorithm": "ed25519",
-    "digest": "2ee8201ffeb851f0160f5fd77d28ec4f8e70eeb7037a23b8404c07bdaf011b11",
-    "signature": "NYChLKU2iuFY98wGT/LtBRJAL8uuFLJ14lurj/2t0eapNp3OO9iJzTjOSPPTWy5Ih/XBVShjnbRBHNgkcSajCA==",
-    "publicKey": "MCowBQYDK2VwAyEAt9zI4sBIaIzgI+4lg2bCQ9dxGgxa9PocbejlwF5vx5s="
+    "digest": "3b3e1c6515581a9cc35e00f8743b90a1070970f83259a6b8db1d3f0d102d5913",
+    "signature": "cv6qdPBETEuwCn48ZQ1P6uaAA3bTmmbefhlvPcPvGMoATbC/eE0JR3Z9w1fMI3VPB/S7tcX5JSopZDq+CYb0BQ==",
+    "publicKey": "MCowBQYDK2VwAyEAwKbz7USE/DD7f9OHB35l7RIxBRF5oiOn4a81d8MKEM4="
   }
 }

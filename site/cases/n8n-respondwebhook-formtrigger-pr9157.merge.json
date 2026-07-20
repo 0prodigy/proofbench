@@ -5,7 +5,7 @@
     {
       "id": "form-submit-persists-execution",
       "kind": "effect",
-      "scope": "a visitor submitting the form trigger front door",
+      "scope": "submitting the form trigger front door creates a new workflow execution",
       "effectCheck": {
         "entity": "execution_entity.max_id",
         "expectedAfterRelation": {
@@ -32,9 +32,9 @@
         "image_digest": "sha256:656869d3f0421b351e61294b65dcdc53a5ec58cf0ded39ddf7790de88d9203d7",
         "version_label": "1.38.0",
         "image_ref_or_tag": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-6c63cd9",
-        "container": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-mrt5uep7"
+        "container": "pb-sut-n8n-respond-to-webhook-form-trigger-pr-9157-mrto4vei"
       },
-      "sha256": "ded2c5e4cabeab502c0917c861e5e4beb322b376c439d4d207760d6d8a2e1c37"
+      "sha256": "41b0801288ec3c9926bbcf8e6bd966370819fb99c7986772dd5da903e456e3bd"
     },
     {
       "id": "store-delta",
@@ -47,11 +47,9 @@
         "before": 0,
         "after": 1,
         "countBefore": 0,
-        "countAfter": 1,
-        "workflowId": "ZGKkIFdCS4YyZ0Xh",
-        "status": "success"
+        "countAfter": 1
       },
-      "sha256": "44542c2c2c6c05dbda22a6f9fb17f9657d4fe1be2e67bc92743dc28422ace36c"
+      "sha256": "17f767f15ad49c190aceefa7f8b7d21e7cc2bf4ba246ade19dd469d0e038ab98"
     },
     {
       "id": "browser-drive",
@@ -62,6 +60,14 @@
         "request": "browser-drive http://localhost:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form",
         "frontDoorUrl": "http://localhost:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form",
         "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:5678"
+          },
+          {
+            "op": "addCookie",
+            "name": "n8n-auth"
+          },
           {
             "op": "navigate",
             "url": "http://host.docker.internal:5678/webhook/ee8a5b73-acd0-498d-a987-835de67ad1c7/n8n-form"
@@ -85,31 +91,26 @@
           {
             "op": "find",
             "css": "input[name=\"field-0\"]",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.2"
+            "elementId": "f.B88C21A12E6AE649B908FD4283FCE39C.d.775A4A908E0DCC95C96C01103A0A363C.e.13"
+          },
+          {
+            "op": "find",
+            "css": "input[name=\"field-0\"]",
+            "elementId": "f.B88C21A12E6AE649B908FD4283FCE39C.d.775A4A908E0DCC95C96C01103A0A363C.e.13"
           },
           {
             "op": "type",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.2",
+            "elementId": "f.B88C21A12E6AE649B908FD4283FCE39C.d.775A4A908E0DCC95C96C01103A0A363C.e.13",
             "text": "Test User"
           },
           {
             "op": "find",
-            "css": "input[type=\"text\"]",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.2"
-          },
-          {
-            "op": "type",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.2",
-            "text": "test@example.com"
-          },
-          {
-            "op": "find",
             "css": "button[type=\"submit\"]",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.7"
+            "elementId": "f.B88C21A12E6AE649B908FD4283FCE39C.d.775A4A908E0DCC95C96C01103A0A363C.e.18"
           },
           {
             "op": "click",
-            "elementId": "f.6D3A982E53F005D4E40633F188D3CF86.d.5599121B01595E74284312E83D8E079F.e.7"
+            "elementId": "f.B88C21A12E6AE649B908FD4283FCE39C.d.775A4A908E0DCC95C96C01103A0A363C.e.18"
           },
           {
             "op": "execute",
@@ -118,9 +119,9 @@
           }
         ],
         "observed": "Your response has been recorded",
-        "executionId": 1
+        "after": 1
       },
-      "sha256": "aea6b3202d5c1fe98966273cba82afe5d57a5559e16d0e4698b4cfee08ef529f"
+      "sha256": "178ea39e2c004f3ebfe9655b96fdf7261ddbc4bb8c07f554b3c12010c1a4b710"
     },
     {
       "id": "fresh-execution",
@@ -129,10 +130,10 @@
       "identity": "form-visitor",
       "data": {
         "entity": "execution_entity.max_id",
-        "executionId": 1,
+        "after": 1,
         "observed": 1
       },
-      "sha256": "283e9ce4d6f17b9cb6a305af8e583f3f1c597ad3e77bcc2c5948f9f734a62917"
+      "sha256": "6ace0ad2f67495dc9038ce46fed09cee96645adcbc6389e3d817eca4af07b7cf"
     }
   ],
   "reproduce": {
@@ -142,8 +143,8 @@
   },
   "seal": {
     "algorithm": "ed25519",
-    "digest": "325b38606e4b1a91c9916d82f0c5c56a699c89f40d2cd2931490e9077b59fd70",
-    "signature": "iWYi0dYubqDXL/GMDQ9grlD6yrAC8LCa7xOPhE7Ds8lRPcxj9mggIXkCTNK0ACqpxqvoY0WW4oPjIq+sD7fiBg==",
-    "publicKey": "MCowBQYDK2VwAyEA+ZokN4BzTMSfVQSPgNJ31OHN08J3ifA+BQteGFCJQb0="
+    "digest": "1bac17d90395cf34d0d6fe186c937f0d78f9fb84ae3fd226884a4fc240b1d205",
+    "signature": "LwLFNoAaGws/uBp7Nuh02m7N5FB9aode0IIMa/waJSq94fsXO4df5grMsTPxEtwUXcXbqf2JCqQeh0GVfuhQAg==",
+    "publicKey": "MCowBQYDK2VwAyEALxJdKZ1P9h3azDla5JJjo/rfEgXxa5gzIwi5fdk1YMQ="
   }
 }
