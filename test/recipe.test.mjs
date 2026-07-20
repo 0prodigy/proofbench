@@ -180,8 +180,10 @@ test('recipe: setup step capture accepts an {from:"html", pattern} regex capture
   const dir = writeRecipeDir(o);
   try {
     const r = loadRecipe(dir);
-    assert.deepEqual(r.setup[0].capture.csrf_token, { from: 'html', pattern: 'name="csrfmiddlewaretoken" value="([^"]+)"' });
-    assert.equal(r.setup[0].capture.id, '$.data.id'); // JSONPath capture stays untouched
+    const capture = r.setup[0].capture;
+    assert.ok(capture);
+    assert.deepEqual(capture.csrf_token, { from: 'html', pattern: 'name="csrfmiddlewaretoken" value="([^"]+)"' });
+    assert.equal(capture.id, '$.data.id'); // JSONPath capture stays untouched
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -193,6 +195,7 @@ test('recipe: confirm is validated with the exact setup step schema and defaults
   let dir = writeRecipeDir(withConfirm);
   try {
     const r = loadRecipe(dir);
+    assert.ok(r.confirm);
     assert.equal(r.confirm.length, 1);
     assert.equal(r.confirm[0].id, 'c1');
   } finally {
