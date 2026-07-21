@@ -30,6 +30,7 @@
     <nav class="nav-links">
       <a href="#pipeline">How it works</a>
       <a href="#catch">The Catch</a>
+      <a href="#stacks">Supported stacks</a>
       <a href="case.html">Case file</a>
       <a href="https://github.com/0prodigy/proofbench">GitHub</a>
     </nav>
@@ -341,6 +342,91 @@ EVIDENCE SEALED ed25519</code></pre>
     </div>
   </section>
 
+  <!-- ============ SUPPORTED STACKS ============ -->
+  <section id="stacks">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">what pb actually supports today</p>
+        <h2>The supported-stacks matrix.</h2>
+        <p>Every row below is what it says, no more — traced to a committed recipe, case file, or design doc in this repo. What isn't supported yet lands as an honest <span class="badge badge-cnd">COULD NOT DETERMINE</span> that names the one thing that would unblock it, never a guessed WORKS.</p>
+      </div>
+
+      <h3 class="stacks-group-head">Supported — traceable to committed evidence</h3>
+      <div class="table-scroll">
+      <table class="stacks-table">
+        <thead><tr><th scope="col">Capability</th><th scope="col">Status</th><th scope="col">Evidence</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Docker conjure — single container &amp; multi-service compose graph
+              <span class="stacks-detail">build the SUT from an exact commit (<code>from_tree</code>): one container (n8n, linkding) or a graph of app + Postgres + inbucket (documenso)</span>
+            </td>
+            <td><span class="badge badge-works">SUPPORTED</span></td>
+            <td class="stacks-evidence"><a href="../recipes/n8n-respondwebhook-formtrigger-pr9157/recipe.json">n8n recipe</a> · <a href="../recipes/linkding-default-mark-shared-pr1170/recipe.json">linkding recipe</a> · <a href="../recipes/documenso-envelope-fields-pr3031/recipe.json">documenso recipe</a></td>
+          </tr>
+          <tr>
+            <td>sqlite store tap
+              <span class="stacks-detail">out-of-band file read, engine-shaped row-count/max-id relations — no app-API involved</span>
+            </td>
+            <td><span class="badge badge-works">SUPPORTED</span> — 3 executed differentials</td>
+            <td class="stacks-evidence"><a href="cases/n8n-respondwebhook-formtrigger-pr9157.merge.json">n8n #9157</a> · <a href="cases/n8n-form-trigger-pr7130.merge.json">n8n #7130</a> · <a href="cases/linkding-default-mark-shared-pr1170.merge.json">linkding #1170</a></td>
+          </tr>
+          <tr>
+            <td>Form &amp; session-auth front doors
+              <span class="stacks-detail">a plain server-rendered creation form (n8n), and a session-auth + CSRF-gated login form ahead of it (linkding) — cookies minted in setup ride into the browser drive</span>
+            </td>
+            <td><span class="badge badge-works">SUPPORTED</span></td>
+            <td class="stacks-evidence"><a href="cases/n8n-respondwebhook-formtrigger-pr9157.merge.json">n8n case</a> · <a href="cases/linkding-default-mark-shared-pr1170.merge.json">linkding case</a></td>
+          </tr>
+          <tr>
+            <td>Agent-proposed browser walk
+              <span class="stacks-detail">a real, cold Sonnet via the local <code>claude</code> CLI proposes the click/type/observe walk headless, on subscription auth — no API key, no replayed transcript</span>
+            </td>
+            <td><span class="badge badge-works">SUPPORTED</span></td>
+            <td class="stacks-evidence">all three cases above</td>
+          </tr>
+          <tr>
+            <td>Postgres store tap + canvas drive + multipart/exec setup
+              <span class="stacks-detail">a Konva <code>&lt;canvas&gt;</code> field-placement front door (shift-click drive), a Postgres out-of-band tap, and a real multi-step setup dance (signup → exec-capture team lookup → inbucket token capture → verify-email → multipart envelope POST) — implemented, unit-tested, committed (185/185 tests, gate PASS, typecheck clean)</span>
+            </td>
+            <td><span class="badge badge-cnd">CAPABILITY PROVEN</span> — no executed differential yet</td>
+            <td class="stacks-evidence"><a href="../docs/documenso-canvas-spike.md">canvas-drive spike</a> · <a href="../recipes/documenso-envelope-fields-pr3031/recipe.json">documenso recipe</a></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="stacks-note">The last row, honestly: the harness capability and the rewritten discriminating recipe (PR #3031's shift-click multiselect, with a verified <code>parent_sha</code>) are real and committed. The live differential itself — merge vs. parent, agent-driven — has not been attempted; the two smoke-test attempts so far failed on infrastructure (a host-port collision, then a conjure port-mapping gap), not on recipe logic, and Docker was left clean both times. Unblock: land the pending port fix and re-run the smoke test end to end, then attempt the differential.</p>
+
+      <h3 class="stacks-group-head">Declines to honest CND — names the one action that unblocks it</h3>
+      <div class="table-scroll">
+      <table class="stacks-table">
+        <thead><tr><th scope="col">Class</th><th scope="col">Status</th><th scope="col">Unblock</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Kubernetes / Helm / a live cluster</td>
+            <td><span class="badge badge-cnd">CND</span></td>
+            <td><code>store_tap.engine: "k8s-exec"</code> and <code>drive.mode: "argo-workflows"</code> are declared in the recipe schema, but the k8s-exec tap is a hard throw today and there's no k8s-attach conjure. Scheduled as <a href="../docs/ROADMAP.md">R3</a> — not a workaround, not built yet.</td>
+          </tr>
+          <tr>
+            <td>Serverless / fully-managed backends</td>
+            <td><span class="badge badge-cnd">CND</span></td>
+            <td>No recipe conjures a managed service pb doesn't control the container for. No code planned until a real paying case demands it.</td>
+          </tr>
+          <tr>
+            <td>Mobile / native front doors</td>
+            <td><span class="badge badge-cnd">CND</span></td>
+            <td>The drive vocabulary is browser DOM (find/type/click) or HTTP only — no native-app driver exists. Same bar as serverless: undesigned until real demand.</td>
+          </tr>
+          <tr>
+            <td>Repos with no Dockerfile / not container-buildable</td>
+            <td><span class="badge badge-cnd">CND</span></td>
+            <td><code>code_identity.mode: "from_tree"</code> requires a <code>dockerfile</code> pb can <code>docker build</code>. Add a Dockerfile, or wait for the (undesigned) pre-build compile hook.</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ QUICKSTART ============ -->
   <section id="quickstart">
     <div class="container">
@@ -460,6 +546,7 @@ open site/case.html          # or double-click the .html file</code></pre><butto
         <h4>Project</h4>
         <a href="#pipeline">How it works</a>
         <a href="#catch">The Catch</a>
+        <a href="#stacks">Supported stacks</a>
         <a href="case.html">Case file</a>
         <a href="https://github.com/0prodigy/proofbench">GitHub</a>
       </div>

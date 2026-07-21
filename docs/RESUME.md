@@ -7,6 +7,52 @@ checkpoint (every milestone is committed); this doc is the human/agent handoff o
 
 ---
 
+## SESSION 2026-07-21 (b) — launch-page stacks matrix landed; documenso differential still BLOCKED
+
+**Done this pass:** the last G1 launch-page piece — `#stacks` section on `site/index.html`
+(nav links added header+footer), plus `.stacks-table`/`.stacks-group-head`/`.stacks-note`
+CSS in `site/assets/site.css`. Two tables: **Supported** (compose/single-container conjure;
+sqlite tap, 3 executed differentials; form + session-auth front doors; agent-proposed
+browser walk; Postgres tap + canvas drive + multipart/exec setup — this last one marked
+`CAPABILITY PROVEN` not `SUPPORTED`, with an explicit prose note that the documenso
+differential itself has not been attempted) and **Declines to honest CND** (k8s/helm → R3,
+serverless/managed, mobile/native, no-Dockerfile — each names its unblock). Every cell
+links to a committed recipe/case/doc file (relative paths, since `product-v1` isn't pushed
+to `origin` yet — only `main`, the old pre-rewrite OSS line, exists on the remote; an
+absolute `github.com/.../blob/main/...` link would silently point at stale code). README has
+no "stacks" section, so nothing to mirror there. `docs/ROADMAP.md`'s "Launch page rebuild"
+checkbox is now checked off. Verified before/after: 185/185 tests, `pb gate` PASS, typecheck
+clean — this was a site-only (HTML/CSS) change, `src/` untouched.
+
+**Left exactly as found, NOT committed (out of scope for this pass, do not lose track of
+it):** `recipes/documenso-envelope-fields-pr3031/recipe.json` and
+`compose.override.mem.yml` carry an uncommitted local diff — the port-3010 fix for the
+conjure port-mapping gap described in the engine-track note below. The matrix's honest
+wording (`CAPABILITY PROVEN`, no executed differential) is written to stay true whether or
+not that diff ever lands, so do not treat "the matrix says CAPABILITY PROVEN" as license to
+quietly commit the port fix and call the row done — a real differential still needs the
+smoke test re-run + a full `pb prove` merge-vs-parent leg pair, live.
+
+**Engine-track state (context carried over, unchanged by this pass):** the postgres/canvas
+harness capability (browserdrive shift-click, widened introspection, settle debounce,
+multipart/exec/headers/origin setup+confirm steps) is implemented, tested, and committed
+clean. The documenso #3031 recipe was rewritten into a real discriminating differential
+(`parent_sha` added, verified against the actual tree at both SHAs — the field-group
+shift-click handler is the only changed code — plus the full HTTP/exec setup dance) and
+committed (`366cbc8`). Two live smoke-test attempts of `conjure()` both failed on
+infrastructure, not recipe logic: (1) this sandbox's host port 3000 is intercepted by an
+unrelated Gitea instance ahead of Docker's own container; (2) after moving to
+`published_port` 3010, `conjure.mjs`'s compose-mode bring-up never actually parameterizes
+the real Docker port publish from recipe fields — it comes from the checked-out
+`compose.yml`'s own `3000:3000`, so the ready-check polled a dead port. The fix
+(`compose.override.mem.yml` sets `PORT=3010` + an additional `3010:3010` mapping;
+recipe.json's `container_port`/`published_port` both 3010) is written but uncommitted and
+NOT yet re-verified live. Docker confirmed clean (no orphaned containers) after both
+attempts. **Next action:** commit the port fix, re-run the smoke test end to end
+(bring-up + full setup dance), then attempt the actual merge-vs-parent differential.
+
+---
+
 ## SESSION 2026-07-21 — READ THIS BLOCK FIRST (2026-07-20's interrupted resume order is now ALL DONE)
 
 **Governance unchanged:** repo-root `CLAUDE.md` + `docs/ROADMAP.md` stay binding. Current gate:
@@ -59,14 +105,13 @@ clean):**
   `caca762` instead.
 - `git stash@{0}` referenced by the 2026-07-20 block — no longer relevant; superseded by the above.
 
-**RESUME ORDER (next session) — items (1)-(5) from 2026-07-20 below are ALL DONE. What's left is
-G1's tail:** (1) second engine EXECUTED — documenso PR #3031's walk is non-discriminating (merge=
-WORKS ∧ parent=WORKS even without the fix), so either land the multiselect-specific walk or pick a
-better-discriminating Postgres PR from the 12-PR corpus; (2) npm distribution (publish as
+**RESUME ORDER (next session) — items (1)-(5) from 2026-07-20 below are ALL DONE, and so is the
+launch-page matrix (see the 2026-07-21 (b) block above). What's left is G1's tail:** (1) second
+engine EXECUTED — documenso #3031 now has a real discriminating recipe + harness capability
+committed (`366cbc8`/`375964f`), but the live differential is BLOCKED on an uncommitted conjure
+port fix, not yet re-verified (see 2026-07-21 (b) block); (2) npm distribution (publish as
 `proofbench`, drop `private:true`, version from git tag, `npx proofbench gate` cold); (3)
-getting-started doc (recipe-authoring guide, two shipped recipes as examples); (4) launch page's one
-remaining piece — a supported-stacks matrix (the three-case layout itself is done, `caca762`). Then
-move to G2.
+getting-started doc — DONE, see `docs/getting-started.md`. Then move to G2.
 
 ---
 

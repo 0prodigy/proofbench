@@ -111,9 +111,15 @@ pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merg
       Done: `docs/getting-started.md` — every field derived from `src/recipe.mjs`,
       verdict/exit-code semantics traced to `src/verdict.mjs`/`src/cli.mjs`, honest-CND
       section names today's declines (no-Dockerfile, k8s, serverless, mobile/native).
-- [ ] **Launch page rebuild** around three real case files: the catch (#9157 DNW), the
+- [x] **Launch page rebuild** around three real case files: the catch (#9157 DNW), the
       earned green (#7130 WORKS), the honest refusal (a real CND) + a supported-stacks
       matrix that says exactly what declines to CND.
+      Three-case layout done `caca762`; supported-stacks matrix (`#stacks` on
+      `site/index.html`) added this pass — 5 supported rows (compose conjure, sqlite
+      tap, form/session-auth front doors, agent-proposed browser walk, postgres+canvas
+      capability honestly marked "no executed differential yet") + 4 honest-CND rows
+      (k8s/helm, serverless/managed, mobile/native, no-Dockerfile), each cell linked to
+      a committed recipe/case/doc. README has no stacks section to mirror into.
 
 **G1 passed when:** a person who didn't build pb takes a compose-runnable repo pb has
 never seen from `npx proofbench` to a real sealed verdict in under an hour, and
