@@ -3,18 +3,42 @@
 # docker/testing/compose.yml. build.context is inherited from the base file
 # (../../ = repo root); only the dockerfile is swapped.
 #
-# NEXT_PUBLIC_WEBAPP_URL: the base compose.yml's env_file (.env.example) does not set this, so
-# server-side code that derives the app's own origin (e.g. the signup-confirmation email's
-# verification link, `packages/lib/server-only/auth/send-confirmation-email.ts`) falls back to
+# PORT=3010 + an ADDITIONAL published port 3010:3010 (Compose CONCATENATES the `ports` list
+# across -f files, so the base file's harmless `3000:3000` mapping stays too, just unused):
+# this sandbox's host port 3000 is intercepted ahead of Docker's own proxy by an unrelated
+# service (confirmed live — curling published :3000 answered with a Gitea login redirect, not
+# documenso, even though `docker ps` reported the mapping as up), so conjure's baseUrl/ready-check
+# must never target host port 3000 for this recipe. apps/remix/server/main.js reads
+# `process.env.PORT` (default 3000), so this is a real, honored app config, not a workaround
+# against the app itself. recipe.json's conjure.published_port/container_port are both 3010 to
+# match.
+#
+# NEXT_PUBLIC_WEBAPP_URL: the base compose.yml's env_file (.env.example) pins this to
 # 'http://localhost:3000' — a host-facing URL that is wrong from INSIDE the chromium sidecar
 # container the browser-drive runs in (see browserdrive.mjs's hostToContainer rewrite: only the
 # harness's own navigate() calls get rewritten, not a URL baked into an email body). Setting it to
-# host.docker.internal here keeps every app-emitted absolute URL consistent with how the sidecar
-# reaches the SUT. The compose conjure path ignores recipe conjure.env (documenso self-bootstraps
-# via its own env_file), so this env addition goes in the overlay, not recipe.json.
+# host.docker.internal:3010 keeps every app-emitted absolute URL consistent with how the sidecar
+# reaches the SUT (host.docker.internal resolves to the host, which now publishes 3010). The
+# compose conjure path ignores recipe conjure.env (documenso self-bootstraps via its own
+# env_file), so this env addition goes in the overlay, not recipe.json.
+#
+# NEXT_PRIVATE_INTERNAL_WEBAPP_URL: the base env_file ALSO pins this to 'http://localhost:3000'
+# (packages/lib/constants/app.ts falls back to NEXT_PUBLIC_WEBAPP_URL only when this is unset, so
+# the .env.example value wins either way) — and this one is a SELF-loopback the LocalJobProvider
+# uses to dispatch background jobs (packages/lib/jobs/client/local.ts submitJobToEndpoint POSTs
+# `${NEXT_PRIVATE_INTERNAL_WEBAPP_URL()}/api/jobs/...` from INSIDE the same container). With
+# PORT=3010 the app listens on 3010, not 3000, so a stale :3000 self-POST connection-refuses;
+# submitJobToEndpoint swallows that failure (`.catch(() => null)`), so signup silently never
+# triggers send.signup.confirmation.email — the confirmation mail never reaches inbucket, no
+# error surfaces anywhere. Unlike NEXT_PUBLIC_WEBAPP_URL (host-facing, needs host.docker.internal
+# so the *sidecar* can resolve it), this is container-internal, so plain localhost:3010 is correct.
 services:
   documenso:
     build:
       dockerfile: docker/Dockerfile.mem
+    ports:
+      - '3010:3010'
     environment:
-      - NEXT_PUBLIC_WEBAPP_URL=http://host.docker.internal:3000
+      - PORT=3010
+      - NEXT_PUBLIC_WEBAPP_URL=http://host.docker.internal:3010
+      - NEXT_PRIVATE_INTERNAL_WEBAPP_URL=http://localhost:3010

@@ -18,8 +18,8 @@
     "compose_overlays": ["compose.override.mem.yml", "Dockerfile.mem"],
     "service": "documenso",
     "env": {},
-    "container_port": 3000,
-    "published_port": 3000,
+    "container_port": 3010,
+    "published_port": 3010,
     "ready_signal": { "path": "/api/health", "expect_status": 200 }
   },
   "fresh_world": { "strategy": "recreate" },
