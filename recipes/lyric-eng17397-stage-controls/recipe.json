@@ -74,7 +74,7 @@
     "base_url_template": "http://{appservice_host}:{appservice_port}",
     "entrypoint": "POST /executions?scenarioId={PB_SCENARIO_ID}&sequenceId={PB_SEQUENCE_ID}&sequenceNoteId={PB_SEQ_NOTE_ID}",
     "headers": { "From": "{PB_LYRIC_FROM}" },
-    "serves": "the same appservice REST entrypoint lyric-py drives in-pod (all three ids MUST be in the query string; a body-only POST 500s). The minted id is the parent execution _id from the fire response; parent.notes[0] then resolves the child note-exec that carries subActions[]/stages[] and is the executionId stagecontrols are scoped by."
+    "serves": "the same appservice REST entrypoint lyric-py drives in-pod (all three ids MUST be in the query string; a body-only POST 500s). The fire response's JSON field `id` ($.id) is the PARENT execution id. GET /executions/{parent_execution_id} returns the parent, whose `notes` is an array of CHILD execution-id STRINGS — $.notes[0] is the child execution that carries subActions[]/stages[] and is the executionId stagecontrols are scoped by. The child's workflow stages are read from GET /executions/{child_execution_id} ($.stages[].name, seeded in declaration order) and driven by PATCH /executions/{child_execution_id}/stages/{stageName} with JSON body {\"state\":\"running\"} then {\"state\":\"succeeded\"} (or {\"state\":\"failed\",\"error\":\"...\"}) — succeeded/failed are the TERMINAL stage states and a terminal stage transition is the state change the intent is about; re-transitioning a terminal stage is rejected 4xx."
   },
 
   "store_tap": {
