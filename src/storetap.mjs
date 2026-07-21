@@ -121,7 +121,20 @@ export async function tapStore(handle, queryName, docker = defaultDocker(), exec
   }
   if (st.engine === 'sqlite') return tapSqlite(handle, st, queryName, query, docker);
   if (st.engine === 'postgres') return tapPostgres(st, queryName, query, docker);
-  if (st.engine === 'mongo') return tapMongo(st, queryName, query, execFn);
+  if (st.engine === 'mongo') {
+    // The mongo engine is k8s-attach only (the Lyric class) — mongotap.mjs's kubectl calls MUST
+    // target the recipe-declared conjure.kube_context/namespace, never the operator's ambient
+    // current-context, so every call is threaded with the SAME world bring-up/drift-sentinel
+    // already attached through. A handle with no _k8sAttach means the wrong conjure mode produced
+    // it; fail loudly rather than let mongotap silently fall through to an un-scoped kubectl call.
+    if (!handle._k8sAttach) {
+      throw new Error(
+        `storetap: engine 'mongo' requires a k8s-attach handle (conjure.mode 'k8s-attach') to supply kube_context/namespace — ` +
+          `got a handle with no _k8sAttach; refusing to run an un-scoped kubectl call`
+      );
+    }
+    return tapMongo(st, queryName, query, handle._k8sAttach.kubeArgs, execFn);
+  }
   throw new Error(`storetap: unsupported engine '${String(/** @type {any} */ (st).engine)}' — only 'sqlite', 'postgres', and 'mongo' are supported`);
 }
 

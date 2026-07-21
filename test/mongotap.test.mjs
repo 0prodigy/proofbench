@@ -15,6 +15,10 @@ import { tapMongo, wrapQueryAsJsonRows } from '../src/mongotap.mjs';
 /** @param {any} x @returns {any} */
 const asAny = (x) => x;
 
+/** The recipe-declared world every kubectl call must carry — deliberately NOT the operator's ambient context/namespace. */
+const KUBE_ARGS = { kubeContext: 'lyriclet-test-ctx', namespace: 'lyriclet-test-ns' };
+const KUBE_PREFIX = ['--context', KUBE_ARGS.kubeContext, '-n', KUBE_ARGS.namespace];
+
 function makeStoreTap(overrides = {}) {
   return {
     engine: 'mongo',
@@ -32,7 +36,10 @@ const b64 = (/** @type {string} */ s) => Buffer.from(s, 'utf8').toString('base64
 
 /**
  * A fake kubectl runner keyed on a handler function so tests can script secret reads + mongosh
- * execs by argv shape without a giant queued-response list.
+ * execs by argv shape without a giant queued-response list. Asserts EVERY call carries the
+ * `--context <kubeContext> -n <namespace>` prefix (the whole point of this tap's fix), then hands
+ * the handler the argv with that prefix stripped — so handler bodies stay shape-focused, same as
+ * before threading kubeArgs in.
  * @param {(args:string[]) => {status:number, stdout?:string, stderr?:string, error?:Error}} handler
  */
 function fakeKubectl(handler) {
@@ -42,7 +49,8 @@ function fakeKubectl(handler) {
     calls,
     run: (/** @type {string[]} */ args) => {
       calls.push(args);
-      return handler(args);
+      assert.deepEqual(args.slice(0, 4), KUBE_PREFIX, `every kubectl call must carry --context/-n, got: ${JSON.stringify(args)}`);
+      return handler(args.slice(4));
     },
   };
 }
@@ -71,7 +79,7 @@ test('mongotap: tries credential_secrets IN ORDER, validates each with a ping, a
     return { status: 0, stdout: '[{"executionId":"exec1","status":"expired"}]' };
   });
 
-  const rows = await tapMongo(asAny(makeStoreTap()), 'stage_controls', makeStoreTap().queries.stage_controls, asAny(kubectl));
+  const rows = await tapMongo(asAny(makeStoreTap()), 'stage_controls', makeStoreTap().queries.stage_controls, asAny(KUBE_ARGS), asAny(kubectl));
   assert.deepEqual(rows, [{ executionId: 'exec1', status: 'expired' }]);
 
   // both secrets' username+password were read, both pinged, only the working one drove the real query
@@ -89,18 +97,19 @@ test('mongotap: builds the exact kubectl exec argv (pod, container, mongosh, --q
     }
     return { status: 0, stdout: '[]' };
   });
-  await tapMongo(asAny(makeStoreTap({ credential_secrets: ['only-secret'] })), 'stage_controls', "db.stagecontrols.find({}).toArray()", asAny(kubectl));
-  const execCall = kubectl.calls.find((c) => c[0] === 'exec');
+  await tapMongo(asAny(makeStoreTap({ credential_secrets: ['only-secret'] })), 'stage_controls', "db.stagecontrols.find({}).toArray()", asAny(KUBE_ARGS), asAny(kubectl));
+  const execCall = kubectl.calls.find((c) => c[4] === 'exec');
   assert.ok(execCall);
-  assert.equal(execCall[0], 'exec');
-  assert.equal(execCall[1], 'mongodb-0');
-  assert.equal(execCall[2], '-c');
-  assert.equal(execCall[3], 'mongod');
-  assert.equal(execCall[4], '--');
-  assert.equal(execCall[5], 'mongosh');
-  assert.ok(execCall[6].startsWith('mongodb://lyric:pw@localhost:27017/lyric?authSource=lyric'));
-  assert.equal(execCall[7], '--quiet');
-  assert.equal(execCall[8], '--eval');
+  assert.deepEqual(execCall.slice(0, 4), KUBE_PREFIX); // --context/-n prefix, every call
+  assert.equal(execCall[4], 'exec');
+  assert.equal(execCall[5], 'mongodb-0');
+  assert.equal(execCall[6], '-c');
+  assert.equal(execCall[7], 'mongod');
+  assert.equal(execCall[8], '--');
+  assert.equal(execCall[9], 'mongosh');
+  assert.ok(execCall[10].startsWith('mongodb://lyric:pw@localhost:27017/lyric?authSource=lyric'));
+  assert.equal(execCall[11], '--quiet');
+  assert.equal(execCall[12], '--eval');
 });
 
 test('mongotap: findOne (object) and a null/absent findOne both normalize to a rows array', async () => {
@@ -108,14 +117,14 @@ test('mongotap: findOne (object) and a null/absent findOne both normalize to a r
     if (args[0] === 'get') return { status: 0, stdout: b64('u') };
     return { status: 0, stdout: '[{"_id":"e1","status":"queued"}]' }; // wrapper already prints the array form
   });
-  const rows = await tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', "db.executions.findOne({_id:'e1'})", asAny(kubectlObj));
+  const rows = await tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', "db.executions.findOne({_id:'e1'})", asAny(KUBE_ARGS), asAny(kubectlObj));
   assert.deepEqual(rows, [{ _id: 'e1', status: 'queued' }]);
 
   const kubectlNull = fakeKubectl((args) => {
     if (args[0] === 'get') return { status: 0, stdout: b64('u') };
     return { status: 0, stdout: '[]' };
   });
-  const rowsNull = await tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', "db.executions.findOne({_id:'missing'})", asAny(kubectlNull));
+  const rowsNull = await tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', "db.executions.findOne({_id:'missing'})", asAny(KUBE_ARGS), asAny(kubectlNull));
   assert.deepEqual(rowsNull, []);
 });
 
@@ -128,7 +137,7 @@ test('mongotap: throws naming every tried secret when NONE authenticates (never 
     return { status: 1, stderr: 'Authentication failed.' };
   });
   await assert.rejects(
-    () => tapMongo(asAny(makeStoreTap()), 'stage_controls', 'db.stagecontrols.find({}).toArray()', asAny(kubectl)),
+    () => tapMongo(asAny(makeStoreTap()), 'stage_controls', 'db.stagecontrols.find({}).toArray()', asAny(KUBE_ARGS), asAny(kubectl)),
     /no WORKING mongo credentials[\s\S]*mongodb-password, mongodb-lyric-lyric[\s\S]*never falls back to an app read/
   );
 });
@@ -143,7 +152,7 @@ test('mongotap: a secret missing username or password is skipped without a ping 
     }
     return { status: 0, stdout: '[]' };
   });
-  await tapMongo(asAny(makeStoreTap({ credential_secrets: ['incomplete-secret', 'good-secret'] })), 'q', 'db.x.find({}).toArray()', asAny(kubectl));
+  await tapMongo(asAny(makeStoreTap({ credential_secrets: ['incomplete-secret', 'good-secret'] })), 'q', 'db.x.find({}).toArray()', asAny(KUBE_ARGS), asAny(kubectl));
   const pingCalls = kubectl.calls.filter((c) => c.includes('--eval') && c[c.indexOf('--eval') + 1] === 'db.runCommand({ping:1})');
   assert.equal(pingCalls.length, 1); // only good-secret ever reached a ping
 });
@@ -156,7 +165,7 @@ test('mongotap: throws on a failing real-query exec (distinct from a credential 
     return { status: 1, stderr: 'MongoServerError: Unrecognized pipeline stage' };
   });
   await assert.rejects(
-    () => tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'stage_controls', 'db.stagecontrols.find({}).toArray()', asAny(kubectl)),
+    () => tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'stage_controls', 'db.stagecontrols.find({}).toArray()', asAny(KUBE_ARGS), asAny(kubectl)),
     /query 'stage_controls' failed via secret 's' \(exit 1\)[\s\S]*Unrecognized pipeline stage/
   );
 });
@@ -168,7 +177,7 @@ test('mongotap: a docker/kubectl runner error (e.g. binary not found) surfaces d
     return { status: /** @type {any} */ (null), error: new Error('spawnSync kubectl ENOENT') };
   });
   await assert.rejects(
-    () => tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', 'db.x.find({}).toArray()', asAny(kubectl)),
+    () => tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', 'db.x.find({}).toArray()', asAny(KUBE_ARGS), asAny(kubectl)),
     /kubectl exec for query 'q' failed to run: spawnSync kubectl ENOENT/
   );
 });

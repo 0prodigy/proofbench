@@ -24,6 +24,15 @@
  * sqlite/postgres already return — so recipe.mjs's `resolveObservable` / catch.mjs's
  * `observedValue` need no mongo-specific branch.
  *
+ * Every kubectl call (secret reads AND mongosh execs) carries `--context <kube_context> -n
+ * <namespace>` from the recipe's own `conjure.kube_context`/`namespace` — the same
+ * operator-supplied world conjure.mjs's bring-up/drift-sentinel already attach through (threaded
+ * in by the caller via {@link tapMongo}'s `kubeArgs` param, sourced from the k8s-attach handle's
+ * `_k8sAttach.kubeArgs`). Every lyriclet has a `mongodb-0`/`mongod` pod and the same
+ * credential-secret names, so an un-scoped kubectl call would SUCCEED against whatever the
+ * operator's shell happens to be pointed at and mint plausible rows as harness provenance for the
+ * WRONG world — never the operator's ambient current-context/current-namespace.
+ *
  * Zero runtime deps: kubectl via child_process (mirroring conjure/storetap/argoworkflows/
  * browserdrive's own runner seams).
  */
@@ -47,6 +56,28 @@ export function defaultExecRunner() {
   };
 }
 
+/**
+ * The recipe-declared, operator-supplied k8s world every kubectl call in this tap MUST target —
+ * never the operator's ambient current-context/current-namespace. Mirrors conjure.mjs's own
+ * `{kubeContext, namespace}` shape (conjure.kube_context/namespace) so a single k8s-attach handle's
+ * world is what every read — bring-up, drift-sentinel, AND this store tap — actually hits.
+ * @typedef {Object} MongoKubeArgs
+ * @property {string} kubeContext
+ * @property {string} namespace
+ */
+
+/**
+ * Prefix a kubectl argv with `--context <kubeContext> -n <namespace>` — every call this tap makes
+ * (secret reads AND mongosh execs) must carry this, or it silently reads whatever world the
+ * operator's shell happens to be pointed at instead of the recipe-declared one.
+ * @param {MongoKubeArgs} kubeArgs
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function withKubeArgs(kubeArgs, args) {
+  return ['--context', kubeArgs.kubeContext, '-n', kubeArgs.namespace, ...args];
+}
+
 /** @param {string} [s] @param {number} [n] */
 function tail(s, n = 800) {
   s = s || '';
@@ -59,12 +90,13 @@ function tail(s, n = 800) {
  * key, bad base64) — the caller treats that as "this secret doesn't work," never a throw
  * (mirrors lyric-mongo.sh's own fall-through-on-failure stance).
  * @param {ExecRunner} execFn
+ * @param {MongoKubeArgs} kubeArgs the recipe-declared world this read must target
  * @param {string} secretName
  * @param {string} field
  * @returns {string}
  */
-function readSecretField(execFn, secretName, field) {
-  const res = execFn.run(['get', 'secret', secretName, '-o', `jsonpath={.data.${field}}`], KUBECTL_TIMEOUT_MS);
+function readSecretField(execFn, kubeArgs, secretName, field) {
+  const res = execFn.run(withKubeArgs(kubeArgs, ['get', 'secret', secretName, '-o', `jsonpath={.data.${field}}`]), KUBECTL_TIMEOUT_MS);
   if (res.error || res.status !== 0) return '';
   const b64 = (res.stdout || '').trim();
   if (!b64) return '';
@@ -94,11 +126,12 @@ function mongoUri(st, username, password) {
  * @param {import('./recipe.mjs').MongoStoreTap} st
  * @param {string} uri
  * @param {string} script
+ * @param {MongoKubeArgs} kubeArgs the recipe-declared world this exec must target
  * @param {ExecRunner} execFn
  * @returns {import('node:child_process').SpawnSyncReturns<string>}
  */
-function execMongosh(st, uri, script, execFn) {
-  return execFn.run(['exec', st.pod, '-c', st.container, '--', 'mongosh', uri, '--quiet', '--eval', script], KUBECTL_TIMEOUT_MS);
+function execMongosh(st, uri, script, kubeArgs, execFn) {
+  return execFn.run(withKubeArgs(kubeArgs, ['exec', st.pod, '-c', st.container, '--', 'mongosh', uri, '--quiet', '--eval', script]), KUBECTL_TIMEOUT_MS);
 }
 
 /**
@@ -107,16 +140,17 @@ function execMongosh(st, uri, script, execFn) {
  * `db.runCommand({ping:1})` actually SUCCEEDS through mongosh, never on the secret's mere
  * presence (a stale secret can sit alongside a live one — lyric-mongo.sh's own finding).
  * @param {import('./recipe.mjs').MongoStoreTap} st
+ * @param {MongoKubeArgs} kubeArgs the recipe-declared world every candidate is tried against
  * @param {ExecRunner} execFn
  * @returns {{secretName:string, uri:string}|null}
  */
-function resolveWorkingCredential(st, execFn) {
+function resolveWorkingCredential(st, kubeArgs, execFn) {
   for (const secretName of st.credential_secrets) {
-    const username = readSecretField(execFn, secretName, 'username');
-    const password = readSecretField(execFn, secretName, 'password');
+    const username = readSecretField(execFn, kubeArgs, secretName, 'username');
+    const password = readSecretField(execFn, kubeArgs, secretName, 'password');
     if (!username || !password) continue;
     const uri = mongoUri(st, username, password);
-    const res = execMongosh(st, uri, 'db.runCommand({ping:1})', execFn);
+    const res = execMongosh(st, uri, 'db.runCommand({ping:1})', kubeArgs, execFn);
     if (!res.error && res.status === 0) return { secretName, uri };
   }
   return null;
@@ -167,18 +201,22 @@ function parseMongoRows(stdout, queryName) {
  * @param {import('./recipe.mjs').MongoStoreTap} st
  * @param {string} queryName
  * @param {string} query
+ * @param {MongoKubeArgs} kubeArgs the recipe-declared `conjure.kube_context`/`namespace` this read
+ *   MUST target (threaded from the k8s-attach handle's own `_k8sAttach.kubeArgs` — the same world
+ *   bring-up/drift-sentinel already attach through) — every kubectl call carries it, so a wrong-
+ *   world read can never silently succeed against the operator's ambient current-context
  * @param {ExecRunner} [execFn] injected for cluster-free tests; defaults to the real kubectl CLI
  * @returns {Promise<any[]>}
  */
-export async function tapMongo(st, queryName, query, execFn = defaultExecRunner()) {
-  const cred = resolveWorkingCredential(st, execFn);
+export async function tapMongo(st, queryName, query, kubeArgs, execFn = defaultExecRunner()) {
+  const cred = resolveWorkingCredential(st, kubeArgs, execFn);
   if (!cred) {
     throw new Error(
       `mongotap: no WORKING mongo credentials for query '${queryName}' — tried secrets [${st.credential_secrets.join(', ')}] ` +
         `(each needs a 'username'+'password' key AND a passing db.runCommand({ping:1})); never falls back to an app read`
     );
   }
-  const res = execMongosh(st, cred.uri, wrapQueryAsJsonRows(query), execFn);
+  const res = execMongosh(st, cred.uri, wrapQueryAsJsonRows(query), kubeArgs, execFn);
   if (res.error) throw new Error(`mongotap: kubectl exec for query '${queryName}' failed to run: ${res.error.message}`);
   if (res.status !== 0) {
     throw new Error(`mongotap: query '${queryName}' failed via secret '${cred.secretName}' (exit ${res.status}): ${tail(res.stderr || res.stdout)}`);

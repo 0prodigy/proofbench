@@ -13,8 +13,12 @@ import assert from 'node:assert/strict';
 import { tapStore, mintStoreDelta } from '../src/storetap.mjs';
 import { isMinted } from '../src/harness.mjs';
 
+/** The recipe-declared world a k8s-attach handle carries — deliberately NOT the operator's ambient context/namespace. */
+const MONGO_KUBE_ARGS = { kubeContext: 'lyriclet-test-ctx', namespace: 'lyriclet-test-ns' };
+const MONGO_KUBE_PREFIX = ['--context', MONGO_KUBE_ARGS.kubeContext, '-n', MONGO_KUBE_ARGS.namespace];
+
 /** A minimal fake mongo SUT handle: the tap kubectl-execs into a k8s pod (store_tap.pod), not handle.containerName. */
-function makeMongoHandle() {
+function makeMongoHandle(withK8sAttach = true) {
   return {
     containerName: 'irrelevant-for-mongo',
     recipe: {
@@ -27,10 +31,16 @@ function makeMongoHandle() {
         queries: { stage_controls: "db.stagecontrols.find({executionId:'exec1'}).toArray()" },
       },
     },
+    ...(withK8sAttach ? { _k8sAttach: { kubeArgs: MONGO_KUBE_ARGS } } : {}),
   };
 }
 
-/** A fake kubectl runner: secret reads always succeed with the given creds, then the query runs. */
+/**
+ * A fake kubectl runner: secret reads always succeed with the given creds, then the query runs.
+ * Asserts every call carries the `--context/-n` prefix (the tap must target the recipe-declared
+ * world, never the operator's ambient current-context), then dispatches on the argv with that
+ * prefix stripped.
+ */
 function fakeKubectlForMongo(/** @type {string} */ queryStdout) {
   /** @type {string[][]} */
   const calls = [];
@@ -38,8 +48,10 @@ function fakeKubectlForMongo(/** @type {string} */ queryStdout) {
     calls,
     run: (/** @type {string[]} */ args) => {
       calls.push(args);
-      if (args[0] === 'get' && args[1] === 'secret') {
-        const field = args[4].includes('username') ? 'username' : 'password';
+      assert.deepEqual(args.slice(0, 4), MONGO_KUBE_PREFIX, `every mongo kubectl call must carry --context/-n, got: ${JSON.stringify(args)}`);
+      const rest = args.slice(4);
+      if (rest[0] === 'get' && rest[1] === 'secret') {
+        const field = rest[4].includes('username') ? 'username' : 'password';
         return { status: 0, stdout: Buffer.from(field === 'username' ? 'lyric' : 'pw', 'utf8').toString('base64') };
       }
       return { status: 0, stdout: queryStdout };
@@ -196,7 +208,10 @@ test('storetap: tapStore dispatches engine "mongo" to a kubectl-exec mongosh tap
   const kubectl = fakeKubectlForMongo('[{"executionId":"exec1","status":"expired"}]');
   const rows = await tapStore(asAny(makeMongoHandle()), 'stage_controls', asAny(fakeDocker([])), asAny(kubectl));
   assert.deepEqual(rows, [{ executionId: 'exec1', status: 'expired' }]);
-  assert.ok(kubectl.calls.some((c) => c[0] === 'exec' && c[1] === 'mongodb-0' && c[3] === 'mongod'));
+  assert.ok(kubectl.calls.some((c) => c[4] === 'exec' && c[5] === 'mongodb-0' && c[7] === 'mongod'));
+  // every call — including the exec above — targeted the handle's own k8s-attach world, never
+  // whatever context/namespace the operator's shell happens to be pointed at.
+  assert.ok(kubectl.calls.every((c) => c.slice(0, 4).every((v, i) => v === MONGO_KUBE_PREFIX[i])));
 });
 
 test('storetap: the mongo tap throws (never falls back to an app read) when no credential_secrets entry authenticates', async () => {
@@ -204,7 +219,8 @@ test('storetap: the mongo tap throws (never falls back to an app read) when no c
     calls: /** @type {string[][]} */ ([]),
     run: (/** @type {string[]} */ args) => {
       kubectl.calls.push(args);
-      if (args[0] === 'get' && args[1] === 'secret') return { status: 1, stderr: 'not found' };
+      const rest = args.slice(4);
+      if (rest[0] === 'get' && rest[1] === 'secret') return { status: 1, stderr: 'not found' };
       return { status: 1, stderr: 'Authentication failed.' };
     },
   };
@@ -212,6 +228,15 @@ test('storetap: the mongo tap throws (never falls back to an app read) when no c
     () => tapStore(asAny(makeMongoHandle()), 'stage_controls', asAny(fakeDocker([])), asAny(kubectl)),
     /no WORKING mongo credentials[\s\S]*never falls back to an app read/
   );
+});
+
+test('storetap: the mongo tap refuses an un-scoped kubectl call when the handle carries no k8s-attach kubeArgs', async () => {
+  const kubectl = fakeKubectlForMongo('[]');
+  await assert.rejects(
+    () => tapStore(asAny(makeMongoHandle(false)), 'stage_controls', asAny(fakeDocker([])), asAny(kubectl)),
+    /engine 'mongo' requires a k8s-attach handle[\s\S]*no _k8sAttach[\s\S]*refusing to run an un-scoped kubectl call/
+  );
+  assert.equal(kubectl.calls.length, 0); // fails before any kubectl call is attempted
 });
 
 test('storetap: mintStoreDelta returns a minted HARNESS delta with the right data shape', () => {
