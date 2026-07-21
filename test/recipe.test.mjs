@@ -83,7 +83,7 @@ test('recipe: the n8n Form Trigger recipe validates and its load-bearing fields 
   assert.equal(r.drive.mode, 'http');
 });
 
-test('recipe: the documenso Envelope Fields recipe validates (compose mode + postgres tap + deferred drive)', () => {
+test('recipe: the documenso Envelope Fields recipe validates (compose mode + postgres tap + browser drive, the discriminating multiselect differential)', () => {
   const r = loadRecipe(DOCUMENSO_RECIPE);
   // compose-mode conjure: the multi-service class, the repo's own testing compose + mem overlays
   assert.equal(r.conjure.mode, 'compose');
@@ -92,7 +92,9 @@ test('recipe: the documenso Envelope Fields recipe validates (compose mode + pos
   const overlays = r.conjure.compose_overlays || [];
   assert.ok(overlays.length >= 1, 'compose_overlays present');
   for (const f of overlays) assert.ok(existsSync(join(DOCUMENSO_RECIPE, f)), `overlay ${f} exists on disk`);
-  // postgres store tap: a SEPARATE DB container, the PR-mutated "Field" table (double-quoted)
+  // postgres store tap: a SEPARATE DB container, the PR-mutated "Field" table (double-quoted),
+  // switched to a row LISTING (row-count) so the claim can bind an exact 'equals 1', with a
+  // settle spec riding out the editor's autosave debounce.
   assert.equal(r.store_tap.engine, 'postgres');
   const pg = /** @type {import('../src/recipe.mjs').PostgresStoreTap} */ (r.store_tap);
   assert.equal(pg.container, 'documenso-test-database-1');
@@ -100,19 +102,35 @@ test('recipe: the documenso Envelope Fields recipe validates (compose mode + pos
   assert.equal(pg.db, 'documenso');
   assert.match(pg.queries.fields, /"Field"/); // PascalCase identifier stays double-quoted (no @@map)
   assert.equal(pg.busy_timeout_ms, undefined); // postgres is MVCC → no busy-timeout
-  // honest code-identity: from_tree bound to the exact merge SHA
+  assert.equal(resolveObservable(pg, 'fields').relation, 'row-count');
+  assert.equal(pg.settle?.quiet_ms, 3000);
+  assert.equal(pg.settle?.max_ms, 30000);
+  // honest code-identity: from_tree bound to the exact merge SHA + its disclosed differential parent
   assert.equal(r.code_identity.mode, 'from_tree');
-  assert.equal(
-    /** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity).sha,
-    '97835b8dbb2ca24670c8a410972d949c982c8f61'
-  );
-  // drive is honestly deferred (Konva <canvas> front door) → the Catch CNDs for this repo
-  assert.equal(r.drive.mode, 'deferred');
-  assert.match(r.drive.reason || '', /canvas/i);
-  // front door is a URL template carrying a minted id (informational, since drive is deferred)
-  assert.match(r.front_door.url_template, /\{[^}]+\}/);
-  // documenso self-bootstraps (auto-migrations) → no REST setup dance
-  assert.deepEqual(r.setup, []);
+  const ci = /** @type {import('../src/recipe.mjs').FromTreeIdentity} */ (r.code_identity);
+  assert.equal(ci.sha, '97835b8dbb2ca24670c8a410972d949c982c8f61');
+  assert.equal(ci.parent_sha, '977d07330b97ce451fb834447807b9d4163fc6bd');
+  // drive is now the real browser Catch (Konva canvas capability proven live, R1 second engine)
+  assert.equal(r.drive.mode, 'browser');
+  // front door lands on the addFields step, both minted ids resolved
+  assert.match(r.front_door.url_template, /\{team_url\}.*\{envelope_id\}/);
+  // setup: signup -> an exec-capture team lookup (no REST route exists for it at this SHA) ->
+  // inbucket capture -> verify-email -> a REAL multipart envelope-create call
+  assert.equal(r.setup.length, 6);
+  assert.equal(r.setup[1].exec?.engine, 'postgres');
+  assert.deepEqual(r.setup[1].capture, { team_id: 0, team_url: 1 });
+  const createStep = r.setup[5];
+  assert.equal(createStep.content_type, 'multipart');
+  assert.equal(createStep.headers?.['x-team-id'], '{team_id}');
+  assert.ok(existsSync(join(DOCUMENSO_RECIPE, createStep.files?.[0].path || '')), 'the multipart file asset exists on disk');
+  // confirm: a genuinely fresh login re-reads the SAME envelope (captured at setup) via x-team-id
+  assert.ok(r.confirm);
+  assert.equal(r.confirm.length, 3);
+  assert.equal(r.confirm[2].capture?.observed, '$.fields.length');
+  assert.equal(r.confirm[2].headers?.['x-team-id'], '{team_id}');
+  // the intent carries no universal quantifier (stays off rule 5) and names the discriminating claim
+  assert.doesNotMatch(r.intent || '', /\b(any|all|every|each|whole)\b/i);
+  assert.match(r.intent || '', /exactly one field row/);
 });
 
 test('recipe: a setup step may combine headers/origin/multipart+files, an exec-capture step validates its own shape, and store_tap.settle loads', () => {
