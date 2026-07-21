@@ -3,7 +3,59 @@
 *Living checkpoint. Update it at the end of every working session. Git is the durable
 checkpoint (every milestone is committed); this doc is the human/agent handoff on top of it.*
 
-**Last updated:** 2026-07-21 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+**Last updated:** 2026-07-22 · **Branch:** `product-v1` · **Tip:** run `git log --oneline -1`.
+
+---
+
+## SESSION 2026-07-22 (f) — LIVE MERGE LEG IN FLIGHT: 5 honest CNDs → 4 pb product fixes; world now base-coherent; blocked on fresh-schema note publish
+
+**Founder grants this session:** full gh-actions authority (exercised), deploys via
+decision-engine surface (`mic byoc` = the notprod-lyric-deploy MCP's API; MCP not attached
+to this project scope), permission rule `Bash(mic byoc:*)` added via /permissions,
+"bring the cluster in shape pb expects" explicitly authorized; testing stays pb-ONLY.
+
+**World state (ctx `akashpathak`, ns `delta` — awake, all four ticket images LIVE+Ready):**
+appservice `akashpathak-e1c87a34` (deploy via mic pin+deploy, infra branch
+`ENG-17397-deploy-appservice-akashpathak-1784662404`), metadata-service
+`akashpathak-dffc6331` (nucliofunction patch), mosaic-function-scenario
+`akashpathak-a32fac6e` (built via single_promote from ENG-17397-scenario-selected-action
+@83ca1a8), mosaic-function-stage-control `akashpathak-0af04e26` (built via git tag pushed
+through gh api at 894ce3d — single_promote does not know this repo; docker_publish needs a
+TAG ref, branch dispatch fails "invalid refspec"). PARENT-leg tags banked for the swap:
+appservice `akashpathak-40b14842`, MDS `akashpathak-b4c121e7` (both images already built).
+
+**pb product fixes shipped THIS session (all live-CND-driven, committed+pushed):**
+`1570a52` proposer mode-aware prompts (browser prompt was hardwired; http/trigger op docs) ·
+`1f05b18` harness discloses the note-lifecycle walk contract (required_capture + serves) ·
+`8ee5991` capture miss / >=400 refuses AT the offending step w/ keys-only shape hint ·
+`566ba9c` non-scalar capture refusal (names the captured object's keys) ·
+recipe commits `6e7aa29`→`2b7ecda`: resolved operator values, From-header auth
+(PB_LYRIC_FROM), corrected serves (POST returns parent with POPULATED notes[]; child id =
+$.notes[0].id), per-leg expected_images repo:tag incl. both mosaic fns. Tests 285/285,
+gate PASS, typecheck clean throughout; frozen core untouched.
+
+**Operator env (resolved, merge leg):** PB_K8S_CONTEXT=akashpathak PB_K8S_NAMESPACE=delta
+PB_DEFAULT_ACTION=full_run PB_OVERRIDE_ACTION=quick_run PB_LYRIC_FROM=akash@lyric.tech
+PB_EXPECTED_IMAGE=<leg appservice ref> — scenario/sequence/seqnote ids: qa5's
+(6a4c92ecb8c4bb507f650038 / …f955 / …f957) are STALE-SCHEMA, see blocker.
+
+**THE BLOCKER (root-caused):** cluster note releases (qa5 family) carry OLD field names
+`actions`/`defaultAction`; the merge code resolves `subActions`/`defaultSubAction`
+(executions.service.ts:305-307,355) → children get subActions:[] stages:[] and note runs
+die ('NoneType' has no attribute 'stage'). Product-path fix IN FLIGHT: lyric-qa agent
+publishing ticket disruption-note (new schema, blocking control resolution_mode on stage
+plan, actions full_run/incremental_run) as `pb-eng17397-disruption` + wiring app/sequence/
+scenario/datasource/automap. Its ids replace qa5's in operator env; PB_OVERRIDE_ACTION
+becomes incremental_run.
+
+**RESUME ORDER:** 1) get publish ids from lyric-qa report (release doc MUST carry
+subActions/defaultSubAction — verify) → 2) re-run merge leg (`node src/cli.mjs prove
+recipes/lyric-eng17397-stage-controls --leg merge --out merge-case.json` with env above +
+new ids) → 3) swap to parent images (mic pin+deploy appservice 40b14842 on the infra
+branch; nucliofunction patch MDS b4c121e7; mosaic fns STAY at ticket builds both legs;
+swap recipe expected_images tags) → 4) `--leg parent --replay-walk merge-case.json` →
+5) `pb differential merge-case.json parent-case.json` → commit sealed pair + site/cases →
+6) founder `npm login` → publish proofbench@0.2.1 (unchanged gate).
 
 ---
 
