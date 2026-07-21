@@ -90,6 +90,24 @@ test('executeNoteLifecycleWalk: reuses the confirmHttpReq request shape — plac
   assert.equal(seen[1].url, 'http://localhost:18000/executions/p1/stages/final');
 });
 
+test('executeNoteLifecycleWalk: a PLACEHOLDER-RESOLVED path that becomes hostile (e.g. a captured value smuggling "@attacker" or "http://evil" in) is refused, defense-in-depth — never fetched', async () => {
+  const fetchFn = asAny(async () => {
+    throw new Error('fetchFn must never be called for a hostile resolved path');
+  });
+  const hostileResolutions = [
+    { captured: '@attacker/x', template: '/executions/{captured_id}' },
+    { captured: 'evil', template: 'http://{captured_id}' }, // resolves to 'http://evil'
+  ];
+  for (const { captured, template } of hostileResolutions) {
+    const walk = [{ op: 'http', args: { method: 'GET', path: template } }];
+    await assert.rejects(
+      executeNoteLifecycleWalk({ fetchFn, baseUrl: 'http://localhost:18000', walk: asAny(walk), headers: {}, captures: { captured_id: captured } }),
+      /note-lifecycle 'http' op resolved to an unsafe path/,
+      `expected template '${template}' with captured='${captured}' to be refused`
+    );
+  }
+});
+
 test('executeNoteLifecycleWalk: a non-2xx/3xx step throws (an honest could-not-execute, not a silent pass)', async () => {
   const fetchFn = asAny(async () => ({ status: 500, headers: { getSetCookie: () => [], get: () => null }, text: async () => 'boom' }));
   const walk = [{ op: 'http', args: { method: 'GET', path: '/x' } }];

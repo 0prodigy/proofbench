@@ -153,6 +153,27 @@ function requireNumber(v, field) {
 }
 
 /**
+ * Guard an `http` walk step's path against host-retargeting tricks. The note-lifecycle executor
+ * builds its request as `fetchFn(baseUrl + resolvedPath)` (catch.mjs's executeNoteLifecycleWalk):
+ * a path carrying userinfo (`@attacker/...`) or an absolute URL (`http://evil`) can re-target that
+ * concatenation at a different host entirely, exfiltrating the recipe's operator_env values /
+ * front_door.headers to it. A safe path must be a plain relative path (starts with '/') and must
+ * not contain '@', '://', or whitespace/control characters. Reused both here (proposal validation
+ * — an unsafe path is rejected at the door as an honest CND) and, defense-in-depth, at execution
+ * (catch.mjs re-checks the PLACEHOLDER-RESOLVED path, since a captured value could smuggle the
+ * same trick in after resolution).
+ * @param {string} path
+ * @returns {string|null} a reason the path is unsafe, or null when it's fine
+ */
+export function unsafeHttpPathReason(path) {
+  if (typeof path !== 'string' || !path.startsWith('/')) return `must start with '/' (a relative path), got ${JSON.stringify(path)}`;
+  if (path.includes('@')) return "must not contain '@' (host-retargeting risk)";
+  if (path.includes('://')) return "must not contain '://' (absolute-URL retargeting risk)";
+  if (/[\s\x00-\x1f]/.test(path)) return 'must not contain whitespace/control characters';
+  return null;
+}
+
+/**
  * Validate one step's args against its op — reject a wrong-shape argument. Returns a clean,
  * whitelisted args object (only the fields the executor uses; no stray keys carried through).
  * @param {string} op
@@ -193,6 +214,10 @@ function validateArgs(op, args, i) {
       // (name -> a JSONPath string read from the response, the setup/confirm default form).
       requireString(args.method, `walk[${i}].args.method`);
       requireString(args.path, `walk[${i}].args.path`);
+      {
+        const pathProblem = unsafeHttpPathReason(args.path);
+        if (pathProblem) bad(`walk[${i}].args.path ${pathProblem}`);
+      }
       if (args.body !== undefined && (!args.body || typeof args.body !== 'object' || Array.isArray(args.body))) {
         bad(`walk[${i}].args.body must be an object when present`);
       }

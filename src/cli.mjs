@@ -228,9 +228,14 @@ export function exitCodeForVerdict(state) {
  * {walk, claim} is folded in as an EXTRA agent-provenance receipt so it is tamper-evident under a
  * FRESH ed25519 seal over intent+claims+receipts+verdict (evidence.mjs's sealBundle, reused as-is,
  * never re-implemented) — `--replay-walk`/`differential` can then extract it from the SEALED
- * bundle only, never a loose file. `{leg, differential:false}` sit alongside as routing metadata:
- * only `pb differential` (which needs TWO case files) ever prints "DIFFERENTIAL: PASS", so a
- * single leg's case can never pass itself off as one.
+ * bundle only, never a loose file. The `{leg, differential:false, recipe, recipeDir}` ROUTING
+ * metadata is folded in TWICE: as a top-level convenience (readable without re-verifying the seal;
+ * `differential:false` means only `pb differential` — which needs TWO case files — ever prints
+ * "DIFFERENTIAL: PASS", so a single leg's case can never pass itself off as one) AND as an extra
+ * 'case-routing' receipt INSIDE `receipts` — receipts contribute to evidence.mjs's manifestDigest,
+ * so THIS copy is the one judgeDifferential actually trusts (extractSealedLeg): a caller can no
+ * longer silently retag a case's leg label after sealing, and a merge-labeled case passed as the
+ * parent argument (or vice versa) is refused rather than silently folded.
  * @param {Object} args
  * @param {{name:string}} args.recipe the loaded recipe (only .name is carried into the case)
  * @param {string} args.recipeDir
@@ -240,18 +245,22 @@ export function exitCodeForVerdict(state) {
  */
 export function sealLegCase({ recipe, recipeDir, leg, result }) {
   const proposal = result.proposal;
-  const receipts = proposal
-    ? [
-        ...result.bundle.receipts,
-        {
-          id: 'agent-proposal',
-          kind: 'proposal',
-          provenance: 'agent',
-          data: { walk: proposal.walk, claim: proposal.claim },
-          sha256: contentAddress(JSON.stringify({ walk: proposal.walk, claim: proposal.claim })),
-        },
-      ]
-    : result.bundle.receipts;
+  const routing = { leg, differential: false, recipe: recipe.name, recipeDir };
+  const receipts = [
+    ...result.bundle.receipts,
+    ...(proposal
+      ? [
+          {
+            id: 'agent-proposal',
+            kind: 'proposal',
+            provenance: 'agent',
+            data: { walk: proposal.walk, claim: proposal.claim },
+            sha256: contentAddress(JSON.stringify({ walk: proposal.walk, claim: proposal.claim })),
+          },
+        ]
+      : []),
+    { id: 'case-routing', kind: 'routing', provenance: 'harness', data: routing, sha256: contentAddress(JSON.stringify(routing)) },
+  ];
   const rewrapped = {
     intent: result.bundle.intent,
     actorIdentity: result.bundle.actorIdentity,
@@ -291,6 +300,40 @@ export function extractFrozenProposal(caseFile) {
 }
 
 /**
+ * Extract the SEALED leg label from a case's own 'case-routing' receipt (folded in by
+ * sealLegCase) — the source of truth judgeDifferential trusts, NOT the case file's un-sealed
+ * top-level `.leg` (routing convenience only, outside the seal's digest). Calling this is only
+ * safe on a case whose seal has ALREADY been verified (extractFrozenProposal/sealedVerdict), same
+ * as extractFrozenProposal's own contract.
+ * @param {any} caseFile parsed pb-catch-case-v1 JSON
+ * @returns {{leg:string}|{error:string}}
+ */
+export function extractSealedLeg(caseFile) {
+  const rec = (caseFile.bundle.receipts || []).find((/** @type {any} */ r) => r.id === 'case-routing');
+  if (!rec || !rec.data || typeof rec.data.leg !== 'string') {
+    return { error: 'sealed case carries no case-routing receipt (was it produced by `pb prove --leg`?)' };
+  }
+  return { leg: rec.data.leg };
+}
+
+/**
+ * Extract a leg's DRIVE-TIME digest set from its SEALED bundle — the 'fingerprint' receipt
+ * conjure.mjs's mintK8sAttachIdentity mints per k8s-attach reproduction carries
+ * `data.drive_time_digests` (the pods' actually-running image digests, read fresh at drive time).
+ * Used by judgeDifferential to catch the case where an operator's promised out-of-band deploy swap
+ * never actually happened — both legs would then have observed the SAME running digests, so
+ * nothing was proven either way. A from_tree recipe's fingerprint (mode:'from_tree') carries no
+ * `drive_time_digests` field, so this returns `[]` for it — the check below is then a no-op.
+ * @param {any} caseFile parsed pb-catch-case-v1 JSON
+ * @returns {string[]} the leg's drive-time digests, sorted (empty when none were minted)
+ */
+function extractDriveTimeDigests(caseFile) {
+  const rec = ((caseFile.bundle && caseFile.bundle.receipts) || []).find((/** @type {any} */ r) => r && r.kind === 'fingerprint');
+  const digests = rec && rec.data && Array.isArray(rec.data.drive_time_digests) ? rec.data.drive_time_digests : [];
+  return [...digests].sort();
+}
+
+/**
  * Stable, key-sorted JSON (mirrors the small pure stableStringify/sortKeys pair every honesty-core
  * module duplicates on purpose — verdict.mjs/evidence.mjs/harness.mjs — so modules stay independent).
  * @param {any} value
@@ -315,8 +358,9 @@ function sortKeys(v) {
  * Fold two sealed leg case files into a differential verdict — computes nothing new and mints
  * nothing: it re-derives each leg's verdict FRESH from ITS OWN seal (sealedVerdict, so a tampered
  * case can never contribute a verdict) and enforces the anti-tautology preconditions (same recipe
- * identity, byte-identical frozen {walk, claim} replayed on both legs). PURE (no I/O, no
- * process.exit) so it is unit-testable without a live cluster.
+ * identity, byte-identical frozen {walk, claim} replayed on both legs, DISTINCT sealed leg labels,
+ * and — for a k8s-attach recipe — an actual deploy swap between the two legs' drive-time image
+ * digests). PURE (no I/O, no process.exit) so it is unit-testable without a live cluster.
  * @param {Object} args
  * @param {any} args.mergeCase parsed pb-catch-case-v1 JSON (validated here — any shape accepted)
  * @param {any} args.parentCase
@@ -344,6 +388,19 @@ export function judgeDifferential({ mergeCase, parentCase, mergePath, parentPath
       ],
     };
   }
+  const mergeLeg = extractSealedLeg(mergeCase);
+  const parentLeg = extractSealedLeg(parentCase);
+  if ('error' in mergeLeg || 'error' in parentLeg) {
+    return { exitCode: 2, lines: [`pb differential: ${('error' in mergeLeg && mergeLeg.error) || ('error' in parentLeg && parentLeg.error)}`] };
+  }
+  if (mergeLeg.leg === parentLeg.leg) {
+    return {
+      exitCode: 2,
+      lines: [
+        `pb differential: both files carry the SAME sealed leg label ('${mergeLeg.leg}') — refusing (a leg case cannot double as the other; pass two DISTINCT legs, not the same case twice or a mislabeled swap).`,
+      ],
+    };
+  }
   const mergeProposal = extractFrozenProposal(mergeCase);
   const parentProposal = extractFrozenProposal(parentCase);
   if ('error' in mergeProposal || 'error' in parentProposal) {
@@ -357,11 +414,31 @@ export function judgeDifferential({ mergeCase, parentCase, mergePath, parentPath
       ],
     };
   }
+  const mergeDigests = extractDriveTimeDigests(mergeCase);
+  const parentDigests = extractDriveTimeDigests(parentCase);
+  const digestLines = [
+    `  merge  drive-time digests: [${mergeDigests.join(', ') || '(none)'}]`,
+    `  parent drive-time digests: [${parentDigests.join(', ') || '(none)'}]`,
+  ];
+  // Anti-tautology: if both legs are k8s-attach (both minted a non-empty digest set) and those
+  // sets are IDENTICAL, the operator's promised out-of-band deploy swap never actually happened —
+  // both legs ran against the same deployed pods, so nothing was proven either way. Refuse PASS
+  // outright rather than let a coincidentally-discriminating verdict pair through.
+  if (mergeDigests.length && parentDigests.length && stableStringify(mergeDigests) === stableStringify(parentDigests)) {
+    return {
+      exitCode: 2,
+      lines: [
+        'pb differential: REFUSED — legs ran against the same deployed digests — no deploy swap occurred.',
+        ...digestLines,
+      ],
+    };
+  }
   const pass = mergeVerdict.state === Verdict.WORKS && parentVerdict.state === Verdict.DOES_NOT_WORK;
   const lines = [
     'pb differential — DIFFERENTIAL (the deploy swap IS why it works)',
     `  merge  (${mergeCase.leg || 'merge'}, ${mergePath}): ${mergeVerdict.state}`,
     `  parent (${parentCase.leg || 'parent'}, ${parentPath}): ${parentVerdict.state}`,
+    ...digestLines,
     '',
     `  DIFFERENTIAL: ${pass ? 'PASS' : 'FAIL'}  (PASS iff merge=WORKS and parent=DOES_NOT_WORK)`,
   ];

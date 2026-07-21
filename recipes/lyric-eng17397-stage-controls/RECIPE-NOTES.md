@@ -72,6 +72,15 @@ cluster itself has never been reached (no live run has executed). Do not treat a
    before this pass. The base-coherence preflight (still R3-unbuilt, see below) still cannot
    check the two Nuclio services until a recon task supplies their refs.
 
+   **Operator note — bind strength (`conjure.mjs`'s `expectedImagesBind` guarantee ladder,
+   strongest to weakest: digest > repo+tag > repo-only > absent):** as committed, these two
+   entries are REPO-ONLY, the weakest non-absent tier — they bind against ANY image ever
+   pushed to that repo, not the specific build under test. For the live run, tighten each
+   entry to `repo:tag` (the built tags for this ticket's two legs are `akashpathak-e1c87a34`
+   and `akashpathak-40b14842`, one per leg — supply whichever tag was actually built for the
+   leg being conjured) or, stronger still, the full `repo@sha256:...` digest ref once it is
+   known, before trusting the differential's identity binding.
+
 5. **`store_tap.queries[*]` placeholders** (`{parent_execution_id}`, `{child_execution_id}`)
    — populated at drive time by the agent-proposed walk (fire → resolve
    `parent.notes[0]` → child id), never baked into the recipe. The walk itself stays
@@ -127,7 +136,11 @@ Everything the loader/catch-path code needs is built and unit-proven cluster-fre
 3. **`conjure.expected_images`** — the two Nuclio refs (mosaic-function-scenario,
    mosaic-function-stage-control) are still not in any read artifact; add them once a recon
    task supplies the refs, or the base-coherence preflight (still unbuilt) will only ever
-   cover appservice/metadata-service.
+   cover appservice/metadata-service. **Also tighten the two already-declared entries
+   (appservice, metadata-service) from repo-only to repo+tag or digest before the live run**
+   — see the bind-strength operator note under "Recon-pending fields" item 4 above (repo-only
+   is the weakest non-absent bind; supply `akashpathak-e1c87a34`/`akashpathak-40b14842` (the
+   built tags, one per leg) or a full digest ref for the strongest bind).
 4. **Header config (`front_door.headers`)** — leave unset unless/until the Lyric team
    confirms `POST /executions`/`PATCH …/stages` need a bearer/`From` header on this cluster
    (see "Deliberately NOT added" above); if they do, add the header + its operator_env name

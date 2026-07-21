@@ -56,7 +56,7 @@ import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
 import { mintWorkflowAttempt, stampManifest, digestBinds, nonceFromRows } from './argoworkflows.mjs';
 import { tapMongo, resolveMongoQueryPlaceholders } from './mongotap.mjs';
 import { resolveCatchSeams, resolveArgoSeams } from './registry.mjs';
-import { proposeWalkAndClaim, ALLOWED_ARGO_OPS, ALLOWED_HTTP_OPS } from './proposer.mjs';
+import { proposeWalkAndClaim, ALLOWED_ARGO_OPS, ALLOWED_HTTP_OPS, unsafeHttpPathReason } from './proposer.mjs';
 import { loadRecipe, resolveObservable } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
@@ -1433,6 +1433,11 @@ export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers
     if (step.op !== 'http') throw new Error(`catch: note-lifecycle executeWalk got an unsupported op '${step.op}' (a validated walk never contains this)`);
     const { method, path, body, capture } = /** @type {any} */ (step.args);
     const resolvedPath = resolvePlaceholders(path, (n) => captures[n]);
+    // Defense-in-depth (proposer.validateArgs already rejects an unsafe RAW path at proposal time):
+    // a captured value substituted into a placeholder could smuggle the same host-retargeting
+    // trick in AFTER resolution, so the op's actual resolved path is re-checked here too.
+    const pathProblem = unsafeHttpPathReason(resolvedPath);
+    if (pathProblem) throw new Error(`catch: note-lifecycle 'http' op resolved to an unsafe path — ${pathProblem} (resolved='${resolvedPath}')`);
     /** @type {Record<string,string>} */
     const resolvedHeaders = {};
     for (const [hk, hv] of Object.entries(headers || {})) resolvedHeaders[hk] = resolvePlaceholders(hv, (n) => captures[n]);

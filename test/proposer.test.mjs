@@ -126,6 +126,24 @@ test('validateProposal: the "http" op rejects a missing method/path and a non-ob
   );
 });
 
+test('validateProposal: the "http" op rejects a hostile path that could re-target fetchFn(baseUrl + path) at a different host', () => {
+  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
+  const hostileShapes = [
+    '@attacker/x', // userinfo-shaped, no leading '/' — re-targets the host on concatenation
+    'http://evil', // absolute URL — bypasses baseUrl entirely
+    '/ok@attacker.com/x', // '@' present even though the path otherwise looks relative
+    'relative/no/leading/slash', // not a relative PATH at all
+    '/has\nnewline', // control character
+  ];
+  for (const path of hostileShapes) {
+    assert.throws(
+      () => validateProposal({ walk: [{ op: 'http', args: { method: 'GET', path } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
+      /walk\[0\]\.args\.path/,
+      `expected '${path}' to be rejected`
+    );
+  }
+});
+
 test('validateProposal: an "http" op is rejected under the default (browser) allowedOps — walk vocabularies stay scoped per drive', () => {
   const raw = { walk: [{ op: 'http', args: { method: 'GET', path: '/x' } }], claim: goodRaw().claim };
   assert.throws(() => validateProposal(raw, { observables: OBSERVABLES }), /walk\[0\]\.op must be one of/);

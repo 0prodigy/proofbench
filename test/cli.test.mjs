@@ -29,9 +29,10 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { assembleCatchBundle, sealedVerdict } from '../src/catch.mjs';
 import { sealBundle } from '../src/evidence.mjs';
+import { mint } from '../src/harness.mjs';
 import { Verdict } from '../src/types.mjs';
 import { loadRecipe } from '../src/recipe.mjs';
-import { exitCodeForVerdict, sealLegCase, extractFrozenProposal, judgeDifferential } from '../src/cli.mjs';
+import { exitCodeForVerdict, sealLegCase, extractFrozenProposal, extractSealedLeg, judgeDifferential } from '../src/cli.mjs';
 
 /** @param {any} x @returns {any} */
 const asAny = (x) => x;
@@ -92,6 +93,25 @@ function doesNotWorkResult(/** @type {import('../src/proposer.mjs').Proposal} */
   return fakeResult({ bundle, proposal });
 }
 
+/**
+ * A minted k8s-attach code-identity fingerprint carrying the given DRIVE-TIME digests (as
+ * conjure.mjs's mintK8sAttachIdentity would produce — see conjure.mjs:1413-1426).
+ * @param {string[]} digests
+ */
+function fingerprintReceipt(digests) {
+  return mint({ id: 'fingerprint', kind: 'fingerprint', provenance: 'harness', data: { mode: 'k8s-attach', drive_time_digests: digests } });
+}
+/** A worksResult() whose reproduction carries a k8s-attach fingerprint bound to `digests`. */
+function worksResultWithDigests(/** @type {string[]} */ digests) {
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSAL.claim, iterations: [{ ...heldIteration(), fingerprint: fingerprintReceipt(digests) }, heldIteration()] });
+  return fakeResult({ bundle, proposal: PROPOSAL });
+}
+/** A doesNotWorkResult() whose reproduction carries a k8s-attach fingerprint bound to `digests`. */
+function doesNotWorkResultWithDigests(/** @type {string[]} */ digests) {
+  const bundle = assembleCatchBundle({ intent: 'x', claim: PROPOSAL.claim, iterations: [{ ...unheldIteration(), fingerprint: fingerprintReceipt(digests) }, unheldIteration()] });
+  return fakeResult({ bundle, proposal: PROPOSAL });
+}
+
 const RECIPE = { name: 'lyric test recipe' };
 
 // ── exitCodeForVerdict: the frozen 0/1/2/3 contract, applied to a single leg's own verdict ──────
@@ -121,6 +141,28 @@ test('sealLegCase: persists {leg, differential:false}, folds the frozen proposal
   assert.ok(rec, 'the frozen {walk,claim} is folded into the sealed bundle, not a loose sibling file');
   assert.equal(rec.provenance, 'agent');
   assert.deepEqual(rec.data, PROPOSAL);
+});
+
+test('sealLegCase: {leg, differential, recipe, recipeDir} is ALSO folded inside the sealed bundle as a case-routing receipt (not just the un-sealed top-level fields), and extractSealedLeg reads it', () => {
+  const kase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResult() });
+  const rec = kase.bundle.receipts.find((/** @type {any} */ r) => r.id === 'case-routing');
+  assert.ok(rec, 'a case-routing receipt is folded into the sealed bundle');
+  assert.equal(rec.provenance, 'harness');
+  assert.deepEqual(rec.data, { leg: 'merge', differential: false, recipe: RECIPE.name, recipeDir: LYRIC_RECIPE });
+  const extracted = extractSealedLeg(kase);
+  assert.deepEqual(extracted, { leg: 'merge' });
+});
+
+test('sealLegCase: retagging the sealed leg AFTER sealing (mutating case-routing, not just the top-level .leg) invalidates the seal', () => {
+  const kase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResult() });
+  const idx = kase.bundle.receipts.findIndex((/** @type {any} */ r) => r.id === 'case-routing');
+  assert.ok(idx >= 0);
+  const tampered = {
+    ...kase,
+    leg: 'parent', // an attacker could still flip the UN-sealed top-level field for free...
+    bundle: { ...kase.bundle, receipts: kase.bundle.receipts.map((/** @type {any} */ r, /** @type {number} */ i) => (i === idx ? { ...r, data: { ...r.data, leg: 'parent' } } : r)) },
+  };
+  assert.equal(sealedVerdict(tampered.bundle).state, Verdict.UNVERIFIED, '...but the SEALED copy inside receipts is what is actually protected');
 });
 
 test('sealLegCase: a leg whose proposer produced no proposal still writes a case (no agent-proposal receipt to replay later)', () => {
@@ -173,6 +215,46 @@ test('judgeDifferential: PASS iff merge=WORKS and parent=DOES_NOT_WORK on the SA
   const { exitCode, lines } = judgeDifferential({ mergeCase, parentCase, mergePath: 'merge.json', parentPath: 'parent.json' });
   assert.equal(exitCode, 0, lines.join('\n'));
   assert.match(lines.join('\n'), /DIFFERENTIAL: PASS/);
+});
+
+test('judgeDifferential: two case files sealed under the SAME leg label are refused (exit 2, named) — a merge-labeled case can never double as the parent', () => {
+  const mergeCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResult() });
+  // A mislabeled swap: the file passed in the PARENT slot was ALSO sealed with leg:'merge'.
+  const parentCaseMislabeled = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: doesNotWorkResult() });
+  const { exitCode, lines } = judgeDifferential({ mergeCase, parentCase: parentCaseMislabeled, mergePath: 'merge.json', parentPath: 'parent.json' });
+  assert.equal(exitCode, 2);
+  assert.match(lines.join(' '), /SAME sealed leg label/);
+});
+
+test('judgeDifferential: retagging only the UN-sealed top-level `.leg` (not the sealed case-routing receipt) does NOT fool the sealed-leg check', () => {
+  const mergeCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResult() });
+  const parentCaseClean = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'parent', result: doesNotWorkResult() });
+  // Flip the outer, un-sealed .leg field to 'merge' too — the sealed case-routing receipt still says 'parent'.
+  const parentCaseRetagged = { ...parentCaseClean, leg: 'merge' };
+  const { exitCode, lines } = judgeDifferential({ mergeCase, parentCase: parentCaseRetagged, mergePath: 'merge.json', parentPath: 'parent.json' });
+  assert.equal(exitCode, 0, lines.join('\n')); // sealed leg labels ('merge'/'parent') still differ, so this legitimately passes
+  assert.match(lines.join('\n'), /DIFFERENTIAL: PASS/);
+});
+
+test('judgeDifferential: identical drive-time digests on both legs refuses PASS (exit 2, named) even when merge=WORKS and parent=DOES_NOT_WORK — no deploy swap occurred', () => {
+  const digests = [`sha256:${'a'.repeat(64)}`];
+  const mergeCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResultWithDigests(digests) });
+  const parentCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'parent', result: doesNotWorkResultWithDigests(digests) });
+  const { exitCode, lines } = judgeDifferential({ mergeCase, parentCase, mergePath: 'merge.json', parentPath: 'parent.json' });
+  assert.equal(exitCode, 2);
+  assert.match(lines.join(' '), /REFUSED.*same deployed digests.*no deploy swap occurred/);
+});
+
+test('judgeDifferential: DISTINCT drive-time digests on the two legs still PASS (merge=WORKS, parent=DOES_NOT_WORK) and both digest sets are surfaced in the summary', () => {
+  const mergeDigests = [`sha256:${'a'.repeat(64)}`];
+  const parentDigests = [`sha256:${'b'.repeat(64)}`];
+  const mergeCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'merge', result: worksResultWithDigests(mergeDigests) });
+  const parentCase = sealLegCase({ recipe: RECIPE, recipeDir: LYRIC_RECIPE, leg: 'parent', result: doesNotWorkResultWithDigests(parentDigests) });
+  const { exitCode, lines } = judgeDifferential({ mergeCase, parentCase, mergePath: 'merge.json', parentPath: 'parent.json' });
+  assert.equal(exitCode, 0, lines.join('\n'));
+  assert.match(lines.join('\n'), /DIFFERENTIAL: PASS/);
+  assert.match(lines.join('\n'), new RegExp(`merge {2}drive-time digests: \\[${mergeDigests[0]}\\]`));
+  assert.match(lines.join('\n'), new RegExp(`parent drive-time digests: \\[${parentDigests[0]}\\]`));
 });
 
 test('judgeDifferential: merge=WORKS but parent=WORKS-too (non-discriminating) is an honest FAIL, not a PASS', () => {

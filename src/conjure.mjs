@@ -1173,15 +1173,27 @@ function splitRepoTag(ref) {
 
 /**
  * The CODE-IDENTITY mint precondition (P1/P4, docs/pb-extensibility-foundation.md §3): every
- * recipe-declared `conjure.expected_images` entry must BIND to a running pod:
- *   - an entry carrying an explicit `@sha256:` digest binds ONLY on that exact digest actually
- *     being observed running (unchanged prior behavior).
- *   - a DIGESTLESS entry (the Lyric class: `git_tag_overwrite` dev-build tags, never a stable
- *     digest, live in the recipe) binds by REPO+TAG against a running pod's OWN requested image ref
- *     (an untagged entry matches by repo alone) — the OBSERVED digest for that SAME container is
- *     what actually gets sealed (mintK8sAttachIdentity), never the recipe's claimed tag.
- * No match (either form) is `unbound` — never WORKS-capable (§4.3's binding ladder; fail-safe: a
- * base-skewed cluster refuses to mint rather than seal a wrong identity).
+ * recipe-declared `conjure.expected_images` entry must BIND to a running pod. The actual guarantee
+ * ladder, strongest to weakest (a recipe author should read a digest ref as "exact bit-for-bit
+ * identity bound", repo+tag as "a specific published build bound", and repo-only as "SOME image
+ * from this repo is running — NOT a specific build, NOT a specific digest"):
+ *   1. **digest** (`@sha256:...`) — binds ONLY on that EXACT digest actually being observed
+ *      running (unchanged prior behavior). Strongest: the sealed identity IS the checked identity.
+ *   2. **repo+tag** (digestless, the Lyric class: `git_tag_overwrite` dev-build tags, never a
+ *      stable digest, live in the recipe) — binds against a running pod's own requested image ref
+ *      matching BOTH repo and tag. The OBSERVED digest for that SAME container is what actually
+ *      gets sealed (mintK8sAttachIdentity), never the recipe's claimed tag — but the tag match at
+ *      least confirms the intended BUILD is what's deployed, not merely something from the repo.
+ *   3. **repo-only** (digestless, untagged entry) — binds against ANY running pod whose image ref
+ *      shares the repo, regardless of tag or digest. Weakest NON-absent guarantee: this admits any
+ *      image ever pushed to that repo (including a stale or wrong build) as satisfying the entry —
+ *      use repo+tag or a full digest ref wherever the operator can supply one.
+ *   4. **absent** (an empty/undeclared `conjure.expected_images` altogether) — this function is
+ *      never even called (see mintK8sAttachIdentity's `if (expectedImages.length)` guard): NO
+ *      binding check runs at all, so a base-skewed cluster is not detected by this mechanism.
+ * No match at levels 1-3 is `unbound` — never WORKS-capable (fail-safe: a base-skewed cluster
+ * refuses to mint rather than seal a wrong identity). Level 4 has no such fail-safe; it is a
+ * recipe-authoring gap, not a code bug — declare `expected_images` whenever possible.
  * @param {string[]} observedDigests
  * @param {string[]} expectedImages
  * @param {{ref:string, digest:string}[]} [observedRefs] per-container {ref,digest} pairs (see
