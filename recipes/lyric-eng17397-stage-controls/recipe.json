@@ -10,7 +10,7 @@
     "repos": [
       { "name": "appservice", "sha": "f38fa648c5378f0aaf574bdbd1da573af640c17b" },
       { "name": "metadata-service", "sha": "e7d543288696dea150f509b3996559896d46d85a" },
-      { "name": "mosaic-function-scenario", "sha": "e5a1660076208afaec6120da196d4db1a42a838f" },
+      { "name": "mosaic-function-scenario", "sha": "83ca1a8258857ef380e43a75a45d8a2bd5cc0126" },
       { "name": "mosaic-function-stage-control", "sha": "894ce3d981ab9466814d996d99e2ea7054da29bf" },
       { "name": "lyric-py", "sha": "3d52c2610fd83e0903c05cbc47352118bf3c58a6" },
       { "name": "lyric-runner-py", "sha": "dac218ffac1756465be67f276f8f76e47e11c307" },
@@ -45,8 +45,8 @@
     "expected_images": [
       "us-docker.pkg.dev/development-367210/lyric/appservice:akashpathak-e1c87a34",
       "us-docker.pkg.dev/development-367210/lyric/metadata-service:akashpathak-dffc6331",
-      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-scenario:delta",
-      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-stage-control:delta"
+      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-scenario:akashpathak-a32fac6e",
+      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-stage-control:ENG-17397-action-and-controls"
     ]
   },
 
@@ -74,7 +74,7 @@
     "base_url_template": "http://{appservice_host}:{appservice_port}",
     "entrypoint": "POST /executions?scenarioId={PB_SCENARIO_ID}&sequenceId={PB_SEQUENCE_ID}&sequenceNoteId={PB_SEQ_NOTE_ID}",
     "headers": { "From": "{PB_LYRIC_FROM}" },
-    "serves": "the same appservice REST entrypoint lyric-py drives in-pod (all three ids MUST be in the query string; a body-only POST 500s). The fire response's JSON field `id` ($.id) is the PARENT execution id. GET /executions/{parent_execution_id} returns the parent, whose `notes` is an array of CHILD execution-id STRINGS — $.notes[0] is the child execution that carries subActions[]/stages[] and is the executionId stagecontrols are scoped by. The child's workflow stages are read from GET /executions/{child_execution_id} ($.stages[].name, seeded in declaration order) and driven by PATCH /executions/{child_execution_id}/stages/{stageName} with JSON body {\"state\":\"running\"} then {\"state\":\"succeeded\"} (or {\"state\":\"failed\",\"error\":\"...\"}) — succeeded/failed are the TERMINAL stage states and a terminal stage transition is the state change the intent is about; re-transitioning a terminal stage is rejected 4xx."
+    "serves": "the same appservice REST entrypoint lyric-py drives in-pod (all three ids MUST be in the query string; a body-only POST 500s). The fire response is the PARENT execution with POPULATED `notes[]`: each notes[] entry is a FULL CHILD execution OBJECT (not an id string) whose scalar `id` field ($.notes[0].id) is the child execution id — the executionId stagecontrols are scoped by and the doc that carries subActions[]/stages[]. GET /executions/{id} responses verifiably use scalar string `id` fields; if a capture on the POST response lands a non-scalar, prefer capturing from a follow-up GET. The child's workflow stages are read from GET /executions/{child_execution_id} ($.stages[].name) and driven by PATCH /executions/{child_execution_id}/stages/{stageName} with JSON body {\"state\":\"running\"} then {\"state\":\"succeeded\"} (or {\"state\":\"failed\",\"error\":\"...\"}) — succeeded/failed are the TERMINAL stage states and a terminal stage transition is the state change the intent is about; re-transitioning a terminal stage is rejected 4xx."
   },
 
   "store_tap": {
