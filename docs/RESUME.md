@@ -7,6 +7,123 @@ checkpoint (every milestone is committed); this doc is the human/agent handoff o
 
 ---
 
+## SESSION 2026-07-21 (c) — G1-tail close-out: distribution staged, docs+matrix landed, one honesty fix, engine still BLOCKED
+
+**Governance unchanged.** Current gate: **G1 tail** — only the second-engine differential
+and the actual `npm publish`/`git push` remain open; everything else in G1 is done.
+
+**DONE this pass (all committed, tree green throughout — verified before AND after:
+`node --test` 186/186, `node src/cli.mjs gate` PASS [14 malicious drivers held, honest=WORKS],
+`npm run typecheck` clean; `docker ps -a` shows zero containers):**
+
+- `f7dd9a9` **pb: G1 distribution — publishable package.json** (files whitelist
+  `["src/","LICENSE","README.md"]`, `engines>=20`), a zero-dep `scripts/version-check.mjs`
+  prepack gate (refuses to pack/publish unless HEAD is tagged `v<package.json version>`
+  exactly), version bumped to **0.2.0** (the local `v0.1.0` tag already points at an
+  unrelated pre-rewrite Go-binary commit, so it was not reused), annotated tag `v0.2.0`
+  cut on `f7dd9a9`. Cold-verified from an empty temp dir: `npm pack` → 24 files (no
+  `recipes/`, `site/`, `test/`, `docs/`, `corpus/` leakage) → fresh `npm install` of the
+  tarball → `node_modules` contains ONLY `proofbench` → `npx pb gate` → **GATE: PASS**,
+  exit 0. `npm publish --dry-run` completed cleanly (log in scratchpad, not committed).
+  **Real `npm publish` was NOT run — HELD for the founder** (see RESUME ORDER below).
+  Caveat surfaced by review: the packable artifact is pinned to `v0.2.0`=`f7dd9a9`, which
+  **predates** this session's harness commits (`375964f`/`366cbc8`) — the next publish
+  needs a version bump + retag once those land in a shippable state.
+- `a4d8df2` **docs: G1 getting-started guide** — `docs/getting-started.md`, the
+  recipe-authoring guide from a stranger's first hour to a sealed verdict, every
+  `pb-recipe-v1` field traced to `src/recipe.mjs`, verdict/exit-code semantics traced to
+  `src/verdict.mjs`/`src/cli.mjs`, honest-CND declines named with their ROADMAP unblock.
+  Gap surfaced, not fixed: CLAUDE.md's stated exit-code contract (0/1/2/3 mapped to
+  WORKS/DNW/CND/internal) is NOT what `src/cli.mjs` implements today (DNW and CND both
+  collapse to exit 1); flagged as a doc/constitution reconciliation item, out of scope
+  for a docs-only change. Also stale: the doc's `git clone` fallback (line 48) points at
+  `origin`'s `main`, which is the old pre-rewrite OSS line — `product-v1` has never been
+  pushed, so that command fetches the wrong code until the founder-gated push happens.
+- `375964f` **harness: shift-click drive primitive, widened introspection, settle
+  debounce, multipart/exec/headers/origin setup+confirm steps** — new `browserdrive.mjs`
+  capability (W3C dual-input-source shift+click) plus `catch.mjs`/`conjure.mjs` setup/
+  confirm steps needed for the documenso multiselect walk (multipart POST, exec-capture,
+  header/origin overrides). Unit-tested against a fake WebDriver router; **no real
+  Chromium has executed the shift-click primitive yet** — that's still the smoke-test gap.
+- `366cbc8` **recipe: documenso #3031 upgraded to the discriminating shift-click
+  multiselect differential** — `parent_sha` added and verified against the real tree at
+  both SHAs (the field-group shift-click handler is the ONLY changed code, closing the
+  prior non-discriminating-walk gap), plus the genuine HTTP/exec setup dance (signup,
+  exec-capture team lookup, inbucket token capture, verify-email, multipart envelope-create).
+- `3ea6987` **site: G1 launch-page supported-stacks matrix** — `#stacks` section on
+  `site/index.html` + `.stacks-table`/`.stacks-group-head`/`.stacks-note` CSS, two
+  tables (5 supported rows incl. Postgres+canvas marked `CAPABILITY PROVEN` not
+  `SUPPORTED` since the documenso differential hasn't executed; 4 honest-CND rows each
+  naming an unblock), every cell linked to a committed recipe/case/doc file.
+- `2995786` **fix: confirm leg no longer inherits a setup capture named `observed`** —
+  a review-surfaced false-WORKS vector: `runConfirmLeg` seeded its `captures` map from
+  `setupCaptures` and gated only on `'observed' in captures`, so a setup step that
+  happened to capture anything named `observed` (e.g. a pre-walk id) could satisfy the
+  fresh-re-observation gate even when confirm[] itself never re-captured anything,
+  promoting a stale value to WORKS via `confirmAgrees`. Fixed with a one-line
+  `delete captures.observed` after the setupCaptures spread, so `observed` can only be
+  set by confirm[]'s own capture in that run. New regression test in
+  `test/catch.test.mjs` reproduces the exact shape and asserts `verdict.state !== WORKS`.
+  No frozen-core file touched (lives in `catch.mjs`'s non-frozen confirm-leg logic).
+- Reviewer pass across the full G1-tail diff: no other false-WORKS vectors found; several
+  non-blocking robustness/CND-misattribution notes filed below and in ROADMAP-adjacent
+  advisories (multipart-without-body silently drops files; exec-capture on zero rows
+  captures `''` instead of failing loudly; confirm-leg `origin`/`headers` placeholder
+  errors aren't wrapped like `path`/`body` so they misattribute to a generic
+  "could not execute" CND instead of naming the placeholder; recipe.mjs accepts an
+  `exec` step inside `confirm[]` at load time even though `catch.mjs` rejects it only at
+  runtime). None are false-WORKS; none block G1 close-out; left for a future slice.
+- ROADMAP: ticked the two stale G0 boxes ("Wire-or-delete" → `ffacf74`, "Constitution +
+  roadmap committed" → `d107bed`) and added one-line BLOCKED/STAGED status to the two
+  open G1 boxes ("Second engine EXECUTED", "Distribution") — neither ticked, since
+  neither is earned yet (no live differential leg; no real registry publish).
+
+**Adoption metrics this session (from the independent verify pass):**
+- **CND rate:** 1/6 committed case legs = 16.7% (all 3 differentials PASS; the sole CND
+  is #7130's parent, the feature-absent leg — expected for an additive PR).
+- **Named-unblock rate:** holds for the committed cases with one flagged gap — the
+  sole CND case (`n8n-form-trigger-pr7130.parent.json`) carries an EMPTY `receipts:[]`
+  (walk never executed) so its verdict-reason prose names the missing cause generically;
+  the specific "Node not found: formTrigger" detail lives only in
+  `docs/differential-validity-2026-07-18.md` / the site, not the sealed artifact itself.
+  Pre-existing, not introduced this session — borderline against the 100% bar, worth a
+  future slice to bind the specific cause into the sealed reason string.
+- **Verdict wall-clock:** no completed verdict runs this session (both documenso conjure
+  smoke attempts failed on infra before reaching a drive leg), so no new wall-clock
+  numbers exist. Cold documenso compose bring-up (first attempt, mostly-cached image
+  layers): ~5-6 min to first ready-check failure. Warm-cache second attempt: ~30-40s to
+  fail (postgres/inbucket healthy fast; ready-check hit the wrong port immediately).
+- **Time-to-first-verdict:** `docs/getting-started.md` states the G1 under-an-hour bar
+  and derives the recipe format from `src/recipe.mjs`; it is a guide, not a freshly
+  measured timing — no new fresh-repo clock was run this session.
+
+**Left exactly as found, uncommitted (documented, not lost):**
+`recipes/documenso-envelope-fields-pr3031/{recipe.json,compose.override.mem.yml}` still
+carry the local port-3010 fix diff described in the (b) block below — same state,
+unchanged this pass. This is the ONE thing standing between "harness capability +
+recipe committed" and "second engine EXECUTED."
+
+**RESUME ORDER (next session) — do these in order:**
+1. **Two HELD founder commands** (neither run this session, both require explicit
+   founder confirmation per the task constraints):
+   - `npm publish` (from `/Users/prodigy/prodigy/project`, publishes `proofbench@0.2.0`
+     — tag `v0.2.0` already exists on `f7dd9a9`; re-tag/rebump first if any src change
+     has landed since).
+   - `git push origin product-v1` and `git push origin v0.2.0` (refspecs
+     `refs/heads/product-v1` and `refs/tags/v0.2.0`) — `product-v1` has never been
+     pushed; today `origin`'s `main` is the stale pre-rewrite OSS line.
+2. **Second engine EXECUTED (the last open G1 item):** commit the port-3010 fix
+   (`recipe.json`/`compose.override.mem.yml`, `published_port`/`container_port` 3010,
+   `PORT=3010` honored by `apps/remix/server/main.js`), re-run the `conjure()` bring-up
+   smoke test end to end (signup → exec team-lookup → inbucket capture → verify-email
+   → multipart envelope-create), THEN attempt the actual merge-vs-parent differential
+   via `node src/cli.mjs prove recipes/documenso-envelope-fields-pr3031`.
+3. Once both land: G1 is fully closed — move to **G2** (machine `--json` verdict,
+   GitHub Action, `pb init`, dogfood, sealed-room minimum, CI intent source,
+   `--merge-only` CI mode, concurrent-run isolation). See ROADMAP.md R2.
+
+---
+
 ## SESSION 2026-07-21 (b) — launch-page stacks matrix landed; documenso differential still BLOCKED
 
 **Done this pass:** the last G1 launch-page piece — `#stacks` section on `site/index.html`

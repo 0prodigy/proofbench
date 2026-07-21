@@ -9,19 +9,22 @@ Agents implement; pb verifies with unfakeable evidence; a human (later: policy) 
 prod deploys. pb is the verification layer — it never implements, never owns the deploy.
 
 **Where we are (2026-07-21, honest):** the honesty core is done, frozen, and green
-(tests + gate + typecheck). Three differential Catches have executed live: n8n #7130
-(additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK catch — a
-real regression, not absent code), and linkding #1170 (the first non-n8n stack —
-Django/sqlite — parent=DOES_NOT_WORK). The effect observable and confirm leg are no
-longer n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the recipe's own
-`store_tap.observables` + `confirm[]` (engine-shaped delta relations, not n8n's
-autoincrement assumption). README and site now lead with the #9157 catch, not a green
-PASS, with all three cases linked to committed `site/cases/*.json` evidence. Still open:
-documenso's differential is drive-blocked (PR #3031's walk is non-discriminating), the
-Lyric/argo path's store tap throws, orgconfig is unwired, the package is unpublishable
-(`private:true`), no getting-started doc, no npm distribution. The enterprise substrate
-is designed on paper with zero running code; all pipeline glue was explicitly cut from
-v1. Full issue register at the bottom.
+(tests + gate + typecheck, 186/186). Three differential Catches have executed live:
+n8n #7130 (additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK
+catch — a real regression, not absent code), and linkding #1170 (the first non-n8n
+stack — Django/sqlite — parent=DOES_NOT_WORK). The effect observable and confirm leg
+are no longer n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the
+recipe's own `store_tap.observables` + `confirm[]` (engine-shaped delta relations, not
+n8n's autoincrement assumption). README and site now lead with the #9157 catch, not a
+green PASS, with all three cases linked to committed `site/cases/*.json` evidence.
+`docs/getting-started.md` and a launch-page supported-stacks matrix are both done.
+Distribution is staged (package.json + prepack version-gate + tag committed, cold
+tarball install verified) but `npm publish`/`git push` are HELD for the founder. Still
+open: documenso's second-engine differential is written (recipe now discriminating,
+harness capability committed) but BLOCKED on an uncommitted conjure port fix, not yet
+re-verified live — no differential leg has run; the Lyric/argo path's store tap
+throws. The enterprise substrate is designed on paper with zero running code; all
+pipeline glue was explicitly cut from v1. Full issue register at the bottom.
 
 ---
 
@@ -62,10 +65,12 @@ Make every claim match reality; land the catch with teeth.
       move behind progressive disclosure; keep only claims with committed evidence.
       Done `caca762`: hero + cert lead with #9157, three case blocks (#9157, #1170, #7130)
       each linked to `site/cases/*.json`.
-- [ ] **Wire-or-delete:** `orgconfig.mjs` (unwired) and `lyric/manifest-adapter.mjs`
+- [x] **Wire-or-delete:** `orgconfig.mjs` (unwired) and `lyric/manifest-adapter.mjs`
       (unwired) — either a CLI path exercises them or they move to `docs/` as design
       notes and out of `src/`. No dead code in src/ (CLAUDE.md pattern 1).
-- [ ] Constitution (`CLAUDE.md`) + this roadmap committed.
+      Done `ffacf74`: both deleted from `src/`, resurrect from `6c1754d` at R3.
+- [x] Constitution (`CLAUDE.md`) + this roadmap committed.
+      Done `d107bed`.
 
 **G0 passed when:** `pb prove` on #9157 yields merge=WORKS ∧ parent=DOES_NOT_WORK,
 evidence committed, README/site contain no claim without evidence.
@@ -104,8 +109,18 @@ pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merg
 - [ ] **Second engine EXECUTED:** one discriminating Postgres-repo differential live —
       documenso with the multiselect-specific walk, or a better-discriminating PR from
       the 12-PR corpus. `pb prove --random` gate runs the full pool.
+      BLOCKED: harness capability (shift-click, multipart/exec setup) + the rewritten
+      discriminating recipe are committed (`375964f`/`366cbc8`), but the live conjure
+      smoke test has not passed — host port 3000 is intercepted by an unrelated
+      process in this sandbox, and the port-3010 fallback fix is written but
+      uncommitted/unverified. No differential leg has run. See RESUME.md.
 - [ ] **Distribution:** publish npm as `proofbench` (name verified free), bin `pb`,
       drop `private:true`, version from git tag. `npx proofbench gate` works cold.
+      STAGED, not shipped: package.json/prepack version-gate/tag `v0.2.0` committed
+      (`f7dd9a9`), cold-install from a packed tarball verified (`npx pb gate` → PASS
+      in a fresh empty dir with zero deps beyond itself) — but the real `npm publish`
+      is HELD for the founder to run; box stays open until the package is actually on
+      the registry.
 - [x] **Getting-started doc:** recipe authoring guide with the two shipped recipes as
       worked examples; prerequisites stated (Node 20+, Docker, claude CLI or API key).
       Done: `docs/getting-started.md` — every field derived from `src/recipe.mjs`,
