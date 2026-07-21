@@ -7,6 +7,65 @@ checkpoint (every milestone is committed); this doc is the human/agent handoff o
 
 ---
 
+## SESSION 2026-07-21 (e) — LYRIC LYRICLET TRACK: R3-subset harness BUILT + reviewed; live run gated on two founder actions
+
+**Founder decisions this session (logged in ROADMAP):** G1 build closed → `git push origin
+product-v1 v0.2.1` EXECUTED (repo now public on 0prodigy/proofbench); `npm publish` of
+proofbench@0.2.1 still PENDING founder `npm login` (ENEEDAUTH). Lyric lyriclet dogfood
+(R3 subset, `docs/lyric-integration-contract.md` `45b7c61`) pulled AHEAD of G2; waking
+`akashpathak` authorized + done.
+
+**BUILT + committed this pass (all green: 275/275 tests, gate PASS 14 held, typecheck
+clean, frozen core diff-empty, zero deps):**
+- `a1fa8eb` loader growth: multi_repo identity, k8s-attach conjure, mongo tap engine,
+  new_instance_per_iteration, operator_env setup, front_door rest, note-lifecycle surface.
+- `44c6c36` mongo exec tap as HARNESS provenance (src/mongotap.mjs) · `4b99093` k8s-attach
+  bring-up + mint preconditions (drive-time digest sealing, drift sentinel) · `6b0f8e4`
+  review fix: every kubectl call scoped --context/-n (wrong-world vector closed).
+- `3578104` recipes/lyric-eng17397-stage-controls (+RECIPE-NOTES.md recon-pending values).
+- `55517f2` drive slice: multi_repo through attach, ref-matching expected_images,
+  runNoteLifecycleCatch (agent-proposed http walk, TOOL attempts, mongo ground truth),
+  fresh-instance enforcement, mongosh/kubectl injection guards, drift bracketing.
+- `b1d7e87` CLI: `pb prove --leg <l> [--replay-walk <merge-case>] [--out]` (propose-once-
+  freeze ACROSS runs) + `pb differential <merge> <parent>` folding two sealed legs.
+- `6e15bb4` false-WORKS review advisories closed: differential refuses PASS on identical
+  drive-time digest sets (no deploy swap = no causal claim), leg labels sealed
+  (case-routing receipt), http path guard (SSRF/userinfo shapes), bind-ladder doc.
+**Reviews:** constitution lens PASS (1 blocking → fixed 6b0f8e4); dedicated false-WORKS
+lens PASS — "no constructible false-WORKS, live-run-ready" (its 4 advisories → 6e15bb4).
+
+**CLUSTER STATE (akashpathak, ctx akashpathak, ns delta — LEFT AWAKE):** running
+ENG-20190 appservice (`akashpathak-69c1188d`) + MDS 2 commits behind ticket tip (missing
+the @AuthValidation commit). Recon FACTS: drive auth = port-forward + `From:` header
+(reads verified 200); mongo tap live via secret `mongodb-lyric-lyric`; NO argocd
+self-heal, DE agent applies only issued deploys → drift sentinel sufficient; runner wheel
+pin `26.3.2.dev20190` SUFFICES (carries A&C surface + mds-sdk 2.0.4.dev17399 — verified,
+no repin). Appservice leg images BUILT + SHA-verified: merge `akashpathak-e1c87a34`
+(=`0aaff3b1e`, sha256:e43ba5fb…) · parent `akashpathak-40b14842` (=`d9b4642`=staging tip,
+sha256:24e13da5…). Note: publish workflow also moved `appservice:latest` (harmless, pins
+are explicit).
+
+**RESUME ORDER — the live differential (everything pb-side is DONE):**
+1. FOUNDER-GATED: build the two MDS images (classifier blocks `gh workflow run` for
+   agents): `gh workflow run single_promote.yml -R lyric-tech/release-manager --ref main
+   -f repository=metadata-service -f from-tag=ENG-17397-action-and-controls -f
+   to-tag=akashpathak-<rand8>` and the same with
+   `from-tag=eng-0001-updating-python-to-3.10`.
+2. Fill RECIPE-NOTES.md recon-pending values (kube_context=akashpathak, namespace=delta,
+   operator_env ids, expected_images repo+tag per leg), export operator_env.
+3. Deploy MERGE builds (appservice `akashpathak-e1c87a34` + MDS merge tag via mic byoc
+   pin/deploy + nuclio fn redeploy) → `node src/cli.mjs prove
+   recipes/lyric-eng17397-stage-controls --leg merge --out merge-case.json`.
+4. Deploy PARENT builds → `… --leg parent --replay-walk merge-case.json --out
+   parent-case.json` → `node src/cli.mjs differential merge-case.json parent-case.json`
+   (PASS requires distinct drive-time digests). Commit sealed cases + site/cases pair.
+5. FOUNDER-GATED: `npm login` → `npm publish` (proofbench@0.2.1, tag v0.2.1 on ffa1bc8).
+6. Close-out: tick earned R3 boxes (mongo tap, k8s-attach, multi-repo identity,
+   fresh-world enforcement — preflight partial via drift sentinel; operator-ratify still
+   unbuilt), update lyric-integration-contract with recon answers, then G2.
+
+---
+
 ## SESSION 2026-07-21 (d) — G1 CLOSED: documenso #3031 SECOND ENGINE EXECUTED LIVE
 
 **Governance unchanged.** This pass finished G1's last build item. **G1 is now fully done**
