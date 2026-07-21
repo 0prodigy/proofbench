@@ -137,7 +137,9 @@ export async function tapStore(handle, queryName, docker = defaultDocker(), exec
  * @returns {Promise<any[]>}
  */
 async function tapSqlite(handle, st, queryName, query, docker) {
-  const args = ['exec', handle.containerName, 'sqlite3', '-json', '-cmd', `.timeout ${st.busy_timeout_ms}`, st.db_path, query];
+  // containerName is only null for mode 'k8s-attach' (engine 'mongo' there, never 'sqlite') — safe
+  // to assert non-null here.
+  const args = ['exec', /** @type {string} */ (handle.containerName), 'sqlite3', '-json', '-cmd', `.timeout ${st.busy_timeout_ms}`, st.db_path, query];
 
   for (let attempt = 0; ; attempt++) {
     const res = docker.run(args, DOCKER_TIMEOUT_MS);
