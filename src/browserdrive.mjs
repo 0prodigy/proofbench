@@ -365,8 +365,15 @@ export async function openBrowser(opts = {}) {
         // The canvas placement gesture: move the real pointer to a viewport coordinate the caller
         // computed from the rendered surface (e.g. a .react-pdf__Page center), then press+release.
         // Drives the app's OWN pointer path (the field-drop mouseup listener) — no per-field DOM node.
+        // W3C Actions REQUIRES integer viewport coordinates (chromedriver 400s "'x' must be an int"
+        // otherwise); the agent computes x/y from introspected rendered-surface rects, which are
+        // legitimately float-valued (getBoundingClientRect), so round here rather than trust the
+        // proposal — the recorded step carries the ACTUAL rounded ints the pointer drove, not the
+        // agent's raw (possibly fractional) proposal.
+        const rx = Math.round(x);
+        const ry = Math.round(y);
         const pointerActions = [
-          { type: 'pointerMove', duration: 10, origin: 'viewport', x, y },
+          { type: 'pointerMove', duration: 10, origin: 'viewport', x: rx, y: ry },
           { type: 'pointerDown', button: 0 },
           { type: 'pause', duration: 60 },
           { type: 'pointerUp', button: 0 },
@@ -391,10 +398,10 @@ export async function openBrowser(opts = {}) {
               },
             ],
           });
-          steps.push({ op: 'clickAt', x, y, shift: true });
+          steps.push({ op: 'clickAt', x: rx, y: ry, shift: true });
         } else {
           await pointerSeq(pointerActions, 'mouse');
-          steps.push({ op: 'clickAt', x, y });
+          steps.push({ op: 'clickAt', x: rx, y: ry });
         }
       },
       async pointer(actions, pointerType = 'mouse') {

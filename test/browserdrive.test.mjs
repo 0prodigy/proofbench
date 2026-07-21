@@ -211,6 +211,19 @@ test('browserdrive: clickAt({shift:true}) drives a two-source W3C Actions payloa
   assert.deepEqual(client.steps[0], { op: 'clickAt', x: 150, y: 260, shift: true });
 });
 
+test('browserdrive: clickAt rounds fractional viewport coords to ints (W3C Actions 400s on a float x/y)', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
+  const fetchFn = fakeFetch(happyRouter);
+  const client = await openBrowser({ docker: asAny(docker), fetchFn: asAny(fetchFn) });
+  // The agent computes coordinates from introspected rects (getBoundingClientRect — legitimately
+  // fractional), e.g. a canvas center point; the primitive must never forward that float verbatim.
+  await client.clickAt(349.6, 211.4);
+  const actions = fetchFn.calls.find((c) => c.path === '/session/sess-1/actions' && c.method === 'POST');
+  const pointerMove = /** @type {any} */ (actions?.body).actions[0].actions[0];
+  assert.deepEqual(pointerMove, { type: 'pointerMove', duration: 10, origin: 'viewport', x: 350, y: 211 });
+  assert.deepEqual(client.steps[0], { op: 'clickAt', x: 350, y: 211 });
+});
+
 test('browserdrive: pointer drives a raw W3C pointer-action sequence and records the walk verbatim', async () => {
   const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
   const fetchFn = fakeFetch(happyRouter);
