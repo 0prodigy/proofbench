@@ -543,6 +543,12 @@ async function resolveImage(docker, recipe, onCloneDir, buildSha) {
   }
 
   // from_tree — build the effective sha (buildSha overrides ci.sha for the differential parent).
+  // (multi_repo pairs with conjure.mode 'k8s-attach', not 'run'/'compose' — no committed recipe
+  // combines them; this guard narrows the type and fails loudly rather than reading undefined
+  // from_tree-only fields if one ever did.)
+  if (ci.mode !== 'from_tree') {
+    throw new Error(`conjure: mode 'run' requires code_identity.mode 'from_tree' or 'pinned_image'; got '${ci.mode}'`);
+  }
   const sha = buildSha || ci.sha;
   const tag = `pb-sut-${slug(recipe.name)}-${sha.slice(0, 7)}`;
   const cached = docker.run(['image', 'inspect', tag], DOCKER_TIMEOUT_MS).status === 0;
@@ -651,6 +657,14 @@ export async function conjure(recipeDir, opts = {}) {
 
   const ci = recipe.code_identity;
   const c = recipe.conjure;
+  // Neither is built here yet (R3 growth, recipe-loader only so far) — fail loudly and by name
+  // rather than reading an undefined single-container field further down.
+  if (c.mode === 'k8s-attach') {
+    throw new Error("conjure: mode 'k8s-attach' is not yet implemented (recipe-loader accepts it; the k8s-attach bring-up is a later slice)");
+  }
+  if (ci.mode === 'multi_repo') {
+    throw new Error("conjure: code_identity.mode 'multi_repo' pairs with conjure.mode 'k8s-attach' only, which is not yet implemented here");
+  }
   const buildSha = opts.buildSha;
   const baseUrl = `http://localhost:${c.published_port}`;
 
@@ -725,7 +739,14 @@ export async function conjure(recipeDir, opts = {}) {
     }
     /** @type {Record<string,any>} */ const captures = {};
     /** @type {Record<string,any>} */ const bodyDerived = {};
-    for (const step of recipe.setup) {
+    // The operator_env OBJECT form (G5, the Lyric class) has no REST steps to walk here — it is
+    // not built by this bring-up (k8s-attach is guarded off above); the array form is the only
+    // shape 'run'/'compose' ever produces.
+    if (!Array.isArray(recipe.setup)) {
+      throw new Error("conjure: setup as an operator_env object is not supported by mode 'run'/'compose' (array-form setup only)");
+    }
+    const setupSteps = recipe.setup;
+    for (const step of setupSteps) {
       if (step.exec) {
         // An out-of-band SETUP-TIME store read (§6 fallback for a bootstrap value with no REST
         // route, e.g. a just-created team's id/url) — never the store_tap ground-truth read.
@@ -770,9 +791,14 @@ export async function conjure(recipeDir, opts = {}) {
     // Front door: resolve placeholders from captures, else a minted id in a setup body. In
     // compose mode a deferred-drive front door (documenso) mints no ids, so an unresolved
     // placeholder stays literal (informational URL) instead of throwing; run mode stays strict.
+    // mode 'rest' (G6, the Lyric class) has no url_template at all — not built by this bring-up.
+    if (typeof recipe.front_door.url_template !== 'string') {
+      throw new Error("conjure: front_door.mode 'rest' (no url_template) is not supported by mode 'run'/'compose'");
+    }
+    const urlTemplate = recipe.front_door.url_template;
     const lookup = (/** @type {string} */ n) => captures[n] ?? bodyDerived[camelize(n)] ?? bodyDerived[n];
     const frontDoorUrl = `${baseUrl}${resolvePlaceholders(
-      recipe.front_door.url_template,
+      urlTemplate,
       c.mode === 'compose' ? (n) => lookup(n) ?? `{${n}}` : lookup
     )}`;
 
