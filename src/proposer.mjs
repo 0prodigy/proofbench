@@ -52,6 +52,17 @@ export const ALLOWED_WALK_OPS = Object.freeze(['find', 'type', 'click', 'clickAt
 export const ALLOWED_ARGO_OPS = Object.freeze(['trigger']);
 
 /**
+ * The walk vocabulary for the NOTE-LIFECYCLE drive (drive.mode:'note-lifecycle', the Lyric class): a
+ * single `http` op — the user gesture is "call the disclosed REST surface" (method/path/body/capture,
+ * the same shape conjure.mjs's setup steps / catch.mjs's confirm steps already use). Kept a one-op
+ * vocabulary so agent-proposes/harness-disposes stays uniform and reuses this validator (the harness
+ * owns the port-forwarded transport, the headers, and every out-of-band mongo read). Selected via the
+ * `allowedOps` parameter of validateProposal/proposeWalkAndClaim.
+ * @type {readonly string[]}
+ */
+export const ALLOWED_HTTP_OPS = Object.freeze(['http']);
+
+/**
  * The relation set the FROZEN verdict adjudicates (verdict.mjs relationHolds). Mirrored here as the
  * proposer's input allowlist so a bad op is rejected at the door as an honest CND, rather than
  * reaching the verdict (where an unknown op relationHolds→false → FALSIFIED anyway). Kept in lockstep
@@ -95,7 +106,8 @@ const SYSTEM_PROMPT = [
 
 /**
  * @typedef {Object} WalkStep
- * @property {'find'|'type'|'click'|'clickAt'|'pointer'} op the browser-drive gesture
+ * @property {'find'|'type'|'click'|'clickAt'|'pointer'|'trigger'|'http'} op the drive gesture (browser
+ *   ops, the one-op argo 'trigger', or the one-op note-lifecycle 'http' — see ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS)
  * @property {Record<string, any>} args op-specific, validated arguments
  */
 
@@ -175,6 +187,26 @@ function validateArgs(op, args, i) {
         for (const [k, v] of Object.entries(args.parameters)) requireString(v, `walk[${i}].args.parameters.${k}`);
       }
       return { ...(args.parameters !== undefined ? { parameters: { ...args.parameters } } : {}) };
+    case 'http': {
+      // The note-lifecycle drive gesture: one REST call against the disclosed surface. `body` (if
+      // any) is JSON-shaped (mirrors conjure.mjs's SetupStep); `capture` (if any) is JSONPath-only
+      // (name -> a JSONPath string read from the response, the setup/confirm default form).
+      requireString(args.method, `walk[${i}].args.method`);
+      requireString(args.path, `walk[${i}].args.path`);
+      if (args.body !== undefined && (!args.body || typeof args.body !== 'object' || Array.isArray(args.body))) {
+        bad(`walk[${i}].args.body must be an object when present`);
+      }
+      if (args.capture !== undefined) {
+        if (!args.capture || typeof args.capture !== 'object' || Array.isArray(args.capture)) bad(`walk[${i}].args.capture must be an object when present`);
+        for (const [k, v] of Object.entries(args.capture)) requireString(v, `walk[${i}].args.capture.${k}`);
+      }
+      return {
+        method: args.method,
+        path: args.path,
+        ...(args.body !== undefined ? { body: args.body } : {}),
+        ...(args.capture !== undefined ? { capture: { ...args.capture } } : {}),
+      };
+    }
     default:
       return bad(`walk[${i}].op unsupported '${op}'`); // unreachable: op is already allowlisted
   }

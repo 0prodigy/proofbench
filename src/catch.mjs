@@ -39,13 +39,24 @@
  * confirm read. The honesty core (verdict/harness/evidence) stays FROZEN.
  */
 
-import { conjure, resolvePlaceholders, resolveBodyPlaceholders, extractJsonPath, extractHtml, absorbSetCookies, encodeSetupBody } from './conjure.mjs';
+import {
+  conjure,
+  resolvePlaceholders,
+  resolveBodyPlaceholders,
+  extractJsonPath,
+  extractHtml,
+  absorbSetCookies,
+  encodeSetupBody,
+  mintK8sAttachIdentity,
+  checkK8sAttachDrift,
+} from './conjure.mjs';
 import { registerReap, deregisterReap } from './reaper.mjs';
 import { mintStoreDelta } from './storetap.mjs';
 import { openBrowser, mintDriveAttempt } from './browserdrive.mjs';
 import { mintWorkflowAttempt, stampManifest, digestBinds, nonceFromRows } from './argoworkflows.mjs';
+import { tapMongo, resolveMongoQueryPlaceholders } from './mongotap.mjs';
 import { resolveCatchSeams, resolveArgoSeams } from './registry.mjs';
-import { proposeWalkAndClaim, ALLOWED_ARGO_OPS } from './proposer.mjs';
+import { proposeWalkAndClaim, ALLOWED_ARGO_OPS, ALLOWED_HTTP_OPS } from './proposer.mjs';
 import { loadRecipe, resolveObservable } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { newBundle, sealBundle, verifySeal } from './evidence.mjs';
@@ -792,6 +803,12 @@ export async function runCatch(opts) {
   if (recipe.drive && recipe.drive.mode === 'argo-workflows') {
     return runArgoCatch(opts, recipe, runDir);
   }
+  // note-lifecycle (the Lyric class): an http/REST drive over a k8s-attach port-forward, ground
+  // truth from the mongo tap — a structurally different leg from the browser loop below (#7130
+  // stays byte-identical; that loop is never reached for this drive.mode).
+  if (recipe.drive && recipe.drive.mode === 'note-lifecycle') {
+    return runNoteLifecycleCatch(opts, recipe, runDir);
+  }
   // Config-keyed registry = the DEFAULT phase-seam wiring; an injected seam still WINS over it
   // (unit tests inject mocks). See src/registry.mjs.
   const { conjureFn, tapStoreFn, openBrowserFn } = resolveCatchSeams(opts, recipe);
@@ -1228,4 +1245,425 @@ async function runArgoCatch(opts, recipe, runDir) {
   const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
   const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
   return { phase: 'catch', sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath, proposal };
+}
+
+// ---------------------------------------------------------------------------
+// The NOTE-LIFECYCLE Catch — drive.mode:'note-lifecycle' (the Lyric class, R3 slice)
+// ---------------------------------------------------------------------------
+
+/**
+ * One note-lifecycle reproduction's observed outcome — mirrors CatchIteration/ArgoIteration's
+ * executed/effectHeld partition exactly: `executed:false` = a mint precondition (k8s-attach identity
+ * bind / drift sentinel), the operator_env resolution, the proposed http walk, or the fresh_world
+ * uniqueness check could not be VERIFIED (throws) → NO delta minted → NOT_EXECUTED → CND.
+ * `executed:true` with `effectHeld:false` = the walk ran and the discriminating mongo tap moved, but
+ * the claim/confirm leg did not hold → a real negative → FALSIFIED.
+ * @typedef {Object} NoteLifecycleIteration
+ * @property {boolean} executed
+ * @property {boolean} effectHeld
+ * @property {any} before
+ * @property {any} [after]
+ * @property {string} [entity]
+ * @property {any} [freshObserved]
+ * @property {{method:string, path:string, status:number}[]} [driveSteps]
+ * @property {import('./types.mjs').Receipt} [fingerprint]
+ * @property {string} [reason]
+ */
+
+/**
+ * Assemble the note-lifecycle evidence bundle — PURE, mirrors assembleArgoBundle. The binding
+ * iteration is the FIRST that executed: the store-delta is the mongo tap's before/after (HARNESS
+ * ground truth), the drive attempt is TOOL (the http steps actually fired against the port-forward),
+ * and the confirm leg (when present) is a fresh-session/second-independent-read TOOL receipt
+ * content-bound to the delta's `after` (freshBinds).
+ * @param {Object} args
+ * @param {any} args.intent
+ * @param {NoteLifecycleIteration[]} args.iterations
+ * @param {import('./proposer.mjs').ProposedClaim} [args.claim] the FROZEN agent-proposed effect claim
+ * @param {string} [args.actorIdentity]
+ * @param {string} [args.identity]
+ * @returns {import('./types.mjs').EvidenceBundle}
+ */
+export function assembleNoteLifecycleBundle({ intent, iterations, claim, actorIdentity = ACTOR_IDENTITY, identity = VISITOR_IDENTITY }) {
+  const its = iterations || [];
+  const binding = its.find((it) => it.executed);
+  const fingerprint = (its.find((it) => it.fingerprint) || {}).fingerprint;
+
+  /** @type {import('./types.mjs').Receipt[]} */
+  const receipts = [];
+  if (fingerprint) receipts.push(fingerprint);
+  /** @type {string[]} */
+  const effectReceiptIds = [];
+  let expectedAfterRelation = claim ? claim.expectedAfterRelation : undefined;
+
+  if (binding) {
+    const before = binding.before;
+    const after = binding.after != null ? binding.after : before;
+    const entity = binding.entity || (claim ? claim.entity : DEFAULT_EFFECT_ENTITY);
+    expectedAfterRelation = normalizeEqualsClaimValue(expectedAfterRelation, after);
+    const delta = mintStoreDelta({ id: 'store-delta', entity, before, after, identity, sourcePR: false });
+    receipts.push(delta);
+    effectReceiptIds.push('store-delta');
+
+    // Drive attempt (TOOL): the http steps actually fired, over the k8s-attach port-forward.
+    receipts.push(
+      mint({
+        id: 'note-lifecycle-drive',
+        kind: 'attempt',
+        provenance: 'tool',
+        identity,
+        data: { steps: binding.driveSteps || [] },
+      })
+    );
+    effectReceiptIds.push('note-lifecycle-drive');
+
+    // Confirm leg (TOOL, fresh-session): the recipe's confirm[] REST re-observation, or (when none
+    // is declared) a SECOND independent scoped mongo read. Content-binds to the delta's `after`.
+    if (binding.after != null && binding.freshObserved !== undefined) {
+      receipts.push(
+        mint({
+          id: 'fresh-execution',
+          kind: 'fresh-session',
+          provenance: 'tool',
+          identity,
+          data: { entity, after: binding.after, observed: coerceObservedForBind(binding.freshObserved, binding.after) },
+        })
+      );
+      effectReceiptIds.push('fresh-execution');
+    }
+  }
+
+  const quantified = quantifierFromIntent(intent) || !!(claim && claim.quantified);
+  /** @type {import('./types.mjs').Claim[]} */
+  const claims = claim
+    ? [
+        {
+          id: 'note-lifecycle-persists-effect',
+          kind: 'effect',
+          scope: claim.scope,
+          ...(quantified ? { quantified: true } : {}),
+          effectCheck: {
+            entity: claim.entity,
+            expectedAfterRelation: /** @type {{op:string, value?:any}} */ (expectedAfterRelation),
+            deltaReceiptId: 'store-delta',
+            confirmLegReceiptId: 'fresh-execution',
+          },
+          receiptIds: effectReceiptIds,
+        },
+      ]
+    : [];
+
+  const k = its.filter((it) => it.effectHeld).length;
+  const kFail = its.filter((it) => it.executed && !it.effectHeld).length;
+  return newBundle({ intent, actorIdentity, claims, receipts, reproduce: { k, n: its.length, kFail } });
+}
+
+/**
+ * The first `{name}` IDENTIFIER-shaped placeholder in a template (mirrors mongotap.mjs's
+ * identifier-restricted placeholder pattern — a mongo query is full of unrelated object-literal
+ * `{`/`}`, so a greedy match would swallow past them). Used to name the discriminating query's
+ * SCOPE (e.g. `{child_execution_id}`) — the fresh-instance id this note-lifecycle Catch binds to.
+ * @param {string} template
+ * @returns {string|undefined}
+ */
+export function firstPlaceholderName(template) {
+  const m = /\{([A-Za-z_][A-Za-z0-9_]*)\}/.exec(template || '');
+  return m ? m[1] : undefined;
+}
+
+/**
+ * Pick the discriminating store-tap query for a note-lifecycle Catch: the recipe-declared
+ * `store_tap.observables` key when present (the Lyric recipe's ONE discriminating query among
+ * several plumbing reads — e.g. `stage_controls_queued`, not `parent_notes`/`child_execution`),
+ * else the first declared query (mirrors runCatch/runArgoCatch's existing single-query default).
+ * @param {import('./recipe.mjs').StoreTap} storeTap
+ * @returns {string}
+ */
+export function pickObservableQueryName(storeTap) {
+  const names = Object.keys(/** @type {any} */ (storeTap).observables || {});
+  return names[0] || Object.keys(storeTap.queries)[0];
+}
+
+/**
+ * fresh_world:'new_instance_per_iteration' enforcement (R3): each reproduce iteration must mint a
+ * genuinely FRESH app-level instance id (here: the value the walk's resolve phase captured under
+ * the discriminating query's own placeholder name, e.g. child_execution_id) — the shared cluster
+ * NEVER tears down between iterations (unlike fresh_world:'recreate'), so a repeated id means the
+ * SAME instance was replayed, not an independent reproduction (a degenerate tautology: re-observing
+ * one cached result twice, never new evidence). PURE: `seenInstanceIds` is mutated with the new id
+ * only when it is genuinely fresh.
+ * @param {Set<string>} seenInstanceIds
+ * @param {string} instanceId
+ * @returns {{fresh:true}|{fresh:false, reason:string}}
+ */
+export function checkFreshInstance(seenInstanceIds, instanceId) {
+  if (seenInstanceIds.has(instanceId)) {
+    return {
+      fresh: false,
+      reason: `fresh_world:new_instance_per_iteration violated — instance id '${instanceId}' was already used by an earlier reproduction (degenerate replay, excluded from k/kFail)`,
+    };
+  }
+  seenInstanceIds.add(instanceId);
+  return { fresh: true };
+}
+
+/**
+ * Execute a validated NOTE-LIFECYCLE http walk against the k8s-attach REST surface (through the
+ * port-forward) — reusing confirmHttpReq's EXACT request shape (placeholder resolution via
+ * resolvePlaceholders/resolveBodyPlaceholders, JSONPath capture via extractJsonPath) rather than
+ * inventing a new executor. Recipe-declared `headers` (front_door.headers, e.g. a cluster's required
+ * From header — sourced strictly from operator_env, never invented) are sent on EVERY request,
+ * placeholder-resolved from the SAME growing `captures` dict the walk's own path/body/capture draw
+ * from. Records each step for the TOOL attempt receipt.
+ * @param {Object} args
+ * @param {typeof fetch} args.fetchFn
+ * @param {string} args.baseUrl
+ * @param {import('./proposer.mjs').WalkStep[]} args.walk a validated walk (proposer.validateProposal, ALLOWED_HTTP_OPS)
+ * @param {Record<string,string>} args.headers recipe-declared, operator_env-resolved headers sent on every request
+ * @param {Record<string,any>} args.captures mutated: seeded with operator_env values, grows with each step's own capture
+ * @returns {Promise<{steps:{method:string,path:string,status:number}[]}>}
+ */
+export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers, captures }) {
+  /** @type {{method:string,path:string,status:number}[]} */
+  const steps = [];
+  // A stateless server-side REST drive needs no session cookie — confirmHttpReq's shape still wants
+  // a jar; a fresh, unused one is harmless (nothing sets Set-Cookie on this surface).
+  const jar = new Map();
+  for (const step of walk || []) {
+    if (step.op !== 'http') throw new Error(`catch: note-lifecycle executeWalk got an unsupported op '${step.op}' (a validated walk never contains this)`);
+    const { method, path, body, capture } = /** @type {any} */ (step.args);
+    const resolvedPath = resolvePlaceholders(path, (n) => captures[n]);
+    /** @type {Record<string,string>} */
+    const resolvedHeaders = {};
+    for (const [hk, hv] of Object.entries(headers || {})) resolvedHeaders[hk] = resolvePlaceholders(hv, (n) => captures[n]);
+    const resolvedBody = body !== undefined ? resolveBodyPlaceholders(body, (n) => captures[n]) : undefined;
+    const res = await confirmHttpReq(fetchFn, method, `${baseUrl}${resolvedPath}`, resolvedBody, jar, undefined, { headers: resolvedHeaders });
+    if (res.status < 200 || res.status >= 400) {
+      throw new Error(`catch: note-lifecycle walk step '${method} ${path}' failed: HTTP ${res.status}`);
+    }
+    if (capture) {
+      for (const [name, jp] of Object.entries(capture)) captures[name] = extractJsonPath(res.json, jp);
+    }
+    steps.push({ method, path: resolvedPath, status: res.status });
+  }
+  return { steps };
+}
+
+/**
+ * Run the NOTE-LIFECYCLE Catch (drive.mode:'note-lifecycle', the Lyric class) across REPRODUCTIONS
+ * fresh app-level instances on a SINGLE long-lived k8s-attach world — fresh_world:
+ * 'new_instance_per_iteration' means the cluster is conjured (port-forwarded) ONCE and never torn
+ * down between iterations; each iteration mints its own fresh app-level unit instead. Per iteration:
+ *   mintK8sAttachIdentity   → the drive-time code-identity mint precondition, called BEFORE the walk
+ *                             (throws → CND, never a false WORKS on a base-skewed pod)
+ *   operator_env resolution → read every declared name from process.env (unset → undefined; a later
+ *                             placeholder resolution throws, naming it — never a fabricated default)
+ *   propose (seam, ONCE)    → the agent receives intent + a harness-run introspection of the REST
+ *                             surface (drive.surface + front_door base_url_template/entrypoint + the
+ *                             operator_env values) and proposes a walk of `http` ops — frozen and
+ *                             replayed verbatim thereafter
+ *   resolve phase           → every walk step but the LAST (fire + resolve the fresh instance id)
+ *   fresh_world check       → the captured instance id must differ from every earlier iteration
+ *                             (checkFreshInstance) or this iteration counts toward NEITHER k nor kFail
+ *   mongo tap BEFORE        → the discriminating query, scoped by the just-captured instance id
+ *   terminal step           → the walk's LAST step (the claimed state-changing action)
+ *   mongo tap AFTER         → the SAME scoped query, re-read
+ *   confirm leg             → the recipe's OWN confirm[] (fresh-session REST) if declared, else a
+ *                             SECOND independent SAME-scoped mongo read (mirrors the argo nonce
+ *                             round-trip) — mongo confirm always goes through the scoped tap, never
+ *                             an ambient read
+ *   checkK8sAttachDrift     → called AFTER the confirm leg (throws → CND naming reconcile-drift,
+ *                             never a false DOES_NOT_WORK)
+ * Attempt receipts are TOOL provenance; ground truth stays the mongo tap (HARNESS). The frozen core
+ * is untouched; the effect claim is agent-proposed (proposer.mjs's ALLOWED_HTTP_OPS).
+ * @param {any} opts the runCatch opts (recipeDir, intent, proposal, llmFn, conjureFn, tapStoreFn, fetchFn)
+ * @param {import('./recipe.mjs').Recipe} recipe the loaded recipe (drive.mode === 'note-lifecycle')
+ * @param {string} runDir directory to persist the sealed receipt into
+ * @returns {Promise<CatchResult>}
+ */
+async function runNoteLifecycleCatch(opts, recipe, runDir) {
+  const { recipeDir } = opts;
+  const fetchFn = opts.fetchFn || /** @type {typeof fetch} */ (fetch);
+  // Config-keyed registry (routes conjure through the k8s-attach environment provider); the
+  // discriminating, placeholder-scoped mongo reads below go through tapMongo directly (they need
+  // per-call query-text substitution tapStoreFn's plain (handle,queryName) shape has no room for).
+  const { conjureFn } = resolveCatchSeams(opts, recipe);
+  const st = /** @type {import('./recipe.mjs').MongoStoreTap} */ (recipe.store_tap);
+  const queryName = pickObservableQueryName(st);
+  const rawQuery = st.queries[queryName];
+  const spec = resolveObservable(st, queryName);
+  const instanceIdName = firstPlaceholderName(rawQuery);
+  const observables = [spec.entity];
+  const fd = /** @type {any} */ (recipe.front_door);
+  const drive = /** @type {any} */ (recipe.drive);
+  const ci = recipe.code_identity;
+  // multi_repo has no single SHA — label the receipt filename from every bound repo instead.
+  const sha =
+    ci.mode === 'multi_repo'
+      ? /** @type {import('./recipe.mjs').MultiRepoIdentity} */ (ci).repos.map((r) => `${r.name}@${String(r.sha).slice(0, 7)}`).join('+')
+      : '';
+  const intent = opts.intent || recipe.intent || `${recipe.name}: ${drive.surface}`;
+
+  /** @type {string[]} */
+  const diagnosis = [];
+  /** @type {NoteLifecycleIteration[]} */
+  const iterations = [];
+  /** @type {import('./proposer.mjs').Proposal|null} */
+  let proposal = opts.proposal || null;
+  let proposalFrozen = !!proposal;
+  /** @type {Set<string>} */
+  const seenInstanceIds = new Set();
+
+  /** @param {NoteLifecycleIteration[]} its @param {import('./proposer.mjs').Proposal|null} p */
+  const seal = async (its, p) => {
+    const bundle = assembleNoteLifecycleBundle({ intent, iterations: its, claim: p ? p.claim : undefined, actorIdentity: ACTOR_IDENTITY, identity: VISITOR_IDENTITY });
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const receiptPath = persistCatchReceipt(runDir, sha, sealBundle(bundle, privateKey));
+    const persisted = /** @type {import('./types.mjs').EvidenceBundle} */ (JSON.parse(readFileSync(receiptPath, 'utf8')));
+    return { phase: /** @type {const} */ ('catch'), sha, verdict: sealedVerdict(persisted), diagnosis, bundle: persisted, receiptPath, proposal: p };
+  };
+
+  /** @type {import('./conjure.mjs').SutHandle|null} */
+  let handle = null;
+  try {
+    handle = await conjureFn(recipeDir, {});
+  } catch (e) {
+    // Bring-up itself could not attach (real cluster/kubectl absence, base-skew, etc.) — every
+    // reproduction is an honest could-not-execute, never evidence against the change.
+    const reason = String((e && /** @type {any} */ (e).message) || e);
+    diagnosis.push(`catch: note-lifecycle bring-up could not attach (feature-absent / infra-absent, not evidence against the change): ${reason}`);
+    for (let i = 0; i < REPRODUCTIONS; i++) iterations.push({ executed: false, effectHeld: false, before: 0, reason });
+    return seal(iterations, null);
+  }
+
+  const attachedHandle = handle;
+  try {
+    for (let i = 0; i < REPRODUCTIONS; i++) {
+      try {
+        const fingerprint = await mintK8sAttachIdentity(attachedHandle);
+
+        // operator_env (G5): read every declared name from process.env — unset stays undefined; a
+        // later placeholder resolution throws, naming it (never a fabricated default).
+        const setup = recipe.setup;
+        if (Array.isArray(setup) && setup.length) {
+          throw new Error("note-lifecycle: array-form setup is not supported (this drive mode expects the operator_env object form — no REST bootstrap dance)");
+        }
+        /** @type {Record<string,any>} */
+        const captures = {};
+        if (!Array.isArray(setup)) {
+          for (const name of setup.operator_env) captures[name] = process.env[name];
+        }
+
+        const introspection = {
+          surface: drive.surface,
+          base_url_template: fd.base_url_template,
+          entrypoint: fd.entrypoint,
+          operator_env: { ...captures },
+        };
+        if (!proposal && !proposalFrozen) {
+          proposalFrozen = true;
+          proposal = await proposeWalkAndClaim({ intent, introspection, observables }, { llmFn: opts.llmFn, allowedOps: ALLOWED_HTTP_OPS });
+          diagnosis.push(
+            `catch: agent proposed a ${proposal.walk.length}-step http walk claiming ${proposal.claim.entity} ${proposal.claim.expectedAfterRelation.op} — frozen and replayed verbatim across reproductions.`
+          );
+        }
+        if (!proposal) throw new Error('the agent seam produced no valid http walk+claim (frozen as unavailable) — could-not-execute');
+        if (proposal.walk.length < 2) {
+          throw new Error(
+            'note-lifecycle: the proposed walk must have at least 2 steps (a resolve phase that captures the fresh instance id, then the terminal state-changing step)'
+          );
+        }
+
+        const headers = /** @type {Record<string,string>} */ (fd.headers) || {};
+        const resolveSteps = proposal.walk.slice(0, -1);
+        const terminalStep = proposal.walk.slice(-1);
+        const drive1 = await executeNoteLifecycleWalk({ fetchFn, baseUrl: attachedHandle.baseUrl, walk: resolveSteps, headers, captures });
+
+        if (!instanceIdName) throw new Error(`note-lifecycle: the discriminating query '${queryName}' names no {placeholder} to scope the fresh instance by`);
+        const instanceId = captures[instanceIdName];
+        if (instanceId === undefined) throw new Error(`note-lifecycle: the walk's resolve phase never captured '${instanceIdName}' — cannot scope the discriminating store tap`);
+
+        const fresh = checkFreshInstance(seenInstanceIds, String(instanceId));
+        if (!fresh.fresh) {
+          diagnosis.push(`catch: ${fresh.reason}`);
+          iterations.push({ executed: false, effectHeld: false, before: 0, reason: fresh.reason });
+          continue;
+        }
+
+        const resolvedQuery = resolveMongoQueryPlaceholders(rawQuery, captures);
+        const kubeArgs = /** @type {any} */ (attachedHandle)._k8sAttach.kubeArgs;
+        const execFn = /** @type {any} */ (attachedHandle)._k8sAttach.execFn;
+        const beforeRows = await tapMongo(st, queryName, resolvedQuery, kubeArgs, execFn);
+        const before = observedValue(beforeRows, spec);
+
+        const drive2 = await executeNoteLifecycleWalk({ fetchFn, baseUrl: attachedHandle.baseUrl, walk: terminalStep, headers, captures });
+        const afterRows = await tapMongo(st, queryName, resolvedQuery, kubeArgs, execFn);
+        const after = observedValue(afterRows, spec);
+        const changed = after !== before;
+
+        let freshObserved;
+        let confirmReason;
+        if (changed) {
+          if (recipe.confirm && recipe.confirm.length) {
+            const confirm = await runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl: attachedHandle.baseUrl, afterValue: after, setupCaptures: captures });
+            freshObserved = confirm.observed;
+            confirmReason = confirm.reason;
+          } else {
+            // No confirm[] declared — a SECOND independent, SAME-scoped mongo read (mirrors the argo
+            // nonce round-trip): mongo confirm always goes through the scoped tap, never ambient.
+            const confirmRows = await tapMongo(st, queryName, resolvedQuery, kubeArgs, execFn);
+            freshObserved = observedValue(confirmRows, spec);
+          }
+          if (confirmReason) diagnosis.push(`catch: ${confirmReason}`);
+        }
+
+        const claimRel = proposal ? normalizeEqualsClaimValue(proposal.claim.expectedAfterRelation, after) : undefined;
+        const claimHolds = claimRelationHolds(claimRel, before, after);
+        const effectHeld = changed && freshObserved !== undefined && confirmAgrees(freshObserved, after) && claimHolds;
+
+        // Drift sentinel AFTER the confirm leg: an un-caused change refuses to confirm (CND naming
+        // reconcile-drift), never a false DOES_NOT_WORK.
+        await checkK8sAttachDrift(attachedHandle);
+
+        const reason = effectHeld
+          ? undefined
+          : !changed
+            ? 'the walk ran but the bound observable did not change'
+            : freshObserved === undefined
+              ? confirmReason || 'a fresh re-observation could not confirm the effect (confirm leg absent)'
+              : !confirmAgrees(freshObserved, after)
+                ? `the fresh re-observation (${freshObserved}) disagreed with the store tap (${after})`
+                : `the persisted value (${after}) did not satisfy the claimed relation${claimRel ? ` (${claimRel.op}${'value' in claimRel ? ' ' + JSON.stringify(claimRel.value) : ''})` : ''}`;
+
+        iterations.push({
+          executed: true,
+          effectHeld,
+          before,
+          after,
+          entity: spec.entity,
+          freshObserved,
+          driveSteps: [...drive1.steps, ...drive2.steps],
+          fingerprint,
+          reason,
+        });
+        diagnosis.push(
+          effectHeld
+            ? `catch: reproduction ${i} — ${spec.entity} ${before} → ${after} (instance ${instanceId}); a fresh re-observation agreed (confirm leg holds).`
+            : `catch: reproduction ${i} executed the walk but did not confirm the effect: ${reason}.`
+        );
+      } catch (e) {
+        const reason = String((e && /** @type {any} */ (e).message) || e);
+        diagnosis.push(`catch: note-lifecycle reproduction ${i} could not execute (feature-absent / could-not-execute, not evidence against the change): ${reason}`);
+        iterations.push({ executed: false, effectHeld: false, before: 0, reason });
+      }
+    }
+  } finally {
+    try {
+      await attachedHandle.teardown();
+    } catch {
+      /* already reaped */
+    }
+  }
+
+  return seal(iterations, proposal);
 }

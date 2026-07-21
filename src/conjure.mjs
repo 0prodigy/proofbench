@@ -77,6 +77,11 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * @property {string[]} pods pod names, sorted
  * @property {string[]} digests resolved `sha256:` digests observed across every container, sorted+deduped
  * @property {Record<string,number>} restarts `${podName}/${containerName}` -> observed restartCount
+ * @property {{ref:string, digest:string}[]} [imageRefs] each container's OWN requested image ref
+ *   (repo[:tag], no digest guaranteed) paired with that SAME container's resolved digest — the
+ *   ref-matching material {@link expectedImagesBind} needs for a digestless `expected_images` entry
+ *   (repo+tag matching); the deduped `digests` set above can't do this since it drops the
+ *   ref<->digest pairing. Optional so a pure detectDrift-only test fixture need not supply it.
  */
 
 /**
@@ -189,8 +194,10 @@ export function resolveBodyPlaceholders(node, lookup) {
 }
 
 /**
- * Walk a simple `$.a.b` JSONPath (the capture syntax). Non-`$` paths and off-path reads
- * return undefined.
+ * Walk a simple `$.a.b` / `$.a[0].b` JSONPath (the capture syntax): a dot-separated key, each
+ * OPTIONALLY followed by one or more `[N]` array-index suffixes (e.g. the Lyric class's
+ * `$.notes[0]._id` — resolving parent.notes[0] to the child note-exec id). Non-`$` paths, an
+ * off-path read, or an out-of-range index all return undefined.
  * @param {any} obj
  * @param {string} path
  * @returns {any}
@@ -198,9 +205,15 @@ export function resolveBodyPlaceholders(node, lookup) {
 export function extractJsonPath(obj, path) {
   if (typeof path !== 'string' || path[0] !== '$') return undefined;
   let cur = obj;
-  for (const key of path.slice(1).split('.').filter(Boolean)) {
+  for (const rawKey of path.slice(1).split('.').filter(Boolean)) {
+    const m = /^([^[\]]+)((?:\[\d+\])*)$/.exec(rawKey);
+    if (!m) return undefined;
     if (cur == null || typeof cur !== 'object') return undefined;
-    cur = cur[key];
+    cur = cur[m[1]];
+    for (const idx of m[2].match(/\[(\d+)\]/g) || []) {
+      if (cur == null || typeof cur !== 'object') return undefined;
+      cur = cur[Number(idx.slice(1, -1))];
+    }
   }
   return cur;
 }
@@ -684,17 +697,18 @@ export async function conjure(recipeDir, opts = {}) {
   const ci = recipe.code_identity;
   const c = recipe.conjure;
 
-  // multi_repo identity is not yet implemented for ANY conjure mode (R3 growth is loader-only so
-  // far) — fail loudly and by name rather than reading an undefined from_tree/pinned_image field
-  // further down.
-  if (ci.mode === 'multi_repo') {
-    throw new Error("conjure: code_identity.mode 'multi_repo' pairs with conjure.mode 'k8s-attach' only, which is not yet implemented here");
-  }
-
-  // k8s-attach owns no container and needs no docker daemon at all — dispatch before the docker
-  // gate below (which stays run/compose-only).
+  // k8s-attach owns no container and needs no docker daemon at all — dispatch (including its own
+  // multi_repo identity handling) before the docker gate below (which stays run/compose-only).
   if (c.mode === 'k8s-attach') {
     return conjureK8sAttach(recipe, opts);
+  }
+
+  // multi_repo identity (the Lyric class) pairs with conjure.mode 'k8s-attach' ONLY — a from_tree/
+  // pinned_image single-container build has no shape for repos[]/wheels[]/images[]. Every OTHER
+  // conjure mode (run/compose, handled below) rejects it by name — never reading an undefined
+  // from_tree/pinned_image field further down.
+  if (ci.mode === 'multi_repo') {
+    throw new Error(`conjure: code_identity.mode 'multi_repo' pairs with conjure.mode 'k8s-attach' only (got conjure.mode ${JSON.stringify(c.mode)})`);
   }
 
   const docker = detectDocker();
@@ -1099,28 +1113,105 @@ async function snapshotCluster(execFn, { kubeContext, namespace }) {
   } catch (e) {
     throw new Error(`conjure: k8s-attach could not parse 'get pods -o json' output: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { pods: podNamesFrom(list), digests: podDigestsFrom(list), restarts: podRestartCountsFrom(list) };
+  return {
+    pods: podNamesFrom(list),
+    digests: podDigestsFrom(list),
+    restarts: podRestartCountsFrom(list),
+    imageRefs: podImageRefsFrom(list),
+  };
+}
+
+/**
+ * The {ref, digest} pairs observed across every (init or regular) container in a `kubectl get pods
+ * -o json` list — `ref` is that SAME container's OWN requested image (`spec.containers[].image` /
+ * `spec.initContainers[].image`, matched by container name; falls back to `status.containerStatuses[].image`
+ * when no spec is present, e.g. a test fixture), `digest` is the resolved `sha256:` digest
+ * (`status.containerStatuses[].imageID`). A container with no resolvable digest is skipped (nothing to
+ * bind against). Used by {@link expectedImagesBind}'s ref-matching path.
+ * @param {any} poList
+ * @returns {{ref:string, digest:string}[]}
+ */
+export function podImageRefsFrom(poList) {
+  const items = poList && Array.isArray(poList.items) ? poList.items : [];
+  /** @type {{ref:string, digest:string}[]} */
+  const out = [];
+  for (const pod of items) {
+    const spec = (pod && pod.spec) || {};
+    const st = (pod && pod.status) || {};
+    const specContainers = [...(spec.containers || []), ...(spec.initContainers || [])];
+    const statuses = [...(st.containerStatuses || []), ...(st.initContainerStatuses || [])];
+    for (const cs of statuses) {
+      if (!cs) continue;
+      const digest = normalizeDigest(cs.imageID);
+      if (!digest) continue;
+      const specC = typeof cs.name === 'string' ? specContainers.find((c) => c && c.name === cs.name) : undefined;
+      const ref = (specC && typeof specC.image === 'string' && specC.image) || (typeof cs.image === 'string' ? cs.image : '');
+      if (ref) out.push({ ref, digest });
+    }
+  }
+  return out;
+}
+
+/** @param {string} ref @returns {string} strip a trailing `@sha256:...` digest, if present */
+function stripDigestSuffix(ref) {
+  return String(ref || '').replace(/@sha256:[0-9a-f]{64}/i, '');
+}
+
+/**
+ * Split a digestless image ref into {repo, tag} — the LAST `:` after the LAST `/` is the tag
+ * (so a `host:port/repo` registry address is never mistaken for a tag); a ref with no such `:`
+ * has an undefined tag (a bare repo reference).
+ * @param {string} ref
+ * @returns {{repo:string, tag:string|undefined}}
+ */
+function splitRepoTag(ref) {
+  const lastSlash = ref.lastIndexOf('/');
+  const lastColon = ref.lastIndexOf(':');
+  if (lastColon > lastSlash) return { repo: ref.slice(0, lastColon), tag: ref.slice(lastColon + 1) };
+  return { repo: ref, tag: undefined };
 }
 
 /**
  * The CODE-IDENTITY mint precondition (P1/P4, docs/pb-extensibility-foundation.md §3): every
- * recipe-declared `conjure.expected_images` entry must name (or resolve to) a `sha256:` digest
- * actually observed running. An expected image with no resolvable digest, or a digest nobody is
- * running, is `unbound` — never WORKS-capable (§4.3's binding ladder).
+ * recipe-declared `conjure.expected_images` entry must BIND to a running pod:
+ *   - an entry carrying an explicit `@sha256:` digest binds ONLY on that exact digest actually
+ *     being observed running (unchanged prior behavior).
+ *   - a DIGESTLESS entry (the Lyric class: `git_tag_overwrite` dev-build tags, never a stable
+ *     digest, live in the recipe) binds by REPO+TAG against a running pod's OWN requested image ref
+ *     (an untagged entry matches by repo alone) — the OBSERVED digest for that SAME container is
+ *     what actually gets sealed (mintK8sAttachIdentity), never the recipe's claimed tag.
+ * No match (either form) is `unbound` — never WORKS-capable (§4.3's binding ladder; fail-safe: a
+ * base-skewed cluster refuses to mint rather than seal a wrong identity).
  * @param {string[]} observedDigests
  * @param {string[]} expectedImages
+ * @param {{ref:string, digest:string}[]} [observedRefs] per-container {ref,digest} pairs (see
+ *   {@link podImageRefsFrom}) — required only for the digestless ref-matching path; omitted callers
+ *   (or a digest-only expected_images list) are unaffected.
  * @returns {{bound:boolean, reason?:string}}
  */
-export function expectedImagesBind(observedDigests, expectedImages) {
+export function expectedImagesBind(observedDigests, expectedImages, observedRefs = []) {
   const observed = new Set(observedDigests);
   /** @type {string[]} */
   const problems = [];
   for (const ref of expectedImages) {
     const digest = normalizeDigest(ref);
-    if (!digest) {
-      problems.push(`${ref} names no sha256 digest to bind — unbound, never WORKS-capable`);
-    } else if (!observed.has(digest)) {
-      problems.push(`${ref} — digest ${digest} was not observed running on any attached pod`);
+    if (digest) {
+      if (!observed.has(digest)) {
+        problems.push(`${ref} — digest ${digest} was not observed running on any attached pod`);
+      }
+      continue;
+    }
+    // Digestless: bind by REPO+TAG against a running pod's own requested image ref — the recipe's
+    // tag is an EXPECTATION, never sealed itself (the observed digest is what gets sealed).
+    const expected = splitRepoTag(stripDigestSuffix(ref));
+    const matched = observedRefs.some((o) => {
+      const obs = splitRepoTag(stripDigestSuffix(o.ref));
+      return expected.tag !== undefined ? obs.repo === expected.repo && obs.tag === expected.tag : obs.repo === expected.repo;
+    });
+    if (!matched) {
+      problems.push(
+        `${ref} names no sha256 digest and matched no running pod's image ref by repo${expected.tag !== undefined ? '+tag' : ''} — unbound, never WORKS-capable`
+      );
     }
   }
   return problems.length ? { bound: false, reason: problems.join('; ') } : { bound: true };
@@ -1151,6 +1242,28 @@ export function detectDrift(before, after) {
     }
   }
   return reasons.length ? { drifted: true, reason: reasons.join('; ') } : { drifted: false };
+}
+
+/**
+ * The `{<slug>_host}`/`{<slug>_port}` placeholders a k8s-attach `front_door.base_url_template`
+ * (mode 'rest') resolves against — one pair per recipe-declared `conjure.services[]` entry, the
+ * slug DERIVED (never hardcoded) from the k8s Service name's own last path segment (e.g.
+ * `svc/appservice` -> `appservice_host`/`appservice_port`; non-alnum runs collapsed to `_` so
+ * `svc/mongodb-svc` still yields a valid placeholder identifier, `mongodb_svc_host`). Every
+ * k8s-attach service is reached through pb's OWN port-forward, so the host is always `localhost`.
+ * @param {import('./recipe.mjs').K8sAttachService[]} services
+ * @returns {Record<string,string|number>}
+ */
+function k8sServicePlaceholders(services) {
+  /** @type {Record<string,string|number>} */
+  const out = {};
+  for (const svc of services) {
+    const last = String(svc.name).split('/').pop() || svc.name;
+    const slug = last.replace(/[^a-zA-Z0-9]+/g, '_');
+    out[`${slug}_host`] = 'localhost';
+    out[`${slug}_port`] = svc.local_port;
+  }
+  return out;
 }
 
 /**
@@ -1201,14 +1314,19 @@ async function conjureK8sAttach(recipe, opts) {
     // drive-time only (mintK8sAttachIdentity) — never this one (F2/F3).
     const attachSnapshot = await snapshotCluster(execFn, kubeArgs);
 
-    const baseUrl = `http://localhost:${services[0].local_port}`;
+    let baseUrl = `http://localhost:${services[0].local_port}`;
     const fd = recipe.front_door;
     /** @type {string} */
     let frontDoorUrl;
     if (fd.mode === 'rest') {
-      throw new Error(
-        "conjure: front_door.mode 'rest' is not yet implemented here (k8s-attach mints identity/bring-up receipts only; REST front-door resolution + drive is a later slice)"
-      );
+      // The Lyric class: no single user-facing page — the door is a REST base (resolved against
+      // every port-forwarded Service, {slug_host}/{slug_port}) + a disclosed entrypoint the DRIVE
+      // fires at drive time (catch.mjs), never here (the entrypoint's own placeholders are
+      // operator_env values, not known at conjure time). frontDoorUrl mirrors the resolved base —
+      // there is no separate page to point at.
+      const svcPlaceholders = k8sServicePlaceholders(services);
+      baseUrl = resolvePlaceholders(/** @type {string} */ (fd.base_url_template), (n) => svcPlaceholders[n]);
+      frontDoorUrl = baseUrl;
     } else {
       // No REST setup dance runs for k8s-attach (operator_env, not steps) — an unresolved
       // placeholder stays literal for a later drive slice to fill, mirroring compose's
@@ -1276,21 +1394,34 @@ export async function mintK8sAttachIdentity(handle) {
   const driveSnapshot = await snapshotCluster(attach.execFn, attach.kubeArgs);
   const expectedImages = /** @type {any} */ (handle.recipe.conjure).expected_images || [];
   if (expectedImages.length) {
-    const { bound, reason } = expectedImagesBind(driveSnapshot.digests, expectedImages);
+    const { bound, reason } = expectedImagesBind(driveSnapshot.digests, expectedImages, driveSnapshot.imageRefs);
     if (!bound) {
       throw new Error(`conjure: k8s-attach code-identity refuses to mint — base-skew: ${reason}`);
     }
   }
+  const ci = handle.recipe.code_identity;
+  // multi_repo (the Lyric class): seal the recipe's OWN repos[]/wheels[] declarations alongside the
+  // DRIVE-TIME observed digests above — the recipe's images[].tag claims are expectations only and
+  // are NEVER what gets sealed here (the running digest is).
+  const multiRepoIdentity =
+    ci.mode === 'multi_repo'
+      ? {
+          repos: /** @type {import('./recipe.mjs').MultiRepoIdentity} */ (ci).repos,
+          wheels: /** @type {import('./recipe.mjs').MultiRepoIdentity} */ (ci).wheels,
+        }
+      : {};
   const fingerprint = mint({
     id: 'fingerprint',
     kind: 'fingerprint',
     provenance: 'harness',
     data: {
       mode: 'k8s-attach',
+      code_identity_mode: ci.mode,
       kube_context: attach.kubeArgs.kubeContext,
       namespace: attach.kubeArgs.namespace,
       drive_time_digests: driveSnapshot.digests,
       expected_images: expectedImages,
+      ...multiRepoIdentity,
     },
   });
   handle.receipts.push(fingerprint);

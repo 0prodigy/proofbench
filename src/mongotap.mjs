@@ -194,6 +194,62 @@ function parseMongoRows(stdout, queryName) {
 }
 
 /**
+ * The permitted SHAPE for an AGENT-CAPTURED value substituted into a mongo query placeholder (e.g.
+ * `{child_execution_id}` — the Lyric class's note-lifecycle drive, catch.mjs): a 24-hex MongoDB
+ * ObjectId, OR a conservative `[A-Za-z0-9_-]{1,64}` token. The agent PROPOSED the walk that produced
+ * this value (via a `capture` on an http walk step) — it is UNTRUSTED input, so a hostile capture
+ * (e.g. `'"};db.dropDatabase();//'`) must never reach the mongosh `--eval` string verbatim; anything
+ * outside this shape is refused before it is ever interpolated.
+ */
+const SAFE_CAPTURED_VALUE = /^(?:[0-9a-fA-F]{24}|[A-Za-z0-9_-]{1,64})$/;
+
+/**
+ * Validate an agent-captured value's SHAPE before it is string-substituted into a mongosh query (or,
+ * by the same rule, any other kubectl-bound argv) — see {@link SAFE_CAPTURED_VALUE}. Throws (naming
+ * the placeholder + the offending value, truncated) rather than interpolate an unsafe shape; the
+ * caller treats the throw as an honest could-not-execute (→ CND naming the step), never a bypass.
+ * @param {string} name the placeholder name (for the error message)
+ * @param {any} value the captured value
+ * @returns {string} the value, stringified, once validated safe
+ */
+export function assertSafeCapturedValue(name, value) {
+  const s = String(value);
+  if (!SAFE_CAPTURED_VALUE.test(s)) {
+    throw new Error(
+      `mongotap: captured value for {${name}} has an unsafe shape for a mongo query (must be a 24-hex ObjectId or [A-Za-z0-9_-]{1,64}) — refusing to interpolate ${JSON.stringify(s.slice(0, 80))} into the mongosh --eval string`
+    );
+  }
+  return s;
+}
+
+/**
+ * Resolve every `{name}` placeholder in a recipe-declared mongo query TEMPLATE with an AGENT-CAPTURED
+ * value (e.g. `store_tap.queries.stage_controls_queued`'s `{child_execution_id}`) — each substituted
+ * value is shape-validated first ({@link assertSafeCapturedValue}); a placeholder with no capture of
+ * that name throws, naming it (never a fabricated blank, mirrors conjure.mjs's resolvePlaceholders).
+ * Scoped to the mongo-query injection surface (the note-lifecycle drive's discriminating tap); HTTP
+ * walk-step placeholders resolve through conjure.mjs's own resolvePlaceholders/resolveBodyPlaceholders
+ * instead (no shell/eval injection surface there).
+ *
+ * The placeholder pattern is deliberately IDENTIFIER-restricted (`{[A-Za-z_][A-Za-z0-9_]*}`, no
+ * closing-`}` search past the first non-word char) — unlike conjure.mjs's URL-template
+ * resolvePlaceholders, a mongo query is itself JS/JSON-shaped and is FULL of unrelated `{`/`}`
+ * object-literal braces (e.g. `find({executionId:'{child_execution_id}'})`); a greedy `[^}]+` would
+ * swallow from the object-literal's own `{` through to the placeholder's closing `}`.
+ * @param {string} query
+ * @param {Record<string,any>} captures
+ * @returns {string}
+ */
+export function resolveMongoQueryPlaceholders(query, captures) {
+  return query.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => {
+    if (!captures || !(name in captures) || captures[name] === undefined) {
+      throw new Error(`mongotap: query references {${name}} but no capture named '${name}' was recorded — cannot resolve`);
+    }
+    return assertSafeCapturedValue(name, captures[name]);
+  });
+}
+
+/**
  * Run the recipe's named mongo store query OUT OF BAND via `kubectl exec ... mongosh` — NEVER
  * through appservice's REST API (§1.1/§4 — an app-sourced read would be agent/tool provenance,
  * not harness). Throws (never falls back to an app read) when no `credential_secrets` entry

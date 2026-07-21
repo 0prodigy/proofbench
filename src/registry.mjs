@@ -11,9 +11,11 @@
  * Each phase resolves to the EXISTING provider ENTRY POINT — the registry adds indirection only, it
  * never re-implements or alters what a provider DOES (§2.3):
  *   - Environment (+ Readiness + Code-Identity): conjure() — it brings the SUT up (conjure.mode
- *     run|compose), resolves code-identity (code_identity.mode from_tree|pinned_image), polls the
- *     disclosed ready_signal, and mints the fingerprint/bringup. conjure's internal mode/engine
- *     dispatch stays in conjure.mjs UNTOUCHED (405 resolveImage, 471 bringUpCompose, 543-557 ready poll).
+ *     run|compose|k8s-attach), resolves code-identity (code_identity.mode
+ *     from_tree|pinned_image|multi_repo), polls the disclosed ready_signal (or, for k8s-attach,
+ *     port-forwards + mints the identity/drift mint-preconditions), and mints the fingerprint/bringup.
+ *     conjure's internal mode/engine dispatch stays in conjure.mjs UNTOUCHED (405 resolveImage, 471
+ *     bringUpCompose, 543-557 ready poll, conjureK8sAttach for the Lyric class).
  *   - Tap: tapStore() — the out-of-band store read, engine-dispatched sqlite|postgres|mongo
  *     inside storetap.mjs, UNTOUCHED.
  *   - Drive: openBrowser() — the browser drive. This slice KEEPS CURRENT BEHAVIOR: runCatch always
@@ -26,8 +28,8 @@
  * (mirroring recipe.mjs/orgconfig.mjs `bad`), never a silent fallthrough. The registry validates only
  * that a key is a KNOWN provider — the semantic cross-constraints (e.g. compose requires from_tree,
  * conjure.mjs:474) stay owned by the provider, so this indirection cannot drift from their behavior.
- * New provider types (k8s-attach, ci_attested, argocd, k8s-exec, http) register here in later
- * milestones — additive, never a frozen-core edit (§2.4).
+ * New provider types (ci_attested, argocd, http) register here in later milestones — additive,
+ * never a frozen-core edit (§2.4). k8s-attach/multi_repo (the Lyric class, R3) are registered now.
  *
  * resolveCatchSeams is the DEFAULT wiring runCatch consumes, applying the invariant "an explicitly
  * INJECTED seam WINS over the registry default" — catch.mjs's unit tests inject mock seams, and
@@ -45,8 +47,8 @@ import { openWorkflowRun, k8sExecTap } from './argoworkflows.mjs';
  * Native provider keys per phase — EXACTLY the modes/engines conjure/storetap already implement (and
  * recipe.mjs already validates at load). An unknown key has no registered provider ⇒ honest error.
  */
-const ENVIRONMENT_MODES = ['run', 'compose'];
-const IDENTITY_MODES = ['from_tree', 'pinned_image'];
+const ENVIRONMENT_MODES = ['run', 'compose', 'k8s-attach'];
+const IDENTITY_MODES = ['from_tree', 'pinned_image', 'multi_repo'];
 const TAP_ENGINES = ['sqlite', 'postgres', 'mongo'];
 
 /**

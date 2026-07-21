@@ -197,8 +197,11 @@ test('recipe: absent setup and absent drive default honestly (empty setup, defer
 test('recipe: every drive mode validates and resolves', () => {
   for (const mode of ['http', 'browser', 'note-lifecycle', 'deferred']) {
     const o = /** @type {any} */ (validRecipe());
-    // note-lifecycle (G7) requires `surface`; every other mode is bare.
+    // note-lifecycle (G7) requires `surface` + a mongo store_tap; every other mode is bare.
     o.drive = mode === 'note-lifecycle' ? { mode, surface: 'appservice-api+mongo' } : { mode };
+    if (mode === 'note-lifecycle') {
+      o.store_tap = { engine: 'mongo', pod: 'mongodb-0', container: 'mongod', db: 'lyric', credential_secrets: ['s'], queries: { q: 'db.x.find()' } };
+    }
     const dir = writeRecipeDir(o);
     try {
       assert.equal(loadRecipe(dir).drive.mode, mode);
@@ -477,14 +480,51 @@ test('recipe: front_door.mode "rest" validates base_url_template/entrypoint and 
   }
 });
 
-test('recipe: drive.mode "note-lifecycle" requires surface and never scripts the walk (G7)', () => {
+test('recipe: front_door.mode "rest" accepts operator_env-sourced headers (e.g. a cluster From header) and rejects a non-string value', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.front_door = {
+    mode: 'rest',
+    base_url_template: 'http://{appservice_host}:{appservice_port}',
+    entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}',
+    headers: { From: '{PB_LYRIC_FROM}' },
+  };
+  const dir = writeRecipeDir(o);
+  try {
+    const r = loadRecipe(dir);
+    assert.deepEqual(/** @type {any} */ (r.front_door).headers, { From: '{PB_LYRIC_FROM}' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const bad = /** @type {any} */ (validRecipe());
+  bad.front_door = { mode: 'rest', base_url_template: 'http://x', entrypoint: 'POST /x', headers: { From: 123 } };
+  const badDir = writeRecipeDir(bad);
+  try {
+    assert.throws(() => loadRecipe(badDir), /front_door\.headers\.From must be a string value/);
+  } finally {
+    rmSync(badDir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: drive.mode "note-lifecycle" requires surface + a mongo store_tap, and never scripts the walk (G7)', () => {
   const o = /** @type {any} */ (validRecipe());
   o.drive = { mode: 'note-lifecycle', surface: 'appservice-api+mongo' };
+  o.store_tap = { engine: 'mongo', pod: 'mongodb-0', container: 'mongod', db: 'lyric', credential_secrets: ['s'], queries: { q: 'db.x.find()' } };
   const dir = writeRecipeDir(o);
   try {
     const r = loadRecipe(dir);
     assert.equal(r.drive.mode, 'note-lifecycle');
     assert.equal(/** @type {any} */ (r.drive).surface, 'appservice-api+mongo');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recipe: drive.mode "note-lifecycle" rejects a non-mongo store_tap (the ground truth must be the mongo tap)', () => {
+  const o = /** @type {any} */ (validRecipe());
+  o.drive = { mode: 'note-lifecycle', surface: 'appservice-api+mongo' };
+  const dir = writeRecipeDir(o); // validRecipe()'s default store_tap.engine is 'sqlite'
+  try {
+    assert.throws(() => loadRecipe(dir), /store_tap\.engine.*requires store_tap\.engine 'mongo'/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

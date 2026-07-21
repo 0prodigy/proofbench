@@ -92,9 +92,25 @@ test('registry: resolveArgoSeams wires the argo drive + tap; injection WINS over
 
 test('registry: unknown type→honest error — an unknown conjure.mode has no registered environment provider', () => {
   assert.throws(
-    () => environmentProvider(makeRecipe({ conjure: { mode: 'k8s-attach' } })),
-    /registry: conjure\.mode has no registered environment provider[\s\S]*k8s-attach/
+    () => environmentProvider(makeRecipe({ conjure: { mode: 'nope' } })),
+    /registry: conjure\.mode has no registered environment provider[\s\S]*nope/
   );
+});
+
+test('registry: config→provider — the Lyric class (k8s-attach / multi_repo) resolves Environment to the existing conjure', () => {
+  assert.equal(environmentProvider(makeRecipe({ conjure: { mode: 'k8s-attach' }, code_identity: { mode: 'multi_repo' } })), conjure);
+});
+
+test('registry: resolveCatchSeams routes a k8s-attach/multi_repo/mongo (the Lyric class) recipe end-to-end without throwing', () => {
+  const lyricRecipe = makeRecipe({
+    code_identity: { mode: 'multi_repo' },
+    conjure: { mode: 'k8s-attach' },
+    store_tap: { engine: 'mongo' },
+    drive: { mode: 'note-lifecycle' },
+  });
+  const seams = resolveCatchSeams({}, lyricRecipe);
+  assert.equal(seams.conjureFn, conjure);
+  assert.equal(seams.tapStoreFn, tapStore);
 });
 
 test('registry: unknown type→honest error — an unknown code_identity.mode has no registered code-identity provider', () => {

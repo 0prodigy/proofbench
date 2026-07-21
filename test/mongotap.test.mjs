@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tapMongo, wrapQueryAsJsonRows } from '../src/mongotap.mjs';
+import { tapMongo, wrapQueryAsJsonRows, resolveMongoQueryPlaceholders, assertSafeCapturedValue } from '../src/mongotap.mjs';
 
 /** @param {any} x @returns {any} */
 const asAny = (x) => x;
@@ -179,5 +179,40 @@ test('mongotap: a docker/kubectl runner error (e.g. binary not found) surfaces d
   await assert.rejects(
     () => tapMongo(asAny(makeStoreTap({ credential_secrets: ['s'] })), 'q', 'db.x.find({}).toArray()', asAny(KUBE_ARGS), asAny(kubectl)),
     /kubectl exec for query 'q' failed to run: spawnSync kubectl ENOENT/
+  );
+});
+
+// ── Placeholder injection guard (item 5): an agent-captured value entering a mongo query ────────
+
+test('mongotap: assertSafeCapturedValue accepts a 24-hex ObjectId and a conservative token, rejects everything else', () => {
+  assert.equal(assertSafeCapturedValue('child_execution_id', '507f1f77bcf86cd799439011'), '507f1f77bcf86cd799439011');
+  assert.equal(assertSafeCapturedValue('name', 'abc-DEF_123'), 'abc-DEF_123');
+  assert.throws(() => assertSafeCapturedValue('child_execution_id', '"};db.dropDatabase();//'), /unsafe shape/);
+  assert.throws(() => assertSafeCapturedValue('x', "'; return 1==1; //"), /unsafe shape/);
+  assert.throws(() => assertSafeCapturedValue('x', ''), /unsafe shape/);
+});
+
+test('mongotap: resolveMongoQueryPlaceholders substitutes a SAFE captured value into the query template', () => {
+  const resolved = resolveMongoQueryPlaceholders(
+    "db.stagecontrols.find({executionId:'{child_execution_id}',status:'queued'}).toArray()",
+    { child_execution_id: '507f1f77bcf86cd799439011' }
+  );
+  assert.equal(resolved, "db.stagecontrols.find({executionId:'507f1f77bcf86cd799439011',status:'queued'}).toArray()");
+});
+
+test('mongotap: resolveMongoQueryPlaceholders REFUSES a hostile capture before it ever reaches the query string', () => {
+  assert.throws(
+    () =>
+      resolveMongoQueryPlaceholders("db.stagecontrols.find({executionId:'{child_execution_id}'}).toArray()", {
+        child_execution_id: '\'"};db.dropDatabase();//',
+      }),
+    /unsafe shape/
+  );
+});
+
+test('mongotap: resolveMongoQueryPlaceholders throws (naming it) when a referenced placeholder was never captured', () => {
+  assert.throws(
+    () => resolveMongoQueryPlaceholders("db.x.find({id:'{missing_id}'}).toArray()", {}),
+    /references \{missing_id\} but no capture named 'missing_id' was recorded/
   );
 });

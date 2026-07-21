@@ -29,6 +29,7 @@ import {
   buildCliPrompt,
   claudeCliLlmFn,
   ALLOWED_WALK_OPS,
+  ALLOWED_HTTP_OPS,
   ALLOWED_RELATION_OPS,
 } from '../src/proposer.mjs';
 import { assembleCatchBundle, quantifierFromIntent } from '../src/catch.mjs';
@@ -97,6 +98,37 @@ test('validateProposal: REJECTS an out-of-menu entity (FW-P1-C) and a bad relati
 
 test('validateProposal: an empty walk is rejected (a proposal must propose at least one gesture)', () => {
   assert.throws(() => validateProposal({ walk: [], claim: goodRaw().claim }, { observables: OBSERVABLES }), /walk must be a non-empty array/);
+});
+
+test('validateProposal: the note-lifecycle "http" op (ALLOWED_HTTP_OPS) accepts method/path/body/capture and strips stray keys', () => {
+  const raw = {
+    walk: [
+      { op: 'http', args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', body: { note: 'x' }, capture: { child_execution_id: '$.notes[0]._id' }, evil: 'nope' } },
+    ],
+    claim: { entity: 'stage_controls_queued.row-count', expectedAfterRelation: { op: 'decreased' }, scope: 'the terminal transition clears queued stagecontrols' },
+  };
+  const { walk } = validateProposal(raw, { observables: ['stage_controls_queued.row-count'], allowedOps: ALLOWED_HTTP_OPS });
+  assert.deepEqual(walk[0], {
+    op: 'http',
+    args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', body: { note: 'x' }, capture: { child_execution_id: '$.notes[0]._id' } },
+  });
+});
+
+test('validateProposal: the "http" op rejects a missing method/path and a non-object body', () => {
+  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
+  assert.throws(
+    () => validateProposal({ walk: [{ op: 'http', args: { path: '/x' } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
+    /walk\[0\]\.args\.method must be a non-empty string/
+  );
+  assert.throws(
+    () => validateProposal({ walk: [{ op: 'http', args: { method: 'GET', path: '/x', body: 'nope' } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
+    /walk\[0\]\.args\.body must be an object/
+  );
+});
+
+test('validateProposal: an "http" op is rejected under the default (browser) allowedOps — walk vocabularies stay scoped per drive', () => {
+  const raw = { walk: [{ op: 'http', args: { method: 'GET', path: '/x' } }], claim: goodRaw().claim };
+  assert.throws(() => validateProposal(raw, { observables: OBSERVABLES }), /walk\[0\]\.op must be one of/);
 });
 
 test('MINT-BOUNDARY: proposer.mjs imports NEITHER mint NOR sealBundle — a proposal is pure data', () => {

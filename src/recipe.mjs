@@ -210,6 +210,7 @@ import { join } from 'node:path';
  *   form) is used verbatim.
  * @property {string} [base_url_template] the REST base (e.g. resolved from a port-forward) — REQUIRED for mode 'rest'
  * @property {string} [entrypoint] the real product entrypoint (e.g. `POST /executions?...`) the drive fires — REQUIRED for mode 'rest'; must be the actual production path, never a look-alike
+ * @property {Record<string,string>} [headers] extra headers sent on EVERY note-lifecycle drive request (mode 'rest' only) — a `{PLACEHOLDER}` value is resolved at drive time from the recipe's OWN operator_env captures (e.g. a cluster's required `From` header); NEVER a literal secret/token baked into the recipe
  * @property {string} [serves] what the front door serves (documentation)
  */
 
@@ -687,6 +688,12 @@ export function loadRecipe(recipeDir) {
   } else {
     if (typeof fd.base_url_template !== 'string' || !fd.base_url_template) bad('front_door.base_url_template', "is required for mode 'rest'");
     if (typeof fd.entrypoint !== 'string' || !fd.entrypoint) bad('front_door.entrypoint', "is required for mode 'rest' (the real product entrypoint the drive fires, e.g. 'POST /executions?...' — never a look-alike)");
+    if (fd.headers !== undefined) {
+      if (!isObject(fd.headers)) bad('front_door.headers', 'must be an object of header name -> string value when present');
+      for (const [hk, hv] of Object.entries(fd.headers)) {
+        if (typeof hv !== 'string') bad(`front_door.headers.${hk}`, 'must be a string value');
+      }
+    }
   }
 
   // store_tap — the out-of-band persisted-leg read; engine-discriminated (sqlite | postgres).
@@ -759,8 +766,11 @@ export function loadRecipe(recipeDir) {
     if (dr.reason !== undefined && (typeof dr.reason !== 'string' || !dr.reason)) bad('drive.reason', 'must be a non-empty string when present');
     if (dr.mode === 'note-lifecycle') {
       // G7: describes the SURFACE this recipe drives (e.g. 'appservice-api+mongo') — the walk
-      // itself stays agent-proposed and is never recipe data.
+      // itself stays agent-proposed and is never recipe data. The note-lifecycle Catch (catch.mjs
+      // runNoteLifecycleCatch) taps ground truth via the mongo engine's out-of-band read ONLY — a
+      // REST/app-sourced read is not the persisted leg (§1.1/§4).
       if (typeof dr.surface !== 'string' || !dr.surface) bad('drive.surface', "is required for drive.mode 'note-lifecycle' (the drive surface, e.g. 'appservice-api+mongo')");
+      if (st.engine !== 'mongo') bad('store_tap.engine', "drive.mode 'note-lifecycle' requires store_tap.engine 'mongo' (the out-of-band ground truth for a note-lifecycle drive)");
     }
     if (dr.mode === 'argo-workflows') {
       const a = dr.argo;

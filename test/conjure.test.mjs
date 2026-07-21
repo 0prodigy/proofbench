@@ -32,6 +32,7 @@ import {
   podNamesFrom,
   podDigestsFrom,
   podRestartCountsFrom,
+  podImageRefsFrom,
   expectedImagesBind,
   detectDrift,
   mintK8sAttachIdentity,
@@ -185,6 +186,13 @@ test('conjure: extractJsonPath walks a $.a.b path and returns undefined off-path
   assert.equal(extractJsonPath({ a: 1 }, '$.a'), 1);
   assert.equal(extractJsonPath({ a: 1 }, 'a'), undefined); // must start with $
   assert.equal(extractJsonPath(null, '$.a'), undefined);
+});
+
+test('conjure: extractJsonPath resolves an array-index segment (e.g. $.notes[0]._id — the Lyric class parent.notes[0] lookup)', () => {
+  assert.equal(extractJsonPath({ notes: [{ _id: 'child1' }, { _id: 'child2' }] }, '$.notes[0]._id'), 'child1');
+  assert.equal(extractJsonPath({ notes: [{ _id: 'child1' }] }, '$.notes[1]._id'), undefined); // out of range
+  assert.equal(extractJsonPath({ a: [[1, 2], [3, 4]] }, '$.a[1][0]'), 3); // chained indices on one segment
+  assert.equal(extractJsonPath({ notes: 'not-an-array' }, '$.notes[0]._id'), undefined);
 });
 
 test('conjure: parseComposeName reads a top-level name:, strips quotes, ignores nested/absent', () => {
@@ -383,6 +391,39 @@ test('conjure: expectedImagesBind requires every expected image to name a digest
   assert.match(wrongDigest.reason || '', /not observed running/);
 });
 
+test('conjure: podImageRefsFrom pairs each container\'s OWN requested image ref with its resolved digest', () => {
+  const list = {
+    items: [
+      {
+        spec: { containers: [{ name: 'appservice', image: 'us-docker.pkg.dev/x/appservice:dev-17398' }] },
+        status: { containerStatuses: [{ name: 'appservice', imageID: `us-docker.pkg.dev/x/appservice@${GOOD_DIGEST}` }] },
+      },
+    ],
+  };
+  assert.deepEqual(podImageRefsFrom(list), [{ ref: 'us-docker.pkg.dev/x/appservice:dev-17398', digest: GOOD_DIGEST }]);
+  assert.deepEqual(podImageRefsFrom({}), []);
+  // no spec.containers at all (an older test fixture) — falls back to containerStatuses[].image, else empty
+  assert.deepEqual(
+    podImageRefsFrom({ items: [{ status: { containerStatuses: [{ name: 'x', imageID: `img@${GOOD_DIGEST}`, image: 'img:v1' }] } }] }),
+    [{ ref: 'img:v1', digest: GOOD_DIGEST }]
+  );
+});
+
+test('conjure: expectedImagesBind ref-matches a DIGESTLESS entry by repo+tag against a running pod\'s own image ref, sealing the OBSERVED digest', () => {
+  const observedRefs = [{ ref: 'us-docker.pkg.dev/x/appservice:dev-17398', digest: GOOD_DIGEST }];
+  // Untagged expected entry (the real ENG-17397 recipe shape) — matches by repo alone.
+  assert.equal(expectedImagesBind([GOOD_DIGEST], ['us-docker.pkg.dev/x/appservice'], observedRefs).bound, true);
+  // Tagged expected entry — must match repo AND tag.
+  assert.equal(expectedImagesBind([GOOD_DIGEST], ['us-docker.pkg.dev/x/appservice:dev-17398'], observedRefs).bound, true);
+  const wrongTag = expectedImagesBind([GOOD_DIGEST], ['us-docker.pkg.dev/x/appservice:other-tag'], observedRefs);
+  assert.equal(wrongTag.bound, false);
+  assert.match(wrongTag.reason || '', /matched no running pod's image ref by repo\+tag/);
+  // A ref-match still fails safe (refuses to mint) when no pod's ref matches by repo at all.
+  const noMatch = expectedImagesBind([GOOD_DIGEST], ['us-docker.pkg.dev/x/other-service'], observedRefs);
+  assert.equal(noMatch.bound, false);
+  assert.match(noMatch.reason || '', /matched no running pod's image ref by repo/);
+});
+
 test('conjure: detectDrift is clean on a stable snapshot and flags a pod-set change, a digest change, and a restart-count increase', () => {
   const before = { pods: ['a'], digests: [GOOD_DIGEST], restarts: { 'a/app': 0 } };
   assert.equal(detectDrift(before, { pods: ['a'], digests: [GOOD_DIGEST], restarts: { 'a/app': 0 } }).drifted, false);
@@ -447,13 +488,83 @@ test('conjure: mode k8s-attach port-forwards every recipe service (never docker)
   }
 });
 
-test('conjure: mode k8s-attach never requires docker and rejects code_identity.mode "multi_repo" (deferred to a later slice)', async () => {
+test("conjure: mode k8s-attach front_door.mode 'rest' resolves base_url_template against every port-forwarded Service (no single user-facing page)", async () => {
+  const dir = writeRecipeDir(
+    validK8sAttachRecipe({
+      conjure: {
+        mode: 'k8s-attach',
+        kube_context: 'akashpathak',
+        namespace: 'delta',
+        services: [
+          { name: 'svc/appservice', local_port: 18000, remote_port: 8000 },
+          { name: 'svc/mongodb-svc', local_port: 27017, remote_port: 27017 },
+        ],
+      },
+      front_door: { mode: 'rest', base_url_template: 'http://{appservice_host}:{appservice_port}', entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}' },
+    })
+  );
+  const fakeSpawn = fakePortForwardSpawn();
+  const fakeExec = fakeK8sExec([{ status: 0, stdout: JSON.stringify(podList()) }]);
+  try {
+    const handle = await conjure(dir, { spawnFn: asAny(fakeSpawn.spawnFn), execFn: asAny(fakeExec) });
+    assert.equal(handle.baseUrl, 'http://localhost:18000');
+    assert.equal(handle.frontDoorUrl, 'http://localhost:18000');
+    await handle.teardown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('conjure: mode k8s-attach never requires docker and brings up code_identity.mode "multi_repo" (the Lyric class)', async () => {
   const dir = writeRecipeDir(validK8sAttachRecipe({ code_identity: { mode: 'multi_repo', repos: [{ name: 'appservice', sha: 'abc' }], wheels: [{ name: 'lyric-py', version: '1.0.0' }] } }));
   try {
-    await assert.rejects(
-      conjure(dir, { spawnFn: asAny(fakePortForwardSpawn().spawnFn), execFn: asAny(fakeK8sExec([{ status: 0, stdout: JSON.stringify(podList()) }])) }),
-      /multi_repo.*not yet implemented/
-    );
+    const handle = await conjure(dir, { spawnFn: asAny(fakePortForwardSpawn().spawnFn), execFn: asAny(fakeK8sExec([{ status: 0, stdout: JSON.stringify(podList()) }])) });
+    assert.equal(handle.containerName, null);
+    await handle.teardown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('conjure: code_identity.mode "multi_repo" is REJECTED (named) for every conjure.mode other than k8s-attach', async () => {
+  const dir = writeRecipeDir({
+    kind: 'pb-recipe-v1',
+    name: 'bad multi_repo/run combo',
+    code_identity: { mode: 'multi_repo', repos: [{ name: 'x', sha: 'abc' }], wheels: [{ name: 'y', version: '1.0.0' }] },
+    conjure: { mode: 'run', env: {}, container_port: 80, published_port: 8080, ready_signal: { path: '/', expect_status: 200 } },
+    fresh_world: { strategy: 'recreate' },
+    setup: [],
+    front_door: { url_template: '/' },
+    store_tap: { engine: 'sqlite', db_path: '/x.db', busy_timeout_ms: 100, queries: { q: 'select 1' } },
+  });
+  try {
+    await assert.rejects(conjure(dir), /multi_repo.*pairs with conjure\.mode 'k8s-attach' only \(got conjure\.mode "run"\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('conjure: mintK8sAttachIdentity seals multi_repo repos[]/wheels[] alongside the drive-time digests (the recipe images[].tag stays a claim, never sealed)', async () => {
+  const dir = writeRecipeDir(
+    validK8sAttachRecipe({
+      code_identity: {
+        mode: 'multi_repo',
+        repos: [{ name: 'appservice', sha: 'f38fa648' }],
+        wheels: [{ name: 'lyric-py', version: '1.3.40.dev17398' }],
+        images: [{ service: 'appservice', tag: 'dev-tag-not-sealed' }],
+      },
+    })
+  );
+  const fakeSpawn = fakePortForwardSpawn();
+  const fakeExec = fakeK8sExec([{ status: 0, stdout: JSON.stringify(podList()) }, { status: 0, stdout: JSON.stringify(podList()) }]);
+  try {
+    const handle = await conjure(dir, { spawnFn: asAny(fakeSpawn.spawnFn), execFn: asAny(fakeExec) });
+    const fp = await mintK8sAttachIdentity(handle);
+    assert.deepEqual(fp.data.repos, [{ name: 'appservice', sha: 'f38fa648' }]);
+    assert.deepEqual(fp.data.wheels, [{ name: 'lyric-py', version: '1.3.40.dev17398' }]);
+    assert.deepEqual(fp.data.drive_time_digests, [GOOD_DIGEST]); // the OBSERVED digest — never the claimed 'dev-tag-not-sealed'
+    assert.equal(JSON.stringify(fp.data).includes('dev-tag-not-sealed'), false);
+    await handle.teardown();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
