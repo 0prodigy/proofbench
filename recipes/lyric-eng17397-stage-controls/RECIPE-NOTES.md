@@ -165,3 +165,21 @@ failure mode reaching a real cluster call is a genuine attach/connect error, nev
 "not implemented" throw. Closing the CLI-level gap (a single-snapshot or two-cluster
 prove mode for `multi_repo`) is next-session work, scoped to ROADMAP R3's "Lyric dogfood"
 checklist item, not this slice.
+
+## LIVE-RUN RESOLUTIONS (2026-07-22 — operator-supplied, session-resolved)
+
+- `conjure.kube_context`/`namespace` = `akashpathak`/`delta` (RESUME decision; cluster is a
+  BYOC lyriclet, customer `delta`).
+- MDS leg images BUILT via release-manager `single_promote.yml` (both runs green):
+  merge `akashpathak-dffc6331` (from-tag `ENG-17397-action-and-controls`) · parent
+  `akashpathak-b4c121e7` (from-tag `eng-0001-updating-python-to-3.10`).
+- `conjure.expected_images` now carries the MERGE-leg repo:tag pair (appservice
+  `akashpathak-e1c87a34`, metadata-service `akashpathak-dffc6331`). **Before the parent
+  leg run, swap both tags** to `akashpathak-40b14842` / `akashpathak-b4c121e7` — the
+  differential compares sealed drive-time digests, not this recipe field, so the between-leg
+  edit cannot fake a swap; it only tightens each leg's identity bind.
+- `PB_DEFAULT_ACTION=full_run`, `PB_OVERRIDE_ACTION=incremental_run` (from the released
+  disruption-note's note-release.json `subActions`/`defaultSubAction`).
+- `PB_SCENARIO_ID`/`PB_SEQUENCE_ID`/`PB_SEQ_NOTE_ID`: cluster-resident — resolve by scoped
+  mongo read (lyric-mongo.sh, ctx akashpathak/ns delta) once the cluster is awake; the
+  2026-07-22 attempt found the lyriclet HIBERNATED (wake is operator-gated).
