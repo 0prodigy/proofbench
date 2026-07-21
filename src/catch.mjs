@@ -1408,6 +1408,22 @@ export function checkFreshInstance(seenInstanceIds, instanceId) {
 }
 
 /**
+ * Bounded, NON-SECRET hint at a step's response shape — the TOP-LEVEL KEYS only (or the array/
+ * non-JSON fact), never a value. Lets a refusal NAME the unblock (adoption bar: a CND that names
+ * no unblocking action is a false-WORKS-severity bug) — e.g. a capture written against `_id` when
+ * the real field is `id` is unfixable without knowing the response's keys.
+ * @param {any} json the step's parsed JSON response (undefined when the body was not JSON)
+ * @returns {string}
+ */
+function responseShapeHint(json) {
+  if (json === undefined) return 'the response was not JSON';
+  if (json === null || typeof json !== 'object') return `the response was a JSON ${json === null ? 'null' : typeof json}, not an object`;
+  if (Array.isArray(json)) return `the response was a JSON array of ${json.length} item(s)`;
+  const keys = Object.keys(json);
+  return `response top-level keys: ${keys.slice(0, 20).join(', ')}${keys.length > 20 ? ', …' : ''}`;
+}
+
+/**
  * Execute a validated NOTE-LIFECYCLE http walk against the k8s-attach REST surface (through the
  * port-forward) — reusing confirmHttpReq's EXACT request shape (placeholder resolution via
  * resolvePlaceholders/resolveBodyPlaceholders, JSONPath capture via extractJsonPath) rather than
@@ -1421,15 +1437,18 @@ export function checkFreshInstance(seenInstanceIds, instanceId) {
  * @param {import('./proposer.mjs').WalkStep[]} args.walk a validated walk (proposer.validateProposal, ALLOWED_HTTP_OPS)
  * @param {Record<string,string>} args.headers recipe-declared, operator_env-resolved headers sent on every request
  * @param {Record<string,any>} args.captures mutated: seeded with operator_env values, grows with each step's own capture
+ * @param {number} [args.indexOffset] the executed slice's offset within the FULL proposed walk (the terminal-step call passes resolveSteps.length) so a refusal names the proposal's own step index
  * @returns {Promise<{steps:{method:string,path:string,status:number}[]}>}
  */
-export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers, captures }) {
+export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers, captures, indexOffset = 0 }) {
   /** @type {{method:string,path:string,status:number}[]} */
   const steps = [];
   // A stateless server-side REST drive needs no session cookie — confirmHttpReq's shape still wants
   // a jar; a fresh, unused one is harmless (nothing sets Set-Cookie on this surface).
   const jar = new Map();
-  for (const step of walk || []) {
+  const list = walk || [];
+  for (let i = 0; i < list.length; i++) {
+    const step = list[i];
     if (step.op !== 'http') throw new Error(`catch: note-lifecycle executeWalk got an unsupported op '${step.op}' (a validated walk never contains this)`);
     const { method, path, body, capture } = /** @type {any} */ (step.args);
     const resolvedPath = resolvePlaceholders(path, (n) => captures[n]);
@@ -1444,10 +1463,22 @@ export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers
     const resolvedBody = body !== undefined ? resolveBodyPlaceholders(body, (n) => captures[n]) : undefined;
     const res = await confirmHttpReq(fetchFn, method, `${baseUrl}${resolvedPath}`, resolvedBody, jar, undefined, { headers: resolvedHeaders });
     if (res.status < 200 || res.status >= 400) {
-      throw new Error(`catch: note-lifecycle walk step '${method} ${path}' failed: HTTP ${res.status}`);
+      throw new Error(`catch: note-lifecycle walk step '${method} ${path}' failed: HTTP ${res.status} (${responseShapeHint(res.json)})`);
     }
     if (capture) {
-      for (const [name, jp] of Object.entries(capture)) captures[name] = extractJsonPath(res.json, jp);
+      // A capture miss fails HERE, naming the unblock. Silently storing undefined made the walk die
+      // steps LATER at an unresolved {placeholder} — the wrong step, the wrong story, no shape hint.
+      // Success semantics are unchanged; the untrusted proposal is never auto-corrected.
+      for (const [name, jp] of Object.entries(capture)) {
+        const captured = extractJsonPath(res.json, jp);
+        if (captured === undefined) {
+          throw new Error(
+            `catch: note-lifecycle walk[${indexOffset + i}] '${method} ${path}' capture '${name}' matched nothing — ` +
+              `JSONPath '${jp}' found no value in the HTTP ${res.status} response (${responseShapeHint(res.json)})`
+          );
+        }
+        captures[name] = captured;
+      }
     }
     steps.push({ method, path: resolvedPath, status: res.status });
   }
@@ -1608,7 +1639,7 @@ async function runNoteLifecycleCatch(opts, recipe, runDir) {
         const beforeRows = await tapMongo(st, queryName, resolvedQuery, kubeArgs, execFn);
         const before = observedValue(beforeRows, spec);
 
-        const drive2 = await executeNoteLifecycleWalk({ fetchFn, baseUrl: attachedHandle.baseUrl, walk: terminalStep, headers, captures });
+        const drive2 = await executeNoteLifecycleWalk({ fetchFn, baseUrl: attachedHandle.baseUrl, walk: terminalStep, headers, captures, indexOffset: resolveSteps.length });
         const afterRows = await tapMongo(st, queryName, resolvedQuery, kubeArgs, execFn);
         const after = observedValue(afterRows, spec);
         const changed = after !== before;

@@ -108,12 +108,41 @@ test('executeNoteLifecycleWalk: a PLACEHOLDER-RESOLVED path that becomes hostile
   }
 });
 
-test('executeNoteLifecycleWalk: a non-2xx/3xx step throws (an honest could-not-execute, not a silent pass)', async () => {
+test('executeNoteLifecycleWalk: a non-2xx/3xx step throws (an honest could-not-execute, not a silent pass) and hints the response shape', async () => {
   const fetchFn = asAny(async () => ({ status: 500, headers: { getSetCookie: () => [], get: () => null }, text: async () => 'boom' }));
   const walk = [{ op: 'http', args: { method: 'GET', path: '/x' } }];
   await assert.rejects(
     executeNoteLifecycleWalk({ fetchFn, baseUrl: 'http://localhost:1', walk: asAny(walk), headers: {}, captures: {} }),
-    /walk step 'GET \/x' failed: HTTP 500/
+    /walk step 'GET \/x' failed: HTTP 500 \(the response was not JSON\)/
+  );
+  // A JSON error body discloses its TOP-LEVEL KEYS (keys only — bounded, non-secret) as the unblock hint.
+  const fetchFnJson = asAny(async () => ({ status: 422, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify({ error: 'bad', message: 'nope' }) }));
+  await assert.rejects(
+    executeNoteLifecycleWalk({ fetchFn: fetchFnJson, baseUrl: 'http://localhost:1', walk: asAny(walk), headers: {}, captures: {} }),
+    /failed: HTTP 422 \(response top-level keys: error, message\)/
+  );
+});
+
+test('executeNoteLifecycleWalk: a capture whose JSONPath matches NOTHING fails AT THAT STEP, naming the capture + path + status + response keys (the third live CND: a silent miss died steps later)', async () => {
+  const fetchFn = asAny(async () => ({ status: 201, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify({ id: 'p1', state: 'new', notes: [{ _id: 'c1' }] }) }));
+  // The live shape: the real field is `id`, the proposal captured `$._id` — the walk must refuse at
+  // step 0 with the keys hint, never at step 1 with an unresolved-{placeholder} story.
+  const walk = [
+    { op: 'http', args: { method: 'POST', path: '/executions', capture: { parent_execution_id: '$._id' } } },
+    { op: 'http', args: { method: 'PATCH', path: '/executions/{parent_execution_id}/stages/final' } },
+  ];
+  await assert.rejects(
+    executeNoteLifecycleWalk({ fetchFn, baseUrl: 'http://localhost:18000', walk: asAny(walk), headers: {}, captures: {} }),
+    /walk\[0\] 'POST \/executions' capture 'parent_execution_id' matched nothing — JSONPath '\$\._id' found no value in the HTTP 201 response \(response top-level keys: id, state, notes\)/
+  );
+});
+
+test('executeNoteLifecycleWalk: a capture against a NON-JSON response says so (+ the status), and the terminal-step slice reports the proposal\'s OWN step index via indexOffset', async () => {
+  const fetchFn = asAny(async () => ({ status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => '<html>ok</html>' }));
+  const walk = [{ op: 'http', args: { method: 'GET', path: '/x', capture: { id: '$.id' } } }];
+  await assert.rejects(
+    executeNoteLifecycleWalk({ fetchFn, baseUrl: 'http://localhost:1', walk: asAny(walk), headers: {}, captures: {}, indexOffset: 2 }),
+    /walk\[2\] 'GET \/x' capture 'id' matched nothing — JSONPath '\$\.id' found no value in the HTTP 200 response \(the response was not JSON\)/
   );
 });
 
