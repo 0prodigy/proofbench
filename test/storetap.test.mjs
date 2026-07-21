@@ -13,6 +13,40 @@ import assert from 'node:assert/strict';
 import { tapStore, mintStoreDelta } from '../src/storetap.mjs';
 import { isMinted } from '../src/harness.mjs';
 
+/** A minimal fake mongo SUT handle: the tap kubectl-execs into a k8s pod (store_tap.pod), not handle.containerName. */
+function makeMongoHandle() {
+  return {
+    containerName: 'irrelevant-for-mongo',
+    recipe: {
+      store_tap: {
+        engine: 'mongo',
+        pod: 'mongodb-0',
+        container: 'mongod',
+        db: 'lyric',
+        credential_secrets: ['mongodb-password'],
+        queries: { stage_controls: "db.stagecontrols.find({executionId:'exec1'}).toArray()" },
+      },
+    },
+  };
+}
+
+/** A fake kubectl runner: secret reads always succeed with the given creds, then the query runs. */
+function fakeKubectlForMongo(/** @type {string} */ queryStdout) {
+  /** @type {string[][]} */
+  const calls = [];
+  return {
+    calls,
+    run: (/** @type {string[]} */ args) => {
+      calls.push(args);
+      if (args[0] === 'get' && args[1] === 'secret') {
+        const field = args[4].includes('username') ? 'username' : 'password';
+        return { status: 0, stdout: Buffer.from(field === 'username' ? 'lyric' : 'pw', 'utf8').toString('base64') };
+      }
+      return { status: 0, stdout: queryStdout };
+    },
+  };
+}
+
 /** @param {any} x @returns {any} */
 const asAny = (x) => x;
 
@@ -152,10 +186,32 @@ test('storetap: tapStore throws on a non-lock error, naming the query and the st
   assert.equal(docker.calls.length, 1); // a real error is not retried
 });
 
-test('storetap: tapStore throws a clear "unsupported engine" error for an engine that is neither sqlite nor postgres', async () => {
+test('storetap: tapStore throws a clear "unsupported engine" error for an engine that is neither sqlite, postgres, nor mongo', async () => {
   const docker = fakeDocker([{ status: 0, stdout: '[]' }]);
   await assert.rejects(() => tapStore(asAny(makeHandle('mysql')), 'executions', asAny(docker)), /unsupported engine 'mysql'/);
   assert.equal(docker.calls.length, 0);
+});
+
+test('storetap: tapStore dispatches engine "mongo" to a kubectl-exec mongosh tap (via the injected execFn seam) and parses rows', async () => {
+  const kubectl = fakeKubectlForMongo('[{"executionId":"exec1","status":"expired"}]');
+  const rows = await tapStore(asAny(makeMongoHandle()), 'stage_controls', asAny(fakeDocker([])), asAny(kubectl));
+  assert.deepEqual(rows, [{ executionId: 'exec1', status: 'expired' }]);
+  assert.ok(kubectl.calls.some((c) => c[0] === 'exec' && c[1] === 'mongodb-0' && c[3] === 'mongod'));
+});
+
+test('storetap: the mongo tap throws (never falls back to an app read) when no credential_secrets entry authenticates', async () => {
+  const kubectl = {
+    calls: /** @type {string[][]} */ ([]),
+    run: (/** @type {string[]} */ args) => {
+      kubectl.calls.push(args);
+      if (args[0] === 'get' && args[1] === 'secret') return { status: 1, stderr: 'not found' };
+      return { status: 1, stderr: 'Authentication failed.' };
+    },
+  };
+  await assert.rejects(
+    () => tapStore(asAny(makeMongoHandle()), 'stage_controls', asAny(fakeDocker([])), asAny(kubectl)),
+    /no WORKING mongo credentials[\s\S]*never falls back to an app read/
+  );
 });
 
 test('storetap: mintStoreDelta returns a minted HARNESS delta with the right data shape', () => {

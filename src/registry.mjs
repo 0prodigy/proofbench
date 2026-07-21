@@ -14,8 +14,8 @@
  *     run|compose), resolves code-identity (code_identity.mode from_tree|pinned_image), polls the
  *     disclosed ready_signal, and mints the fingerprint/bringup. conjure's internal mode/engine
  *     dispatch stays in conjure.mjs UNTOUCHED (405 resolveImage, 471 bringUpCompose, 543-557 ready poll).
- *   - Tap: tapStore() — the out-of-band store read, engine-dispatched sqlite|postgres inside
- *     storetap.mjs (111-120), UNTOUCHED.
+ *   - Tap: tapStore() — the out-of-band store read, engine-dispatched sqlite|postgres|mongo
+ *     inside storetap.mjs, UNTOUCHED.
  *   - Drive: openBrowser() — the browser drive. This slice KEEPS CURRENT BEHAVIOR: runCatch always
  *     browser-drives, so the drive provider is openBrowser REGARDLESS of recipe.drive.mode (the n8n
  *     #7130 golden recipe declares drive.mode:"http" yet is browser-driven today — it must stay so).
@@ -47,7 +47,7 @@ import { openWorkflowRun, k8sExecTap } from './argoworkflows.mjs';
  */
 const ENVIRONMENT_MODES = ['run', 'compose'];
 const IDENTITY_MODES = ['from_tree', 'pinned_image'];
-const TAP_ENGINES = ['sqlite', 'postgres'];
+const TAP_ENGINES = ['sqlite', 'postgres', 'mongo'];
 
 /**
  * Drive-mode dispatch (M3): every mode valid TODAY resolves to the browser drive — exactly current
@@ -88,9 +88,9 @@ export function environmentProvider(recipe) {
 }
 
 /**
- * Resolve the TAP provider: tapStore(). Keyed by store_tap.engine (sqlite|postgres) — the branches
- * tapStore already dispatches internally (storetap.mjs:117-119). Returns the EXISTING tapStore; an
- * unrecognized engine is an honest error. Pure indirection — tapStore's behavior is unchanged.
+ * Resolve the TAP provider: tapStore(). Keyed by store_tap.engine (sqlite|postgres|mongo) — the
+ * branches tapStore already dispatches internally. Returns the EXISTING tapStore; an unrecognized
+ * engine is an honest error. Pure indirection — tapStore's behavior is unchanged.
  * @param {import('./recipe.mjs').Recipe} recipe
  * @returns {(handle:any, queryName:string) => Promise<any[]>}
  */

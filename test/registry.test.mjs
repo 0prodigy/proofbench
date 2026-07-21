@@ -44,9 +44,10 @@ test('registry: a missing conjure.mode defaults to run (single container), still
   assert.equal(environmentProvider(makeRecipe({ conjure: {} })), conjure);
 });
 
-test('registry: config→provider — a sqlite/postgres recipe resolves Tap to the existing tapStore', () => {
+test('registry: config→provider — a sqlite/postgres/mongo recipe resolves Tap to the existing tapStore', () => {
   assert.equal(tapProvider(makeRecipe()), tapStore);
   assert.equal(tapProvider(makeRecipe({ store_tap: { engine: 'postgres' } })), tapStore);
+  assert.equal(tapProvider(makeRecipe({ store_tap: { engine: 'mongo' } })), tapStore);
 });
 
 test('registry: drive.mode DISPATCH — grandfathered modes resolve to the browser drive (#7130 http stays browser-driven)', () => {

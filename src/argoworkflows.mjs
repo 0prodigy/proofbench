@@ -391,6 +391,27 @@ export function mintWorkflowAttempt({ id, name, nonce, phase, steps, digests, id
  * (requiredFix 4). Because mintStoreDelta stamps HARNESS unconditionally, out-of-band-ness cannot
  * be enforced in the frozen core — it lives here + in recipe-load validation. Unit runs inject an
  * argoTapFn seam; the live k8s-exec engine ships with the deferred live leg.
+ *
+ * WHY THIS STAYS SEPARATE FROM mongotap.mjs's `tapMongo` (both now read mongo via `kubectl exec …
+ * mongosh`, but they are NOT the same engine and must not be conflated):
+ *   - recipe.mjs validates `store_tap.engine:'k8s-exec'` and `'mongo'` as DISTINCT discriminated-
+ *     union members with different honesty contracts. 'k8s-exec' queries MUST carry the `{nonce}`
+ *     placeholder and `entity` MUST NOT be a global max-id/count aggregate (requiredFix 3) — the
+ *     nonce round-trip (P2) is what proves THIS run's write, not merely that mongo has A row.
+ *     'mongo' has neither requirement; it is a plain credentialed read (pod/container/db/
+ *     credential_secrets), correct for the Lyric class's general store_tap but NOT nonce-scoped —
+ *     silently routing k8s-exec through it would drop the nonce-round-trip guardrail the argo
+ *     drive's honesty depends on.
+ *   - The call SHAPES differ: argoTapFn is `(handle, queryName, nonce) => Promise<any[]>` (the
+ *     nonce is substituted into the query via `substituteNonce`, see runArgoCatch); tapMongo is
+ *     `(st, queryName, query, execFn) => Promise<any[]>` with a plain static query — a nonce
+ *     round-trip has nowhere to plug in.
+ *   - `store_client` on a k8s-exec tap is a generic string ('mongosh'|'psql'|...), not mongo-
+ *     specific — a live k8s-exec implementation is a DISPATCH over `store_client`, of which a
+ *     mongosh backend could reuse mongotap.mjs's low-level `kubectl exec … mongosh` transport
+ *     (credential-secret fallback, JSON-row normalization) as a building block. That reuse is a
+ *     future slice, not this one — this task's scope is the 'mongo' engine only (LOCAL-ONLY, no
+ *     live cluster calls); the live k8s-exec leg stays explicitly deferred.
  * @returns {Promise<any[]>}
  */
 export async function k8sExecTap() {

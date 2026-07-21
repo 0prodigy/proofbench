@@ -4,12 +4,14 @@
  * the DELTA receipt the verdict adjudicates. This is the §1.1 persisted leg (harness
  * provenance): a store-of-record observation the driving agent has NO write-handle to.
  *
- * The read is a `docker exec … <client>` against the store DIRECTLY — NEVER a call to the
- * app's own API. It is engine-discriminated: sqlite (n8n) is a store FILE inside the SUT
- * container read with `sqlite3 -json`; postgres (documenso) is a SEPARATE DB container read
- * with `psql -At`. An app-endpoint read is only TOOL provenance and can never be the persisted
- * leg (docs/phase-3-theory.md §1.1/§4); if the store cannot be read out of band, this module
- * throws rather than fall back to an app read — for BOTH engines.
+ * The read is a `docker exec … <client>` (mongo: `kubectl exec … mongosh`) against the store
+ * DIRECTLY — NEVER a call to the app's own API. It is engine-discriminated: sqlite (n8n) is a
+ * store FILE inside the SUT container read with `sqlite3 -json`; postgres (documenso) is a
+ * SEPARATE DB container read with `psql -At`; mongo (the Lyric class, ENG-17397 draft) is a k8s
+ * pod read with `kubectl exec … mongosh` — see mongotap.mjs for that engine's credential-fallback
+ * shape. An app-endpoint read is only TOOL provenance and can never be the persisted leg
+ * (docs/phase-3-theory.md §1.1/§4); if the store cannot be read out of band, this module throws
+ * rather than fall back to an app read — for every engine.
  *
  * tapStore runs a recipe's named read-only query and returns the parsed rows. Per M1's
  * finding, n8n runs sqlite in rollback-journal mode, so a reader can intermittently collide
@@ -26,6 +28,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { mint } from './harness.mjs';
+import { tapMongo, defaultExecRunner } from './mongotap.mjs';
 
 const DOCKER_TIMEOUT_MS = 120000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -101,14 +104,16 @@ function parsePsqlRows(stdout) {
 /**
  * Run the recipe's named store query OUT OF BAND against the conjured SUT's persisted store and
  * return the parsed rows. NEVER touches the app's API — this is the harness-provenance persisted
- * leg (§1.1/§4). Dispatches on the recipe's store engine (sqlite | postgres).
+ * leg (§1.1/§4). Dispatches on the recipe's store engine (sqlite | postgres | mongo).
  *
  * @param {import('./conjure.mjs').SutHandle} handle a live conjured SUT
  * @param {string} queryName a key of recipe.store_tap.queries
  * @param {DockerRunner} [docker] injected for docker-free tests; defaults to the real docker CLI
+ * @param {import('./mongotap.mjs').ExecRunner} [execFn] injected for cluster-free tests (mongo
+ *   engine only — a `kubectl` runner, mirroring `docker` above); defaults to the real kubectl CLI
  * @returns {Promise<any[]>} the query's rows ([] when the store holds none)
  */
-export async function tapStore(handle, queryName, docker = defaultDocker()) {
+export async function tapStore(handle, queryName, docker = defaultDocker(), execFn = defaultExecRunner()) {
   const st = handle.recipe.store_tap;
   const query = st.queries[queryName];
   if (typeof query !== 'string' || !query) {
@@ -116,7 +121,8 @@ export async function tapStore(handle, queryName, docker = defaultDocker()) {
   }
   if (st.engine === 'sqlite') return tapSqlite(handle, st, queryName, query, docker);
   if (st.engine === 'postgres') return tapPostgres(st, queryName, query, docker);
-  throw new Error(`storetap: unsupported engine '${String(/** @type {any} */ (st).engine)}' — only 'sqlite' and 'postgres' are supported`);
+  if (st.engine === 'mongo') return tapMongo(st, queryName, query, execFn);
+  throw new Error(`storetap: unsupported engine '${String(/** @type {any} */ (st).engine)}' — only 'sqlite', 'postgres', and 'mongo' are supported`);
 }
 
 /**
