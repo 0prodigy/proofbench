@@ -137,6 +137,36 @@ test('executeNoteLifecycleWalk: a capture whose JSONPath matches NOTHING fails A
   );
 });
 
+test('executeNoteLifecycleWalk: a capture whose JSONPath yields a NON-SCALAR (object/null) fails AT THAT STEP naming BOTH shapes (the fourth live CND: "[object Object]" exploded one step later)', async () => {
+  // The live shape: appservice's POST serializer returns `id` as an OBJECT while GET returns scalar
+  // strings — the refusal must disclose the captured object's own keys so the next run can name the
+  // real scalar field, plus the response's top-level keys, at THIS step (never the later path guard).
+  const jsonRes = (/** @type {any} */ body) => asAny(async () => ({ status: 201, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify(body) }));
+  const walk = [
+    { op: 'http', args: { method: 'POST', path: '/executions', capture: { parent_execution_id: '$.id' } } },
+    { op: 'http', args: { method: 'PATCH', path: '/executions/{parent_execution_id}/stages/final' } },
+  ];
+  await assert.rejects(
+    executeNoteLifecycleWalk({ fetchFn: jsonRes({ id: { buffer: 'deadbeef' }, state: 'new', notes: [] }), baseUrl: 'http://localhost:18000', walk: asAny(walk), headers: {}, captures: {} }),
+    /walk\[0\] 'POST \/executions' capture 'parent_execution_id' matched a non-scalar — JSONPath '\$\.id' produced \(captured value top-level keys: buffer\) in the HTTP 201 response \(response top-level keys: id, state, notes\); captures must be scalar ids\/values/
+  );
+  // A captured null is non-scalar too (it would resolve into a later placeholder as the string 'null').
+  await assert.rejects(
+    executeNoteLifecycleWalk({ fetchFn: jsonRes({ id: null, state: 'new' }), baseUrl: 'http://localhost:18000', walk: asAny(walk), headers: {}, captures: {} }),
+    /capture 'parent_execution_id' matched a non-scalar — JSONPath '\$\.id' produced \(the captured value was a JSON null, not an object\)/
+  );
+  // A scalar capture is UNCHANGED (success semantics untouched).
+  /** @type {Record<string,any>} */
+  const captures = {};
+  const fetchFn = asAny(async (/** @type {string} */ url, /** @type {any} */ init) =>
+    init.method === 'POST'
+      ? { status: 201, headers: { getSetCookie: () => [], get: () => null }, text: async () => JSON.stringify({ id: 'p1' }) }
+      : { status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => '{}' }
+  );
+  await executeNoteLifecycleWalk({ fetchFn, baseUrl: 'http://localhost:18000', walk: asAny(walk), headers: {}, captures });
+  assert.equal(captures.parent_execution_id, 'p1');
+});
+
 test('executeNoteLifecycleWalk: a capture against a NON-JSON response says so (+ the status), and the terminal-step slice reports the proposal\'s OWN step index via indexOffset', async () => {
   const fetchFn = asAny(async () => ({ status: 200, headers: { getSetCookie: () => [], get: () => null }, text: async () => '<html>ok</html>' }));
   const walk = [{ op: 'http', args: { method: 'GET', path: '/x', capture: { id: '$.id' } } }];

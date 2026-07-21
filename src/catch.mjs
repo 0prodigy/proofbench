@@ -1413,14 +1413,15 @@ export function checkFreshInstance(seenInstanceIds, instanceId) {
  * no unblocking action is a false-WORKS-severity bug) — e.g. a capture written against `_id` when
  * the real field is `id` is unfixable without knowing the response's keys.
  * @param {any} json the step's parsed JSON response (undefined when the body was not JSON)
+ * @param {string} [subject] what the hint describes (default the step's response; also reused for a captured value)
  * @returns {string}
  */
-function responseShapeHint(json) {
-  if (json === undefined) return 'the response was not JSON';
-  if (json === null || typeof json !== 'object') return `the response was a JSON ${json === null ? 'null' : typeof json}, not an object`;
-  if (Array.isArray(json)) return `the response was a JSON array of ${json.length} item(s)`;
+function responseShapeHint(json, subject = 'response') {
+  if (json === undefined) return `the ${subject} was not JSON`;
+  if (json === null || typeof json !== 'object') return `the ${subject} was a JSON ${json === null ? 'null' : typeof json}, not an object`;
+  if (Array.isArray(json)) return `the ${subject} was a JSON array of ${json.length} item(s)`;
   const keys = Object.keys(json);
-  return `response top-level keys: ${keys.slice(0, 20).join(', ')}${keys.length > 20 ? ', …' : ''}`;
+  return `${subject} top-level keys: ${keys.slice(0, 20).join(', ')}${keys.length > 20 ? ', …' : ''}`;
 }
 
 /**
@@ -1475,6 +1476,16 @@ export async function executeNoteLifecycleWalk({ fetchFn, baseUrl, walk, headers
           throw new Error(
             `catch: note-lifecycle walk[${indexOffset + i}] '${method} ${path}' capture '${name}' matched nothing — ` +
               `JSONPath '${jp}' found no value in the HTTP ${res.status} response (${responseShapeHint(res.json)})`
+          );
+        }
+        // A NON-SCALAR capture (object/array/null) fails here too: stored silently it only explodes
+        // at a later placeholder as '[object Object]'/'null' — the wrong step, and without the
+        // captured value's own keys the next proposal cannot name the real scalar field.
+        if (captured === null || (typeof captured !== 'string' && typeof captured !== 'number' && typeof captured !== 'boolean')) {
+          throw new Error(
+            `catch: note-lifecycle walk[${indexOffset + i}] '${method} ${path}' capture '${name}' matched a non-scalar — ` +
+              `JSONPath '${jp}' produced (${responseShapeHint(captured, 'captured value')}) in the HTTP ${res.status} response ` +
+              `(${responseShapeHint(res.json)}); captures must be scalar ids/values`
           );
         }
         captures[name] = captured;
