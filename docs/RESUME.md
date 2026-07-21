@@ -7,6 +7,114 @@ checkpoint (every milestone is committed); this doc is the human/agent handoff o
 
 ---
 
+## SESSION 2026-07-21 (d) — G1 CLOSED: documenso #3031 SECOND ENGINE EXECUTED LIVE
+
+**Governance unchanged.** This pass finished G1's last build item. **G1 is now fully done**
+except the two founder-HELD commands (`npm publish`, `git push`) — see RESUME ORDER below.
+Next session moves to **G2** (see ROADMAP.md R2).
+
+**DONE this pass (all committed, tree green throughout — verified before AND after every
+commit: `node --test` 186→189/189 as tests were added, `node src/cli.mjs gate` PASS [14
+malicious drivers held, honest=WORKS], `npm run typecheck` clean; `docker ps -a` empty
+after every attempt, no orphans left at any point):**
+
+- `f4f1e56` **port-3010 fix, live-verified via a smoke script first:** the port-3010
+  fix banked from the prior session (host port 3000 is hijacked by an unrelated
+  `kubectl port-forward`, PID 12248 — never killed) plus a SECOND, previously-
+  undiscovered bug the smoke test surfaced: `.env.example` also pins
+  `NEXT_PRIVATE_INTERNAL_WEBAPP_URL` to `localhost:3000` — the `LocalJobProvider`'s
+  self-loopback POST that actually dispatches the signup-confirmation-email job. With
+  `PORT=3010` that self-POST connection-refused and was silently swallowed
+  (`submitJobToEndpoint .catch(() => null)`), so inbucket never received the
+  verification mail. Fixed by also pinning
+  `NEXT_PRIVATE_INTERNAL_WEBAPP_URL=http://localhost:3010` in the compose overlay.
+  `conjure()` smoke passed end-to-end (signup → exec team-lookup → inbucket token
+  capture → verify-email → multipart envelope-create → front-door URL minted, cookies
+  captured, clean teardown) BEFORE this was committed, per the task's ordering.
+- **Three diagnose-fix cycles against genuine live infra bugs**, each committed
+  separately with its own live re-run:
+  - `822e4f9` **attempt #1 was a truthful non-discriminating negative**
+    (merge=WORKS ∧ parent=WORKS — reported honestly, not forced). Root-caused from the
+    sealed receipts: headless chrome's default window was small, so documenso's Konva
+    canvas rendered at ~124x175px, too little room for 3 non-overlapping field
+    placements (every clickAt after the first landed on the already-placed field's own
+    Rect); the proposed walk also `find`-but-never-`click`ed the Remove button. Fixed
+    additively: `browserdrive.mjs` now boots headless chrome with
+    `--window-size=1600,1200` (a general fix, not documenso-specific); the recipe's
+    `intent` was sharpened (spread placements, name the Remove button's `title`
+    attribute, spell out find-then-click). Test updated.
+  - `531a8f8` **attempt #2 was an honest CND** (both legs
+    `COULD_NOT_DETERMINE`) — chromedriver 400'd every `clickAt` with `'x' must be an
+    int`: the agent computes canvas coordinates from `getBoundingClientRect()`, which
+    is legitimately float-valued. Fixed: `clickAt` now `Math.round()`s x/y before
+    building the W3C Actions payload (both the shift and non-shift branch), and records
+    the ACTUAL rounded ints driven, not the raw proposal. New regression test.
+  - `5f8af83` **attempt #3 was an honest CND again** (both legs
+    `COULD_NOT_DETERMINE`) — chromedriver 500'd `move target out of bounds`.
+    Root-caused with a standalone repro script (conjure + open browser + introspect +
+    propose, stepping the walk op-by-op): documenso's canvas rect reports height 1130
+    at y=172 (bottom edge ~1302), but the real visible viewport is only
+    `innerHeight`=1061 — the canvas is taller than the window, and the agent (seeing
+    only the raw rect) computed an on-canvas but off-screen click. Fixed: `catch.mjs`'s
+    `INTROSPECT_JS` now also reports the window's own `viewport` `{width,height}`
+    alongside fields/buttons/canvases; `introspect()`'s return type widens to match
+    (bare-array test fakes still accepted, viewport defaults to `{width:0,height:0}`);
+    `proposer.mjs`'s shared `SYSTEM_PROMPT` states the clamp requirement explicitly.
+    Two new tests (widened shape + back-compat).
+  - None of the three fixes touched the frozen core (`verdict.mjs`/`harness.mjs`/
+    `evidence.mjs`) — all live in `browserdrive.mjs`/`catch.mjs`/`proposer.mjs`/the
+    recipe, exactly per the task's constraint.
+- `c926321` **attempt #4 — DIFFERENTIAL: PASS, sealed and committed.**
+  `node src/cli.mjs prove recipes/documenso-envelope-fields-pr3031` →
+  merge `97835b8dbb2c`=**WORKS** (k=2, fresh worlds, `Field.rows` 0→1, fresh confirm
+  agrees) ∧ parent `977d07330b97`=**DOES_NOT_WORK** (kFail=2/2 falsified: the SAME
+  frozen agent-proposed walk replayed verbatim persisted `Field.rows` 0→**2**, not the
+  claimed 1 — without the shift-click multiselect handler, the parent's click *replaces*
+  rather than *extends* the selection, so the toolbar's Remove only drops the
+  last-clicked field, leaving 2 instead of 1). Seals independently RE-VERIFIED via the
+  `sealedVerdict` code path (not by eye, via a standalone script): both receipts
+  re-read from disk reproduce the CLI's exact verdict, and a tampered copy of each
+  correctly degrades to `UNVERIFIED`. `site/cases/documenso-envelope-fields-pr3031.
+  {merge,parent}.json` are byte-identical copies of the sealed run-dir receipts.
+- **Per-leg wall-clock (adoption metric, warm image cache — both SHAs already built in
+  earlier attempts this pass):** merge leg (k=2 reproductions + one cold-Sonnet
+  `claude -p` proposer call, frozen thereafter) ≤ 2m48s (bounded above by the gap
+  between the preceding commit and the merge receipt's mtime, which also includes a
+  few seconds of session overhead); parent leg (k=2 reproductions, the SAME frozen
+  walk replayed, NO proposer call) = 2m07s (receipt mtimes 15:12:43 → 15:14:50). Total
+  differential (both legs) ≈ 4m55s warm. A genuinely cold run (fresh docker image
+  build for both SHAs) was NOT separately timed this pass — the honest gap: no
+  first-cold-build wall-clock number exists yet for this recipe.
+- **docs+site truth pass** (this commit, see `git log --oneline -1`): `site/index.html`'s
+  `#stacks` matrix — the Postgres+canvas row flips `CAPABILITY PROVEN` → `SUPPORTED`
+  with a link to the sealed case files (and the "Agent-proposed browser walk" row's
+  evidence list gains the documenso case as a 4th proof); `docs/ROADMAP.md`'s "Second
+  engine EXECUTED" box ticked with commit refs; this RESUME block.
+
+**Left exactly as found (documented, not lost):** the Lyric/argo store-tap `throws`
+(R3, cluster-gated, unchanged); `pb prove --random` (the full-pool gate) was NOT run
+this pass — a bonus per the task brief, not required to close this box.
+
+**RESUME ORDER (next session) — do these in order:**
+1. **Two HELD founder commands** (neither run this session, both require explicit
+   founder confirmation per the task constraints):
+   - `npm publish` (from `/Users/prodigy/prodigy/project`, publishes `proofbench@0.2.0`
+     — tag `v0.2.0` exists on `f7dd9a9`, which now PREDATES this session's harness
+     commits; re-tag/rebump before the real publish).
+   - `git push origin product-v1` and `git push origin v0.2.0` — `product-v1` has
+     never been pushed; today `origin`'s `main` is the stale pre-rewrite OSS line.
+2. **G1 is fully closed** (second engine executed, distribution staged, getting-started
+   done, launch page done) — once (1) lands, move to **G2**: machine `--json` verdict,
+   GitHub Action, `pb init`, dogfood, sealed-room minimum, CI intent source,
+   `--merge-only` CI mode, concurrent-run isolation. See ROADMAP.md R2.
+3. Minor gaps surfaced but out of scope for this pass (future slice, not blocking):
+   the live claude-CLI proposer has no retry on a single malformed proposal (costs a
+   CND, not a false-WORKS — noted in the "READ THIS BLOCK FIRST" session block below);
+   the exit-code doc/constitution reconciliation gap (`docs/getting-started.md` note);
+   binding the #7130 parent's specific CND cause into the sealed reason string itself.
+
+---
+
 ## SESSION 2026-07-21 (c) — G1-tail close-out: distribution staged, docs+matrix landed, one honesty fix, engine still BLOCKED
 
 **Governance unchanged.** Current gate: **G1 tail** — only the second-engine differential

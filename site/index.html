@@ -382,19 +382,19 @@ EVIDENCE SEALED ed25519</code></pre>
               <span class="stacks-detail">a real, cold Sonnet via the local <code>claude</code> CLI proposes the click/type/observe walk headless, on subscription auth — no API key, no replayed transcript</span>
             </td>
             <td><span class="badge badge-works">SUPPORTED</span></td>
-            <td class="stacks-evidence">all three cases above</td>
+            <td class="stacks-evidence">all three cases above · <a href="cases/documenso-envelope-fields-pr3031.merge.json">documenso #3031</a> (shift-click multiselect)</td>
           </tr>
           <tr>
             <td>Postgres store tap + canvas drive + multipart/exec setup
-              <span class="stacks-detail">a Konva <code>&lt;canvas&gt;</code> field-placement front door (shift-click drive), a Postgres out-of-band tap, and a real multi-step setup dance (signup → exec-capture team lookup → inbucket token capture → verify-email → multipart envelope POST) — implemented, unit-tested, committed (185/185 tests, gate PASS, typecheck clean)</span>
+              <span class="stacks-detail">a Konva <code>&lt;canvas&gt;</code> field-placement front door (shift-click drive), a Postgres out-of-band tap, and a real multi-step setup dance (signup → exec-capture team lookup → inbucket token capture → verify-email → multipart envelope POST)</span>
             </td>
-            <td><span class="badge badge-cnd">CAPABILITY PROVEN</span> — no executed differential yet</td>
-            <td class="stacks-evidence"><a href="../docs/documenso-canvas-spike.md">canvas-drive spike</a> · <a href="../recipes/documenso-envelope-fields-pr3031/recipe.json">documenso recipe</a></td>
+            <td><span class="badge badge-works">SUPPORTED</span> — 1 executed differential</td>
+            <td class="stacks-evidence"><a href="cases/documenso-envelope-fields-pr3031.merge.json">documenso #3031</a> · <a href="../recipes/documenso-envelope-fields-pr3031/recipe.json">documenso recipe</a></td>
           </tr>
         </tbody>
       </table>
       </div>
-      <p class="stacks-note">The last row, honestly: the harness capability and the rewritten discriminating recipe (PR #3031's shift-click multiselect, with a verified <code>parent_sha</code>) are real and committed. The live differential itself — merge vs. parent, agent-driven — has not been attempted; the two smoke-test attempts so far failed on infrastructure (a host-port collision, then a conjure port-mapping gap), not on recipe logic, and Docker was left clean both times. Unblock: land the pending port fix and re-run the smoke test end to end, then attempt the differential.</p>
+      <p class="stacks-note">The last row: the second, non-n8n, non-Django engine — Postgres tap + a real Konva canvas browser drive. <code>pb prove recipes/documenso-envelope-fields-pr3031</code> ran merge <code>97835b8d</code> = WORKS (k=2, fresh worlds, <code>Field.rows</code> 0→1, fresh confirm agrees) against parent <code>977d0733</code> = DOES NOT WORK (kFail=2/2 falsified: the SAME frozen walk left <code>Field.rows</code> at 2, not 1 — the parent's field-click handler ignores Shift and replaces the selection instead of extending it, so the toolbar's Remove only drops the last-clicked field). Sealed receipts: <a href="cases/documenso-envelope-fields-pr3031.merge.json">merge case</a> · <a href="cases/documenso-envelope-fields-pr3031.parent.json">parent case</a>.</p>
 
       <h3 class="stacks-group-head">Declines to honest CND — names the one action that unblocks it</h3>
       <div class="table-scroll">

@@ -9,22 +9,23 @@ Agents implement; pb verifies with unfakeable evidence; a human (later: policy) 
 prod deploys. pb is the verification layer — it never implements, never owns the deploy.
 
 **Where we are (2026-07-21, honest):** the honesty core is done, frozen, and green
-(tests + gate + typecheck, 186/186). Three differential Catches have executed live:
+(tests + gate + typecheck, 189/189). FOUR differential Catches have executed live:
 n8n #7130 (additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK
-catch — a real regression, not absent code), and linkding #1170 (the first non-n8n
-stack — Django/sqlite — parent=DOES_NOT_WORK). The effect observable and confirm leg
-are no longer n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the
-recipe's own `store_tap.observables` + `confirm[]` (engine-shaped delta relations, not
-n8n's autoincrement assumption). README and site now lead with the #9157 catch, not a
-green PASS, with all three cases linked to committed `site/cases/*.json` evidence.
+catch — a real regression, not absent code), linkding #1170 (the first non-n8n
+stack — Django/sqlite — parent=DOES_NOT_WORK), and documenso #3031 (the SECOND ENGINE
+— Postgres tap + a real Konva canvas browser drive — parent=DOES_NOT_WORK, kFail=2/2:
+the same frozen shift-click-multiselect walk left 2 fields instead of 1 without the
+PR's selection-extend fix). The effect observable and confirm leg are no longer
+n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the recipe's own
+`store_tap.observables` + `confirm[]` (engine-shaped delta relations, not n8n's
+autoincrement assumption). README and site now lead with the #9157 catch, not a
+green PASS, with all four cases linked to committed `site/cases/*.json` evidence.
 `docs/getting-started.md` and a launch-page supported-stacks matrix are both done.
 Distribution is staged (package.json + prepack version-gate + tag committed, cold
 tarball install verified) but `npm publish`/`git push` are HELD for the founder. Still
-open: documenso's second-engine differential is written (recipe now discriminating,
-harness capability committed) but BLOCKED on an uncommitted conjure port fix, not yet
-re-verified live — no differential leg has run; the Lyric/argo path's store tap
-throws. The enterprise substrate is designed on paper with zero running code; all
-pipeline glue was explicitly cut from v1. Full issue register at the bottom.
+open: the Lyric/argo path's store tap throws. The enterprise substrate is designed on
+paper with zero running code; all pipeline glue was explicitly cut from v1. Full issue
+register at the bottom.
 
 ---
 
@@ -106,14 +107,20 @@ pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merg
       recipe, same mint rules). Auth for it = the recipe's existing `auth_preflight` /
       setup surface; cookie-inject lands here (it has a surface now — documenso).
       Done `18f579f` (cookie-inject wired into `runCatch`) + recipe migration `01a9f24`.
-- [ ] **Second engine EXECUTED:** one discriminating Postgres-repo differential live —
-      documenso with the multiselect-specific walk, or a better-discriminating PR from
-      the 12-PR corpus. `pb prove --random` gate runs the full pool.
-      BLOCKED: harness capability (shift-click, multipart/exec setup) + the rewritten
-      discriminating recipe are committed (`375964f`/`366cbc8`), but the live conjure
-      smoke test has not passed — host port 3000 is intercepted by an unrelated
-      process in this sandbox, and the port-3010 fallback fix is written but
-      uncommitted/unverified. No differential leg has run. See RESUME.md.
+- [x] **Second engine EXECUTED:** one discriminating Postgres-repo differential live —
+      documenso with the multiselect-specific walk. `pb prove
+      recipes/documenso-envelope-fields-pr3031` → merge `97835b8d`=WORKS (k=2, fresh
+      worlds, `Field.rows` 0→1, fresh confirm agrees) ∧ parent `977d0733`=DOES_NOT_WORK
+      (kFail=2/2 falsified — the SAME frozen shift-click-multiselect walk left
+      `Field.rows` at 2, not 1: the parent's field-click handler ignores Shift and
+      replaces rather than extends the selection, so the toolbar Remove only drops the
+      last-clicked field). Sealed receipts committed at
+      `site/cases/documenso-envelope-fields-pr3031.{merge,parent}.json`. Port fix
+      `f4f1e56`; three live-diagnosed harness fixes surfaced and fixed en route
+      (`822e4f9` canvas-collision + un-clicked-Remove + headless window size,
+      `531a8f8` W3C Actions float-coordinate rounding, `5f8af83` viewport-aware
+      introspection) — none touched the frozen core. `pb prove --random` (the full-pool
+      gate) was NOT run this pass; a bonus, not required for this box.
 - [ ] **Distribution:** publish npm as `proofbench` (name verified free), bin `pb`,
       drop `private:true`, version from git tag. `npx proofbench gate` works cold.
       STAGED, not shipped: package.json/prepack version-gate/tag `v0.2.0` committed
