@@ -14,6 +14,9 @@
  *     (-p, --output-format json, --model sonnet, tools off, a NEUTRAL tmp cwd), a good/fenced .result
  *     → a valid proposal through validateProposal, and the throw paths (is_error OAuth envelope,
  *     non-JSON .result, and a hostile .result rejected by validateProposal → CND).
+ *   - the MODE-AWARE prompt (the mode-blindness fix): proposeWalkAndClaim threads allowedOps into
+ *     the llmFn input; buildCliPrompt/buildProposeTool under ALLOWED_HTTP_OPS teach the http op's
+ *     exact args shape and never the browser gestures; the browser default stays byte-identical.
  */
 
 import test from 'node:test';
@@ -345,4 +348,66 @@ test("buildProposeTool: expectedAfterRelation.value's description flags it REQUI
   const tool = buildProposeTool(OBSERVABLES);
   const props = tool.input_schema.properties;
   assert.match(props.claim.properties.expectedAfterRelation.properties.value.description, /REQUIRED when op is 'equals'/);
+});
+
+// --- the MODE-AWARE prompt (the mode-blindness fix: prompt vocabulary = validator vocabulary) ----
+
+test('buildCliPrompt: ALLOWED_HTTP_OPS (note-lifecycle) teaches the http op + its exact args shape, never the browser gestures', () => {
+  const p = buildCliPrompt({ intent: 'terminal transition clears queued stagecontrols', introspection: { surface: 'note-lifecycle' }, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS });
+  // The walk vocabulary the model sees is the SAME one validateProposal enforces (the live bug:
+  // a browser prompt on an http-only drive → the model proposed `find` → a guaranteed CND).
+  assert.match(p, /\{"op":"http","args":\{\.\.\.\}\}/);
+  assert.match(p, /"op": one of http,/);
+  assert.match(p, /`method` \(required/);
+  assert.match(p, /`path` \(required/);
+  assert.match(p, /JSONPath string read from the step's JSON response/); // the capture semantics
+  assert.match(p, /\{name\} placeholder/); // …and the placeholder semantics
+  assert.match(p, /Walk arg shapes: http → \{"method":"\.\.\.","path":"\/\.\.\."/);
+  assert.doesNotMatch(p, /find|click|selector|pointer/); // no browser instruction survives
+  // The claim-shape section is IDENTICAL to the browser prompt's.
+  assert.match(p, /increased\|decreased\|changed\|unchanged\|equals/);
+  assert.match(p, /REQUIRED when op is 'equals'/);
+  assert.match(p, /execution_entity\.max_id/);
+  assert.match(p, /ONLY a single JSON object/);
+});
+
+test('buildCliPrompt: the browser DEFAULT is byte-identical with and without an explicit allowedOps (no regression)', () => {
+  const input = { intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES };
+  assert.equal(buildCliPrompt(input), buildCliPrompt({ ...input, allowedOps: ALLOWED_WALK_OPS }));
+  assert.match(buildCliPrompt(input), /Use ONLY find\/type\/click/); // the browser walk text is still there
+});
+
+test('proposeWalkAndClaim: threads allowedOps into the llmFn input (http mode and the browser default)', async () => {
+  /** @type {any} */ let seen;
+  const httpRaw = {
+    walk: [
+      { op: 'http', args: { method: 'POST', path: '/executions', capture: { id: '$.notes[0]._id' } } },
+      { op: 'http', args: { method: 'POST', path: '/executions/{id}/transition' } },
+    ],
+    claim: goodRaw().claim,
+  };
+  const proposal = await proposeWalkAndClaim(
+    { intent: 'x', introspection: {}, observables: OBSERVABLES },
+    { llmFn: async (input) => ((seen = input), httpRaw), allowedOps: ALLOWED_HTTP_OPS }
+  );
+  assert.deepEqual(seen.allowedOps, [...ALLOWED_HTTP_OPS]);
+  assert.equal(proposal.walk[0].op, 'http');
+  await proposeWalkAndClaim({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { llmFn: async (input) => ((seen = input), goodRaw()) });
+  assert.deepEqual(seen.allowedOps, [...ALLOWED_WALK_OPS]); // the default vocabulary reaches the seam too
+});
+
+test('claudeCliLlmFn: threads allowedOps into the CLI prompt (the http-mode prompt reaches the real seam)', async () => {
+  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(goodRaw()))) });
+  await claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS }, { runner, cwd: tmpdir() });
+  const prompt = runner.calls[0].args[1];
+  assert.match(prompt, /\{"op":"http","args":\{\.\.\.\}\}/);
+  assert.doesNotMatch(prompt, /find|click|selector|pointer/);
+});
+
+test('buildProposeTool: ALLOWED_HTTP_OPS narrows the op enum to http (API tool-call path, same fix)', () => {
+  const tool = buildProposeTool(OBSERVABLES, ALLOWED_HTTP_OPS);
+  assert.deepEqual(tool.input_schema.properties.walk.items.properties.op.enum, ['http']);
+  assert.doesNotMatch(tool.description, /find|click/);
+  // The default is unchanged (the existing enum test also proves this).
+  assert.deepEqual(buildProposeTool(OBSERVABLES).input_schema.properties.walk.items.properties.op.enum, [...ALLOWED_WALK_OPS]);
 });

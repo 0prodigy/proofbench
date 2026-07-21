@@ -77,6 +77,13 @@ const DEFAULT_MODEL = 'claude-sonnet-5';
 const DEFAULT_MAX_TOKENS = 1024;
 const PROPOSE_TOOL_NAME = 'propose_walk';
 
+/** The claim-shape prompt section — SHARED verbatim across every drive mode's system prompt. */
+const CLAIM_PROMPT_LINES = [
+  '- claim: the single effect you expect to persist, bound to ONE of the disclosed observables',
+  '  (entity), with expectedAfterRelation describing how that observable should move (e.g. increased).',
+  '  Set quantified:true only for a universal claim (any/all/every user).',
+];
+
 const SYSTEM_PROMPT = [
   'You propose how a real first-time visitor would drive a web app\'s ALREADY-LOADED front-door page',
   'to exercise ONE feature, plus the single persisted effect that proves it worked. Reply ONLY via the',
@@ -96,13 +103,106 @@ const SYSTEM_PROMPT = [
   '  click is off-screen and the driver rejects it. clickAt -> {"x":n,"y":n,"shift":true?} (hold Shift',
   '  for the click — a multi-select gesture on a canvas). Do NOT navigate and do NOT run scripts: the',
   '  harness owns navigation and every observation.',
-  '- claim: the single effect you expect to persist, bound to ONE of the disclosed observables',
-  '  (entity), with expectedAfterRelation describing how that observable should move (e.g. increased).',
-  '  Set quantified:true only for a universal claim (any/all/every user).',
+  ...CLAIM_PROMPT_LINES,
   '',
   'Propose the smallest walk that submits the front door. The harness — not you — reads the store and',
   'decides the verdict.',
 ].join('\n');
+
+/**
+ * @typedef {Object} OpPromptDoc
+ * @property {readonly string[]} intro replaces the browser intro paragraph (still ends in the propose_walk-tool clause)
+ * @property {readonly string[]} walk the `- walk:` section documenting the op's EXACT validateArgs shape
+ * @property {string} argShapes the compact "Walk arg shapes" recap line for the CLI prompt
+ */
+
+/**
+ * Per-op prompt docs for the NON-BROWSER one-op drive vocabularies (keyed by op; the browser default
+ * keeps SYSTEM_PROMPT verbatim). This map closes the MODE-BLINDNESS bug: validateProposal restricts
+ * the walk vocabulary per drive mode (allowedOps), but the prompt used to instruct the browser
+ * gestures unconditionally — the model obeyed, proposed `find`, and every note-lifecycle run was a
+ * guaranteed could-not-execute. Each `walk` section mirrors validateArgs's shape for its op exactly
+ * (the prompt must teach the SAME vocabulary the gate enforces).
+ * @type {Record<string, OpPromptDoc>}
+ */
+const OP_PROMPT_DOCS = {
+  http: {
+    intro: [
+      'You propose how a real API client would drive a service\'s harness-disclosed REST surface (the',
+      'introspection carries the front door: base_url_template, entrypoint, and the operator_env echo) to',
+      'exercise ONE feature, plus the single persisted effect that proves it worked. Reply ONLY via the',
+      'propose_walk tool.',
+    ],
+    walk: [
+      '- walk: the ordered REST calls. Every step MUST be {"op":"http","args":{...}} — no browser gestures,',
+      '  no scripts. args: `method` (required, e.g. "GET"/"POST") and `path` (required; a RELATIVE path',
+      '  starting with \'/\' — never an absolute URL, \'@\', \'://\', or whitespace; the harness owns the host).',
+      '  Optional `body`: a JSON object (never an array or a bare string). Optional `capture`: an object of',
+      '  name -> a \'$.a.b[0].c\' JSONPath string read from the step\'s JSON response. A {name} placeholder in',
+      '  a later step\'s path or body string is substituted from the operator_env values and earlier captures',
+      '  (an unresolved placeholder fails the step).',
+    ],
+    argShapes:
+      'Walk arg shapes: http → {"method":"...","path":"/...","body":{...} optional,"capture":{"name":"$.json.path"} optional}.',
+  },
+  trigger: {
+    intro: [
+      'You propose how a real user would run a service\'s harness-disclosed Argo workflow (the manifest is',
+      'disclosed config, like a front-door URL) to exercise ONE feature, plus the single persisted effect',
+      'that proves it worked. Reply ONLY via the propose_walk tool.',
+    ],
+    walk: [
+      '- walk: the ordered trigger gestures. Every step MUST be {"op":"trigger","args":{...}} — the harness',
+      '  owns the run-nonce and the manifest. args: optional `parameters`, an object of name -> STRING',
+      '  workflow parameters (nothing else).',
+    ],
+    argShapes: 'Walk arg shapes: trigger → {"parameters":{"name":"value", ...} optional} (every value a string).',
+  },
+};
+
+/** The closing prompt lines shared by every non-browser mode (the browser closing names the front door). */
+const NON_BROWSER_CLOSING_LINES = [
+  'Propose the smallest walk that exercises the disclosed surface end-to-end. The harness — not you —',
+  'reads the store and decides the verdict.',
+];
+
+/**
+ * The per-op docs when EVERY allowed op is a non-browser one (http/trigger), else null → the caller
+ * keeps the browser text byte-identical to today's.
+ * @param {readonly string[]} allowedOps
+ * @returns {OpPromptDoc[]|null}
+ */
+function nonBrowserOpDocs(allowedOps) {
+  if (!allowedOps || allowedOps.length === 0) return null;
+  /** @type {OpPromptDoc[]} */
+  const docs = [];
+  for (const op of allowedOps) {
+    const d = OP_PROMPT_DOCS[op];
+    if (!d) return null;
+    docs.push(d);
+  }
+  return docs;
+}
+
+/**
+ * The mode-aware system prompt: the browser default is SYSTEM_PROMPT unchanged; a non-browser
+ * vocabulary (ALLOWED_HTTP_OPS / ALLOWED_ARGO_OPS) swaps the intro + walk-vocabulary sections while
+ * the claim-shape section stays identical.
+ * @param {readonly string[]} allowedOps
+ * @returns {string}
+ */
+function systemPromptFor(allowedOps) {
+  const docs = nonBrowserOpDocs(allowedOps);
+  if (!docs) return SYSTEM_PROMPT;
+  return [
+    ...docs[0].intro,
+    '',
+    ...docs.flatMap((d) => [...d.walk]),
+    ...CLAIM_PROMPT_LINES,
+    '',
+    ...NON_BROWSER_CLOSING_LINES,
+  ].join('\n');
+}
 
 /**
  * @typedef {Object} WalkStep
@@ -128,9 +228,11 @@ const SYSTEM_PROMPT = [
  */
 
 /**
- * @typedef {(input:{intent:any, introspection:any, observables:string[]}) => Promise<any>} LlmFn
+ * @typedef {(input:{intent:any, introspection:any, observables:string[], allowedOps?:readonly string[]}) => Promise<any>} LlmFn
  * The proposer seam: takes the intent + the harness-owned introspection snapshot + the disclosed
- * observable menu, returns the UNTRUSTED raw proposal. The default is a real Anthropic call.
+ * observable menu + the drive mode's walk vocabulary (allowedOps — the SAME list validateProposal
+ * enforces, so prompt and gate can never disagree), returns the UNTRUSTED raw proposal. The default
+ * is a real Anthropic call.
  */
 
 /**
@@ -301,18 +403,22 @@ export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_O
 }
 
 /**
- * The Anthropic tool encoding EXACTLY the walk+claim shape: the op enum (find/type/click/clickAt/
- * pointer), the claim's entity enum (= the disclosed observables, FW-P1-C), and the relation-op enum
- * (the frozen relation set). input_schema is a hint to the model; validateProposal is the real gate.
+ * The Anthropic tool encoding EXACTLY the walk+claim shape: the op enum (= the drive mode's
+ * allowedOps; browser default find/type/click/clickAt/pointer), the claim's entity enum (= the
+ * disclosed observables, FW-P1-C), and the relation-op enum (the frozen relation set). input_schema
+ * is a hint to the model; validateProposal is the real gate.
  * @param {string[]} observables
+ * @param {readonly string[]} [allowedOps] the drive mode's walk vocabulary (browser default)
  * @returns {{name:string, description:string, input_schema:any}}
  */
-export function buildProposeTool(observables) {
+export function buildProposeTool(observables, allowedOps = ALLOWED_WALK_OPS) {
   return {
     name: PROPOSE_TOOL_NAME,
-    description:
-      'Propose the user walk on the already-loaded front-door page (find/type/click; clickAt/pointer ' +
-      'for a canvas) and the single persisted effect to claim, bound to one disclosed observable.',
+    description: nonBrowserOpDocs(allowedOps)
+      ? `Propose the walk (ops: ${allowedOps.join('/')}) against the harness-disclosed surface and the ` +
+        'single persisted effect to claim, bound to one disclosed observable.'
+      : 'Propose the user walk on the already-loaded front-door page (find/type/click; clickAt/pointer ' +
+        'for a canvas) and the single persisted effect to claim, bound to one disclosed observable.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -324,7 +430,7 @@ export function buildProposeTool(observables) {
             type: 'object',
             additionalProperties: false,
             properties: {
-              op: { type: 'string', enum: [...ALLOWED_WALK_OPS] },
+              op: { type: 'string', enum: [...allowedOps] },
               args: { type: 'object' },
             },
             required: ['op', 'args'],
@@ -374,11 +480,11 @@ export function extractProposal(body) {
  * — deps stay ZERO). Forces the propose_walk tool (tool_choice), reads the tool_use input back as
  * the untrusted raw proposal. Needs ANTHROPIC_API_KEY; without it, throws (inject a mock llmFn for
  * API-free runs). fetchFn is injectable so the request/extraction is exercisable without the network.
- * @param {{intent:any, introspection:any, observables:string[]}} input
+ * @param {{intent:any, introspection:any, observables:string[], allowedOps?:readonly string[]}} input
  * @param {{fetchFn?:typeof fetch, model?:string, maxTokens?:number}} [opts]
  * @returns {Promise<any>}
  */
-export async function defaultLlmFn({ intent, introspection, observables }, opts = {}) {
+export async function defaultLlmFn({ intent, introspection, observables, allowedOps = ALLOWED_WALK_OPS }, opts = {}) {
   const doFetch = opts.fetchFn || /** @type {typeof fetch} */ (fetch);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) bad('ANTHROPIC_API_KEY is not set — the real Sonnet proposer needs it (inject a mock llmFn for API-free runs)');
@@ -392,9 +498,9 @@ export async function defaultLlmFn({ intent, introspection, observables }, opts 
     body: JSON.stringify({
       model: opts.model || DEFAULT_MODEL,
       max_tokens: opts.maxTokens || DEFAULT_MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      system: systemPromptFor(allowedOps),
       messages: [{ role: 'user', content: `${intent}\n\n${JSON.stringify(introspection)}` }],
-      tools: [buildProposeTool(observables)],
+      tools: [buildProposeTool(observables, allowedOps)],
       tool_choice: { type: 'tool', name: PROPOSE_TOOL_NAME },
     }),
   });
@@ -447,29 +553,30 @@ function stripFence(s) {
 }
 
 /**
- * Build the CLI prompt: the shared SYSTEM_PROMPT + the intent + the harness introspection snapshot +
- * the disclosed observable menu + an explicit "reply with ONLY the JSON {walk, claim}" instruction
- * that mirrors buildProposeTool's shape (the op enum, entity ∈ observables, the frozen relation-op
- * enum). There is NO forced tool in `claude -p`, so the schema must live in the prompt; the real gate
- * is still validateProposal on the returned raw.
- * @param {{intent:any, introspection:any, observables:string[]}} input
+ * Build the CLI prompt: the (mode-aware) system prompt + the intent + the harness introspection
+ * snapshot + the disclosed observable menu + an explicit "reply with ONLY the JSON {walk, claim}"
+ * instruction that mirrors buildProposeTool's shape (the op enum = allowedOps, entity ∈ observables,
+ * the frozen relation-op enum). There is NO forced tool in `claude -p`, so the schema must live in
+ * the prompt; the real gate is still validateProposal on the returned raw.
+ * @param {{intent:any, introspection:any, observables:string[], allowedOps?:readonly string[]}} input
  * @returns {string}
  */
-export function buildCliPrompt({ intent, introspection, observables }) {
+export function buildCliPrompt({ intent, introspection, observables, allowedOps = ALLOWED_WALK_OPS }) {
   const menu = observables || [];
+  const docs = nonBrowserOpDocs(allowedOps);
   return [
-    SYSTEM_PROMPT,
+    systemPromptFor(allowedOps),
     '',
     `INTENT: ${intent}`,
     '',
-    `HARNESS INTROSPECTION (the already-loaded front-door page, provided by the harness): ${JSON.stringify(introspection)}`,
+    `HARNESS INTROSPECTION (${docs ? 'the disclosed drive surface' : 'the already-loaded front-door page'}, provided by the harness): ${JSON.stringify(introspection)}`,
     '',
     `DISCLOSED OBSERVABLES — the claim.entity MUST be exactly one of: ${menu.join(', ') || '(none)'}`,
     '',
     'This mode has NO tools available: ignore any instruction above to reply via a tool, and instead',
     'reply with ONLY a single JSON object (no prose, no explanation, no markdown fence) of this shape:',
     '{',
-    `  "walk": [ { "op": one of ${ALLOWED_WALK_OPS.join('|')}, "args": { ... } }, ... ],`,
+    `  "walk": [ { "op": one of ${allowedOps.join('|')}, "args": { ... } }, ... ],`,
     '  "claim": {',
     `    "entity": one of ${menu.join('|') || '(none)'},`,
     `    "expectedAfterRelation": { "op": one of ${ALLOWED_RELATION_OPS.join('|')}, "value": REQUIRED when op is 'equals' (the exact value, e.g. true/1/"some-string") — omit for increased/decreased/changed/unchanged },`,
@@ -477,9 +584,11 @@ export function buildCliPrompt({ intent, introspection, observables }) {
     '    "quantified": optional boolean (true only for a universal any/all/every claim)',
     '  }',
     '}',
-    'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
-      'clickAt → {"x":<number>,"y":<number>,"shift":true? (hold Shift for a multi-select gesture)}; ' +
-      'pointer → {"actions":[...],"pointerType":"..."}.',
+    docs
+      ? docs.map((d) => d.argShapes).join(' ')
+      : 'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
+        'clickAt → {"x":<number>,"y":<number>,"shift":true? (hold Shift for a multi-select gesture)}; ' +
+        'pointer → {"actions":[...],"pointerType":"..."}.',
   ].join('\n');
 }
 
@@ -494,15 +603,15 @@ export function buildCliPrompt({ intent, introspection, observables }) {
  * an honest could-not-execute → CND; otherwise the model's `.result` (fence-stripped) is JSON.parse'd
  * to the UNTRUSTED raw proposal — validateProposal in proposeWalkAndClaim is still the gate (this
  * never bypasses it, so a hostile CLI reply degrades to ≠WORKS exactly like the API path).
- * @param {{intent:any, introspection:any, observables:string[]}} input
+ * @param {{intent:any, introspection:any, observables:string[], allowedOps?:readonly string[]}} input
  * @param {{runner?:ClaudeRunner, model?:string, cwd?:string}} [opts]
  * @returns {Promise<any>} the untrusted raw proposal (validateProposal gates it)
  */
-export async function claudeCliLlmFn({ intent, introspection, observables }, opts = {}) {
+export async function claudeCliLlmFn({ intent, introspection, observables, allowedOps = ALLOWED_WALK_OPS }, opts = {}) {
   const runner = opts.runner || defaultClaudeRunner();
   const model = opts.model || DEFAULT_CLI_MODEL;
   const cwd = opts.cwd || mkdtempSync(join(tmpdir(), 'pb-proposer-'));
-  const prompt = buildCliPrompt({ intent, introspection, observables });
+  const prompt = buildCliPrompt({ intent, introspection, observables, allowedOps });
   const args = ['-p', prompt, '--output-format', 'json', '--model', model, '--disallowedTools', CLI_DISALLOWED_TOOLS];
   const res = runner.run(args, cwd);
   if (res.error) {
@@ -529,13 +638,16 @@ export async function claudeCliLlmFn({ intent, introspection, observables }, opt
 /**
  * Propose a validated {walk, claim} for the intent + introspection, or THROW (→ caller treats a
  * throw as an honest could-not-execute → CND). The llmFn seam produces an untrusted raw proposal;
- * validateProposal is the gate. Default llmFn = the real Anthropic call.
+ * validateProposal is the gate. Default llmFn = the real Anthropic call. allowedOps is threaded INTO
+ * the llmFn input so the prompt teaches the same vocabulary the validator enforces (mode-blindness
+ * — a browser prompt on an http-only drive — made every note-lifecycle proposal a guaranteed CND).
  * @param {{intent:any, introspection:any, observables:string[]}} input
- * @param {{llmFn?:LlmFn, allowedOps?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS for the argo drive)
+ * @param {{llmFn?:LlmFn, allowedOps?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS for the argo/note-lifecycle drives)
  * @returns {Promise<Proposal>}
  */
 export async function proposeWalkAndClaim({ intent, introspection, observables }, opts = {}) {
+  const allowedOps = opts.allowedOps || ALLOWED_WALK_OPS;
   const llmFn = opts.llmFn || /** @type {LlmFn} */ ((input) => defaultLlmFn(input));
-  const raw = await llmFn({ intent, introspection, observables });
-  return validateProposal(raw, { observables, allowedOps: opts.allowedOps || ALLOWED_WALK_OPS });
+  const raw = await llmFn({ intent, introspection, observables, allowedOps });
+  return validateProposal(raw, { observables, allowedOps });
 }
