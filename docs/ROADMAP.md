@@ -106,8 +106,11 @@ pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merg
       the 12-PR corpus. `pb prove --random` gate runs the full pool.
 - [ ] **Distribution:** publish npm as `proofbench` (name verified free), bin `pb`,
       drop `private:true`, version from git tag. `npx proofbench gate` works cold.
-- [ ] **Getting-started doc:** recipe authoring guide with the two shipped recipes as
+- [x] **Getting-started doc:** recipe authoring guide with the two shipped recipes as
       worked examples; prerequisites stated (Node 20+, Docker, claude CLI or API key).
+      Done: `docs/getting-started.md` — every field derived from `src/recipe.mjs`,
+      verdict/exit-code semantics traced to `src/verdict.mjs`/`src/cli.mjs`, honest-CND
+      section names today's declines (no-Dockerfile, k8s, serverless, mobile/native).
 - [ ] **Launch page rebuild** around three real case files: the catch (#9157 DNW), the
       earned green (#7130 WORKS), the honest refusal (a real CND) + a supported-stacks
       matrix that says exactly what declines to CND.
