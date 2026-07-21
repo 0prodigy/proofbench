@@ -214,7 +214,12 @@ function noteLifecycleRecipe(overrides = {}) {
     },
     fresh_world: { strategy: 'new_instance_per_iteration' },
     setup: { operator_env: ['PB_SCENARIO_ID'] },
-    front_door: { mode: 'rest', base_url_template: 'http://{appservice_host}:{appservice_port}', entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}' },
+    front_door: {
+      mode: 'rest',
+      base_url_template: 'http://{appservice_host}:{appservice_port}',
+      entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}',
+      serves: 'the parent execution; parent.notes[0]._id is the child note-exec id the store tap is scoped by',
+    },
     store_tap: {
       engine: 'mongo',
       pod: 'mongodb-0',
@@ -238,11 +243,13 @@ function writeRecipeDir(obj) {
 
 /**
  * Run the note-lifecycle Catch end to end (cluster-free): a real conjureK8sAttach bring-up over a
- * fake port-forward/kubectl, a real mongotap read, a mock llmFn (frozen proposal). Sets/restores
- * PB_SCENARIO_ID for the duration (operator_env is read from process.env, never fabricated).
+ * fake port-forward/kubectl, a real mongotap read, a mock llmFn (frozen proposal; injectable to
+ * observe the seam's input). Sets/restores PB_SCENARIO_ID for the duration (operator_env is read
+ * from process.env, never fabricated).
  * @param {(id:string)=>number} afterCountForId
+ * @param {any} [llmFn]
  */
-async function runNoteLifecycle(afterCountForId) {
+async function runNoteLifecycle(afterCountForId, llmFn = asAny(async () => NOTE_PROPOSAL_RAW)) {
   const dir = writeRecipeDir(noteLifecycleRecipe());
   const runDir = mkdtempSync(join(tmpdir(), 'pb-notelifecycle-run-'));
   const priorEnv = process.env.PB_SCENARIO_ID;
@@ -251,7 +258,7 @@ async function runNoteLifecycle(afterCountForId) {
     const conjureFn = asAny((/** @type {string} */ d, /** @type {any} */ o) =>
       conjure(d, { ...o, spawnFn: asAny(fakePortForwardSpawn()), execFn: asAny(makeFakeExec(afterCountForId)) })
     );
-    return await runCatch({ recipeDir: dir, runDir, conjureFn, fetchFn: makeFakeFetch(), llmFn: asAny(async () => NOTE_PROPOSAL_RAW) });
+    return await runCatch({ recipeDir: dir, runDir, conjureFn, fetchFn: makeFakeFetch(), llmFn });
   } finally {
     if (priorEnv === undefined) delete process.env.PB_SCENARIO_ID;
     else process.env.PB_SCENARIO_ID = priorEnv;
@@ -274,6 +281,25 @@ test('runNoteLifecycleCatch HAPPY: two fresh instances, the terminal step clears
   const fp = result.bundle.receipts.find((r) => r.kind === 'fingerprint');
   assert.ok(fp, 'a k8s-attach identity fingerprint was minted');
   assert.deepEqual(fp.data.repos, [{ name: 'appservice', sha: 'abc1234' }]);
+});
+
+test('runNoteLifecycleCatch: the propose-seam input discloses the harness-owned walk contract (required_capture + serves + allowedOps) — never contract-blind', async () => {
+  /** @type {any[]} */
+  const seen = [];
+  const result = await runNoteLifecycle(() => 0, asAny(async (/** @type {any} */ input) => (seen.push(input), NOTE_PROPOSAL_RAW)));
+  assert.equal(result.verdict.state, Verdict.WORKS, result.verdict.reasons.join(' | '));
+  assert.equal(seen.length, 1, 'propose-once-freeze: the seam is consulted exactly once');
+  const { introspection, allowedOps, observables } = seen[0];
+  // The NEW contract disclosures (the second live CND: a 1-step walk that never captured the id).
+  assert.equal(introspection.required_capture, 'child_execution_id'); // = the discriminating query's {placeholder}
+  assert.match(introspection.serves, /notes\[0\]\._id/); // the recipe's own resolution prose
+  assert.deepEqual(allowedOps, ['http']); // the drive-mode vocabulary reaches the seam (mode-blindness fix)
+  // The pre-existing keys are EXTENDED, never renamed.
+  assert.equal(introspection.surface, 'appservice-api+mongo');
+  assert.equal(introspection.base_url_template, 'http://{appservice_host}:{appservice_port}');
+  assert.equal(introspection.entrypoint, 'POST /executions?scenarioId={PB_SCENARIO_ID}');
+  assert.deepEqual(introspection.operator_env, { PB_SCENARIO_ID: 'scn-1' });
+  assert.deepEqual(observables, ['stage_controls_queued.row-count']);
 });
 
 test('runNoteLifecycleCatch FALSIFIED: the terminal step never clears the queued stagecontrols (reproduced) => DOES_NOT_WORK', async () => {

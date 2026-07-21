@@ -371,6 +371,17 @@ test('buildCliPrompt: ALLOWED_HTTP_OPS (note-lifecycle) teaches the http op + it
   assert.match(p, /ONLY a single JSON object/);
 });
 
+test('buildCliPrompt: an introspection-disclosed required_capture adds the resolve-then-terminal walk contract (the second live CND: a 1-step walk)', () => {
+  const input = { intent: 'x', introspection: { surface: 's', required_capture: 'child_execution_id' }, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS };
+  const p = buildCliPrompt(input);
+  assert.match(p, /AT LEAST 2 steps/);
+  assert.match(p, /capture named exactly "child_execution_id"/);
+  assert.match(p, /The LAST step must be the single terminal state-changing call/);
+  assert.match(p, /observes the store between the resolve phase and that final step/);
+  // Without the disclosure the prompt is unchanged — the contract is drive-disclosed, not http-generic.
+  assert.doesNotMatch(buildCliPrompt({ ...input, introspection: { surface: 's' } }), /AT LEAST 2 steps/);
+});
+
 test('buildCliPrompt: the browser DEFAULT is byte-identical with and without an explicit allowedOps (no regression)', () => {
   const input = { intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES };
   assert.equal(buildCliPrompt(input), buildCliPrompt({ ...input, allowedOps: ALLOWED_WALK_OPS }));

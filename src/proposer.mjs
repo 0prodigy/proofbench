@@ -205,6 +205,30 @@ function systemPromptFor(allowedOps) {
 }
 
 /**
+ * The walk-shape contract the harness disclosed THROUGH the introspection (catch.mjs's
+ * note-lifecycle drive sets `required_capture` = the discriminating query's {placeholder}): the
+ * harness splits the walk as resolveSteps = walk.slice(0,-1) / terminalStep = walk.slice(-1) and
+ * scopes its store reads by the captured id, so a walk that never captures it — or has only one
+ * step — is a guaranteed could-not-execute. Emitted on BOTH prompt paths (CLI + API system prompt)
+ * only when the disclosure is present; without it the prompt is unchanged.
+ * @param {any} introspection
+ * @returns {string[]}
+ */
+function requiredCaptureContractLines(introspection) {
+  const name = introspection && typeof introspection.required_capture === 'string' && introspection.required_capture;
+  if (!name) return [];
+  return [
+    '',
+    'This drive\'s walk needs AT LEAST 2 steps. Every step before the LAST is the resolve phase (setup +',
+    `resolving the fresh instance) and MUST populate a capture named exactly "${name}" — the harness scopes`,
+    'its store reads by that captured id (the introspection\'s `serves`, when present, describes how the',
+    'entrypoint\'s response resolves to it). The LAST step must be the single terminal state-changing call',
+    'the claim is about: the harness observes the store between the resolve phase and that final step, and',
+    'again after it.',
+  ];
+}
+
+/**
  * @typedef {Object} WalkStep
  * @property {'find'|'type'|'click'|'clickAt'|'pointer'|'trigger'|'http'} op the drive gesture (browser
  *   ops, the one-op argo 'trigger', or the one-op note-lifecycle 'http' — see ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS)
@@ -498,7 +522,7 @@ export async function defaultLlmFn({ intent, introspection, observables, allowed
     body: JSON.stringify({
       model: opts.model || DEFAULT_MODEL,
       max_tokens: opts.maxTokens || DEFAULT_MAX_TOKENS,
-      system: systemPromptFor(allowedOps),
+      system: [systemPromptFor(allowedOps), ...requiredCaptureContractLines(introspection)].join('\n'),
       messages: [{ role: 'user', content: `${intent}\n\n${JSON.stringify(introspection)}` }],
       tools: [buildProposeTool(observables, allowedOps)],
       tool_choice: { type: 'tool', name: PROPOSE_TOOL_NAME },
@@ -566,6 +590,7 @@ export function buildCliPrompt({ intent, introspection, observables, allowedOps 
   const docs = nonBrowserOpDocs(allowedOps);
   return [
     systemPromptFor(allowedOps),
+    ...requiredCaptureContractLines(introspection),
     '',
     `INTENT: ${intent}`,
     '',

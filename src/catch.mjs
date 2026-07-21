@@ -1563,6 +1563,13 @@ async function runNoteLifecycleCatch(opts, recipe, runDir) {
           surface: drive.surface,
           base_url_template: fd.base_url_template,
           entrypoint: fd.entrypoint,
+          // Contract disclosures the harness already owns (like the observables menu / the argo
+          // manifest): the discriminating query's {placeholder} the walk's resolve phase MUST
+          // capture (enforced below), and the recipe's own prose for how the entrypoint's response
+          // resolves to that id. Without them the proposer is contract-blind — the second live CND
+          // was a 1-step walk that could never satisfy the resolve-then-terminal split.
+          ...(instanceIdName ? { required_capture: instanceIdName } : {}),
+          ...(fd.serves !== undefined ? { serves: fd.serves } : {}),
           operator_env: { ...captures },
         };
         if (!proposal && !proposalFrozen) {
