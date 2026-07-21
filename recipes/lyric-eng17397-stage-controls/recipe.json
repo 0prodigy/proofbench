@@ -63,7 +63,8 @@
       "PB_SEQ_NOTE_ID",
       "PB_DEFAULT_ACTION",
       "PB_OVERRIDE_ACTION",
-      "PB_EXPECTED_IMAGE"
+      "PB_EXPECTED_IMAGE",
+      "PB_LYRIC_FROM"
     ],
     "capture_expectations": "echo the PB_DEFAULT_ACTION/PB_OVERRIDE_ACTION/PB_EXPECTED_IMAGE operator env back to stdout as JSON so ratify re-captures them as exports (substituteExports expands $VAR in expect predicates only for CAPTURED exports, never bare env) -- mirrors ready.yaml's capture-expectations verb; a required value left unset must surface as an honest not-run, never a fabricated default."
   },
@@ -72,6 +73,7 @@
     "mode": "rest",
     "base_url_template": "http://{appservice_host}:{appservice_port}",
     "entrypoint": "POST /executions?scenarioId={PB_SCENARIO_ID}&sequenceId={PB_SEQUENCE_ID}&sequenceNoteId={PB_SEQ_NOTE_ID}",
+    "headers": { "From": "{PB_LYRIC_FROM}" },
     "serves": "the same appservice REST entrypoint lyric-py drives in-pod (all three ids MUST be in the query string; a body-only POST 500s). The minted id is the parent execution _id from the fire response; parent.notes[0] then resolves the child note-exec that carries subActions[]/stages[] and is the executionId stagecontrols are scoped by."
   },
 
