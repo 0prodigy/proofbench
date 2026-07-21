@@ -260,6 +260,13 @@ introspection only" page (→ R3, written with the Lyric dogfood).
 
 ## Decision log (settled — do not reopen)
 
+- 2026-07-21 (founder, same-turn): G1 build complete; `git push origin product-v1 v0.2.1`
+  executed (npm publish pending founder `npm login`). **Lyric lyriclet dogfood (the R3
+  subset scoped in `docs/lyric-integration-contract.md`) is pulled AHEAD of G2** — pb
+  ships the control surface, Lyric team integrates once, then autopilot; first substrate
+  = BYOC lyriclet via decision-engine; target = ENG-17397 live differential. Founder also
+  authorized waking the hibernated `akashpathak` lyriclet for this work. G2 items remain
+  next after the dogfood.
 - 2026-07-20 (founder, product audit): fundamentals CONFIRMED right — the 8 invariants,
   recipe seam, differential Catch stand; the gap is coverage/cost/onboarding, all
   additive. No rewrite, ever. Adoption metrics block above is binding at every gate.
