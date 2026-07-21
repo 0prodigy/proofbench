@@ -55,12 +55,22 @@ const W3C_ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 /** The W3C/Selenium "Shift" key code point, for a held-shift multi-select gesture (clickAt shift:true). */
 const SHIFT_KEY_CODE = '';
 
-/** The session capabilities — headless chrome, exactly the disclosed sandbox-safe args. */
+/**
+ * The session capabilities — headless chrome, exactly the disclosed sandbox-safe args.
+ * `--window-size=1600,1200` was added live (documenso #3031 differential): headless chrome's
+ * DEFAULT window is small, so a canvas-shaped drive surface (Konva's field editor, laid out
+ * alongside a nav+sidebar+field-type panel) rendered its <canvas> at ~124x175px — too little
+ * room for a multi-field walk to place non-overlapping fields, causing every subsequent clickAt
+ * to land on the already-placed field's own Rect (a select, not a place) instead of empty canvas.
+ * A generous window fixes this for ANY future canvas-shaped SUT, not just documenso.
+ */
 const SESSION_BODY = Object.freeze({
   capabilities: {
     alwaysMatch: {
       browserName: 'chrome',
-      'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage'] },
+      'goog:chromeOptions': {
+        args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1600,1200'],
+      },
     },
   },
 });

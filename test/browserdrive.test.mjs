@@ -98,7 +98,14 @@ test('browserdrive: openBrowser pulls, boots with --shm-size=2g, polls /status, 
   assert.ok(fetchFn.calls.some((c) => c.path === '/status'));
   const session = fetchFn.calls.find((c) => c.path === '/session');
   assert.deepEqual(session?.body, {
-    capabilities: { alwaysMatch: { browserName: 'chrome', 'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage'] } } },
+    capabilities: {
+      alwaysMatch: {
+        browserName: 'chrome',
+        'goog:chromeOptions': {
+          args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1600,1200'],
+        },
+      },
+    },
   });
   assert.equal(client.sessionId, 'sess-1');
 });
