@@ -44,7 +44,9 @@
     ],
     "expected_images": [
       "us-docker.pkg.dev/development-367210/lyric/appservice:akashpathak-e1c87a34",
-      "us-docker.pkg.dev/development-367210/lyric/metadata-service:akashpathak-dffc6331"
+      "us-docker.pkg.dev/development-367210/lyric/metadata-service:akashpathak-dffc6331",
+      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-scenario:delta",
+      "us-docker.pkg.dev/development-367210/lyric/mosaic-function-stage-control:delta"
     ]
   },
 

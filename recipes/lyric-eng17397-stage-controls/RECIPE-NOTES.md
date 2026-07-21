@@ -178,8 +178,17 @@ checklist item, not this slice.
   leg run, swap both tags** to `akashpathak-40b14842` / `akashpathak-b4c121e7` — the
   differential compares sealed drive-time digests, not this recipe field, so the between-leg
   edit cannot fake a swap; it only tightens each leg's identity bind.
-- `PB_DEFAULT_ACTION=full_run`, `PB_OVERRIDE_ACTION=incremental_run` (from the released
-  disruption-note's note-release.json `subActions`/`defaultSubAction`).
-- `PB_SCENARIO_ID`/`PB_SEQUENCE_ID`/`PB_SEQ_NOTE_ID`: cluster-resident — resolve by scoped
-  mongo read (lyric-mongo.sh, ctx akashpathak/ns delta) once the cluster is awake; the
-  2026-07-22 attempt found the lyriclet HIBERNATED (wake is operator-gated).
+- The drive surface is the cluster's ALREADY-RELEASED A&C note `eng17397-ac-qa5`
+  (note `6a4c92ecad276d92ae32f952`) — NOT the ticket dir's unpublished disruption-note
+  draft (real-entrypoint rule). Its release carries the A&C surface under the REAL schema
+  field names `actions[]`/`defaultAction` (not ready.yaml's `subActions`/`defaultSubAction`):
+  stages validate→transform→approve, blocking control `approve_gate` on `approve`.
+- Resolved operator_env (scoped mongo reads, ctx `akashpathak`/ns `delta`, 2026-07-22):
+  `PB_SCENARIO_ID=6a4c92ecb8c4bb507f650038` (the app's Signature scenario — executions fire
+  on signature scenarios; the sibling `…0036` is type `config`),
+  `PB_SEQUENCE_ID=6a4c92ecad276d92ae32f955`, `PB_SEQ_NOTE_ID=6a4c92ecad276d92ae32f957`
+  (sequencenote → DRAFT release `6a4c92ecad276d92ae32f953`, same actions/workflow as the
+  installed 0.0.1), `PB_DEFAULT_ACTION=full_run`, `PB_OVERRIDE_ACTION=quick_run`.
+  The release has zero tables — no datasource/automap prep needed; stagecontrols collection
+  was EMPTY and no execution has ever carried subActions on this cluster (first A&C fire
+  ever will be pb's).
