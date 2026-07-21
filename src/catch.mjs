@@ -417,10 +417,13 @@ function sleep(ms) {
  * The read-only page snapshot the agent proposes against — the HARNESS runs it, never the agent.
  * Widened (generically, not documenso-specific) beyond fillable fields to also enumerate BUTTONS
  * (type/title/aria-label/trimmed text + a computed short CSS selector hint: `#id` else an
- * `nth-of-type` path) and each CANVAS's viewport `getBoundingClientRect` — the coordinates a
- * clickAt-driven walk needs to compute a click point on a DOM-less surface (Konva, react-pdf).
- * Returns `{fields, buttons, canvases}`; a bare array (older test fakes) is still accepted by
- * {@link introspect} as fields-only.
+ * `nth-of-type` path), each CANVAS's viewport `getBoundingClientRect`, and the window's OWN visible
+ * `viewport` bounds — a canvas taller/wider than the viewport (documenso's editor: rect height
+ * 1130 vs an actual visible innerHeight of 1061) otherwise leaves the agent computing an in-canvas
+ * but off-screen clickAt coordinate, which chromedriver 400s ("move target out of bounds"); ground
+ * truth the agent can clamp against fixes that for ANY canvas-shaped surface, not just documenso's.
+ * Returns `{fields, buttons, canvases, viewport}`; a bare array (older test fakes) is still
+ * accepted by {@link introspect} as fields-only (viewport defaults to `{width:0, height:0}`).
  */
 const INTROSPECT_JS = `
   function pbSelectorHint(el) {
@@ -453,7 +456,8 @@ const INTROSPECT_JS = `
     var r = el.getBoundingClientRect();
     return { selector: pbSelectorHint(el), x: r.x, y: r.y, width: r.width, height: r.height };
   });
-  return { fields: fields, buttons: buttons, canvases: canvases };
+  var viewport = { width: window.innerWidth, height: window.innerHeight };
+  return { fields: fields, buttons: buttons, canvases: canvases, viewport: viewport };
 `;
 
 const INTROSPECT_RETRY_MS = 20000; // bounded wait for an async-rendering surface (react-pdf/Konva editor) to paint
@@ -478,21 +482,24 @@ export function quantifierFromIntent(intent) {
 
 /**
  * Introspect the ALREADY-NAVIGATED front door — the read-only snapshot of fillable fields (+
- * buttons + canvases, see {@link INTROSPECT_JS}) the agent proposes against. This is HARNESS-owned
- * (it runs the page read via client.execute); the agent never runs the read and never navigates,
- * so `execute`/`navigate` stay out of the walk vocabulary (FW-P1-D). A bare array (a test fake
- * predating the widened shape) is accepted as fields-only, buttons/canvases defaulting to `[]`.
+ * buttons + canvases + the window's own viewport bounds, see {@link INTROSPECT_JS}) the agent
+ * proposes against. This is HARNESS-owned (it runs the page read via client.execute); the agent
+ * never runs the read and never navigates, so `execute`/`navigate` stay out of the walk vocabulary
+ * (FW-P1-D). A bare array (a test fake predating the widened shape) is accepted as fields-only,
+ * buttons/canvases defaulting to `[]` and viewport to `{width:0, height:0}`.
  * @param {import('./browserdrive.mjs').BrowserClient} client
- * @returns {Promise<{fields: Array<{name:string|null, type:string, tag:string}>, buttons: any[], canvases: any[]}>}
+ * @returns {Promise<{fields: Array<{name:string|null, type:string, tag:string}>, buttons: any[], canvases: any[], viewport: {width:number, height:number}}>}
  */
 export async function introspect(client) {
   const raw = await client.execute(INTROSPECT_JS);
-  if (Array.isArray(raw)) return { fields: raw, buttons: [], canvases: [] };
+  if (Array.isArray(raw)) return { fields: raw, buttons: [], canvases: [], viewport: { width: 0, height: 0 } };
   const obj = raw && typeof raw === 'object' ? raw : {};
+  const vp = obj.viewport && typeof obj.viewport === 'object' ? obj.viewport : {};
   return {
     fields: Array.isArray(obj.fields) ? obj.fields : [],
     buttons: Array.isArray(obj.buttons) ? obj.buttons : [],
     canvases: Array.isArray(obj.canvases) ? obj.canvases : [],
+    viewport: { width: Number(vp.width) || 0, height: Number(vp.height) || 0 },
   };
 }
 
@@ -505,7 +512,7 @@ export async function introspect(client) {
  * absent) stay fast; the live default is the full 20s window.
  * @param {import('./browserdrive.mjs').BrowserClient} client
  * @param {{timeoutMs?:number, pollMs?:number}} [opts]
- * @returns {Promise<{fields:any[], buttons:any[], canvases:any[]}>}
+ * @returns {Promise<{fields:any[], buttons:any[], canvases:any[], viewport:{width:number,height:number}}>}
  */
 export async function introspectSettled(client, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? INTROSPECT_RETRY_MS;

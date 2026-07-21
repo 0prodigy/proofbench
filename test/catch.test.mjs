@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleCatchBundle, observedValue, confirmAgrees, normalizeEqualsClaimValue, coerceObservedForBind, sealedVerdict, persistCatchReceipt, runCatch } from '../src/catch.mjs';
+import { assembleCatchBundle, observedValue, confirmAgrees, normalizeEqualsClaimValue, coerceObservedForBind, sealedVerdict, persistCatchReceipt, runCatch, introspect } from '../src/catch.mjs';
 import { verdict } from '../src/verdict.mjs';
 import { sealBundle, verifySeal } from '../src/evidence.mjs';
 import { Verdict } from '../src/types.mjs';
@@ -170,6 +170,26 @@ test("catch helpers: coerceObservedForBind reshapes a confirm-leg observation in
   assert.equal(coerceObservedForBind('1', 1), 1);
   assert.equal(coerceObservedForBind('abc', 1), 'abc'); // non-numeral string passes through unchanged
   assert.equal(coerceObservedForBind(1, 1), 1); // same type: untouched
+});
+
+test('introspect: passes through the widened {fields,buttons,canvases,viewport} snapshot (documenso #3031 gap: an out-of-viewport clickAt 500s the driver)', async () => {
+  const client = /** @type {any} */ ({
+    execute: async () => ({
+      fields: [{ name: 'field-0', type: 'text', tag: 'input' }],
+      buttons: [{ type: 'button', title: 'Remove', ariaLabel: '', text: 'Remove', selector: 'button:nth-of-type(1)' }],
+      canvases: [{ selector: 'canvas:nth-of-type(1)', x: 393.5, y: 172, width: 800, height: 1130.1875 }],
+      viewport: { width: 1600, height: 1061 },
+    }),
+  });
+  const snap = await introspect(client);
+  assert.deepEqual(snap.viewport, { width: 1600, height: 1061 });
+  assert.equal(snap.canvases[0].height, 1130.1875); // wider/taller than the viewport — the agent must clamp, not the harness
+});
+
+test('introspect: a bare-array test fake (predating the widened shape) is still accepted, viewport defaulting to {width:0, height:0}', async () => {
+  const client = /** @type {any} */ ({ execute: async () => [{ name: 'field-0', type: 'text', tag: 'input' }] });
+  const snap = await introspect(client);
+  assert.deepEqual(snap, { fields: [{ name: 'field-0', type: 'text', tag: 'input' }], buttons: [], canvases: [], viewport: { width: 0, height: 0 } });
 });
 
 test('catch assembly: a boolean confirm-leg observation against a numeric store after (linkding shape) still reaches WORKS via coerceObservedForBind, not verdict.mjs', () => {
