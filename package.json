@@ -1,6 +1,6 @@
 {
   "name": "proofbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Proof-of-work for AI change — sealed, tri-state verdicts (WORKS / DOES NOT WORK / COULD NOT DETERMINE) an agent cannot fake.",
   "license": "Apache-2.0",
   "repository": {
