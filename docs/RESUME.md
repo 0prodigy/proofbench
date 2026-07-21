@@ -113,6 +113,23 @@ this pass — a bonus per the task brief, not required to close this box.
    the exit-code doc/constitution reconciliation gap (`docs/getting-started.md` note);
    binding the #7130 parent's specific CND cause into the sealed reason string itself.
 
+**Post-hoc independent review of `f4f1e56..4949afe` (the commits after the session's
+review panel): PASS — ship, zero blocking.** Frozen core diff empty, zero new deps, both
+seals re-verified with a genuine tamper probe, differential confirmed non-tautological
+(identical intent on the parent leg produced DNW). Advisories banked:
+- **Intent-sharpening ratchet (watch item, IC-15):** the documenso recipe's `intent` now
+  embeds near-procedural language (button `title`, "click it, not just find it"). Still
+  agent-proposed walk + harness-tap truth, but ration intent edits — fix live failures
+  in the HARNESS generically (as 822e4f9/5f8af83 did), or intents become de facto scripts.
+- `catch.mjs:496` legacy bare-array introspection defaults viewport to 0×0, which with
+  the clamp rule would forbid every clickAt if that path ever met a live proposal.
+- A future NON-differential run of the documenso recipe is weaker than it looks: merge's
+  0→1 alone can't distinguish "placed 3, removed 2" from "placed 1"; the discrimination
+  lives in the parent leg.
+Version was then bumped to **0.2.1 with tag `v0.2.1` on the final tip** (the old
+`v0.2.0`@`f7dd9a9` predates the honesty fix + harness slice — do NOT publish it), so the
+held commands are now: `npm publish` + `git push origin product-v1 v0.2.1`.
+
 ---
 
 ## SESSION 2026-07-21 (c) — G1-tail close-out: distribution staged, docs+matrix landed, one honesty fix, engine still BLOCKED
