@@ -413,9 +413,51 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** The read-only page snapshot the agent proposes against — the HARNESS runs it, never the agent. */
-const INTROSPECT_JS =
-  "return Array.from(document.querySelectorAll('input, textarea')).map((el) => ({ name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() }))";
+/**
+ * The read-only page snapshot the agent proposes against — the HARNESS runs it, never the agent.
+ * Widened (generically, not documenso-specific) beyond fillable fields to also enumerate BUTTONS
+ * (type/title/aria-label/trimmed text + a computed short CSS selector hint: `#id` else an
+ * `nth-of-type` path) and each CANVAS's viewport `getBoundingClientRect` — the coordinates a
+ * clickAt-driven walk needs to compute a click point on a DOM-less surface (Konva, react-pdf).
+ * Returns `{fields, buttons, canvases}`; a bare array (older test fakes) is still accepted by
+ * {@link introspect} as fields-only.
+ */
+const INTROSPECT_JS = `
+  function pbSelectorHint(el) {
+    if (el.id) return '#' + el.id;
+    var path = [];
+    var cur = el;
+    while (cur && cur.nodeType === 1 && cur !== document.body) {
+      var parent = cur.parentElement;
+      if (!parent) { path.unshift(cur.tagName.toLowerCase()); break; }
+      var siblings = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === cur.tagName; });
+      var idx = siblings.indexOf(cur) + 1;
+      path.unshift(cur.tagName.toLowerCase() + ':nth-of-type(' + idx + ')');
+      cur = parent;
+    }
+    return path.join(' > ');
+  }
+  var fields = Array.from(document.querySelectorAll('input, textarea')).map(function (el) {
+    return { name: el.getAttribute('name'), type: (el.getAttribute('type') || 'text').toLowerCase(), tag: el.tagName.toLowerCase() };
+  });
+  var buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).map(function (el) {
+    return {
+      type: (el.getAttribute('type') || '').toLowerCase(),
+      title: el.getAttribute('title') || '',
+      ariaLabel: el.getAttribute('aria-label') || '',
+      text: (el.textContent || '').trim().slice(0, 80),
+      selector: pbSelectorHint(el),
+    };
+  });
+  var canvases = Array.from(document.querySelectorAll('canvas')).map(function (el) {
+    var r = el.getBoundingClientRect();
+    return { selector: pbSelectorHint(el), x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+  return { fields: fields, buttons: buttons, canvases: canvases };
+`;
+
+const INTROSPECT_RETRY_MS = 20000; // bounded wait for an async-rendering surface (react-pdf/Konva editor) to paint
+const INTROSPECT_POLL_MS = 1000;
 
 /**
  * Universal-quantifier words that make a claim quantified (§1.4/FW-11). Word-bounded so
@@ -435,16 +477,51 @@ export function quantifierFromIntent(intent) {
 }
 
 /**
- * Introspect the ALREADY-NAVIGATED front door — the read-only snapshot of fillable fields the agent
- * proposes against. This is HARNESS-owned (it runs the page read via client.execute); the agent
- * never runs the read and never navigates, so `execute`/`navigate` stay out of the walk vocabulary
- * (FW-P1-D). Returns the field descriptors (name/type/tag) the proposer sees.
+ * Introspect the ALREADY-NAVIGATED front door — the read-only snapshot of fillable fields (+
+ * buttons + canvases, see {@link INTROSPECT_JS}) the agent proposes against. This is HARNESS-owned
+ * (it runs the page read via client.execute); the agent never runs the read and never navigates,
+ * so `execute`/`navigate` stay out of the walk vocabulary (FW-P1-D). A bare array (a test fake
+ * predating the widened shape) is accepted as fields-only, buttons/canvases defaulting to `[]`.
  * @param {import('./browserdrive.mjs').BrowserClient} client
- * @returns {Promise<{fields: Array<{name:string|null, type:string, tag:string}>}>}
+ * @returns {Promise<{fields: Array<{name:string|null, type:string, tag:string}>, buttons: any[], canvases: any[]}>}
  */
 export async function introspect(client) {
-  const fields = await client.execute(INTROSPECT_JS);
-  return { fields: Array.isArray(fields) ? fields : [] };
+  const raw = await client.execute(INTROSPECT_JS);
+  if (Array.isArray(raw)) return { fields: raw, buttons: [], canvases: [] };
+  const obj = raw && typeof raw === 'object' ? raw : {};
+  return {
+    fields: Array.isArray(obj.fields) ? obj.fields : [],
+    buttons: Array.isArray(obj.buttons) ? obj.buttons : [],
+    canvases: Array.isArray(obj.canvases) ? obj.canvases : [],
+  };
+}
+
+/**
+ * Re-introspect until SOMETHING renders (a field, a button, or a canvas) or a bounded window
+ * elapses — an async-rendering editor (react-pdf/Konva) can still be painting when the harness
+ * first navigates. Bounded (never infinite): a genuinely feature-absent/empty page still returns
+ * the last (empty) snapshot after the window, an honest could-not-execute downstream, not a hang.
+ * Configurable timeout/poll so tests exercising a genuinely-empty parent-shaped world (feature-
+ * absent) stay fast; the live default is the full 20s window.
+ * @param {import('./browserdrive.mjs').BrowserClient} client
+ * @param {{timeoutMs?:number, pollMs?:number}} [opts]
+ * @returns {Promise<{fields:any[], buttons:any[], canvases:any[]}>}
+ */
+export async function introspectSettled(client, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? INTROSPECT_RETRY_MS;
+  const pollMs = opts.pollMs ?? INTROSPECT_POLL_MS;
+  const deadline = Date.now() + timeoutMs;
+  let snapshot = await introspect(client);
+  while (
+    snapshot.fields.length === 0 &&
+    snapshot.buttons.length === 0 &&
+    snapshot.canvases.length === 0 &&
+    Date.now() < deadline
+  ) {
+    await sleep(pollMs);
+    snapshot = await introspect(client);
+  }
+  return snapshot;
 }
 
 /**
@@ -474,7 +551,7 @@ export async function executeWalk(client, walk) {
         break;
       }
       case 'clickAt':
-        await client.clickAt(step.args.x, step.args.y);
+        await client.clickAt(step.args.x, step.args.y, step.args.shift !== undefined ? { shift: step.args.shift } : undefined);
         break;
       case 'pointer':
         await client.pointer(step.args.actions, step.args.pointerType);
@@ -491,14 +568,21 @@ export async function executeWalk(client, walk) {
  * elapses. A polled settle (not a bare sleep) tolerates an async persist without racing it; if
  * nothing changes the last read is returned and the caller records a real negative (executed but
  * not persisted).
+ * After the value moves off `before`, an optional recipe-declared `settle` spec
+ * ({@link import('./recipe.mjs').ObservableSpec}'s sibling on `store_tap.settle`) keeps polling
+ * until the value is UNCHANGED for `quiet_ms` (a debounced autosave — e.g. documenso's ~2s
+ * debounce — can otherwise be read mid-flight, at a transient count between the pre- and
+ * post-debounce value), bounded overall by `max_ms`. Absent `settle` is the prior behavior
+ * unchanged (return the instant the value first moves).
  * @param {(handle:any, queryName:string) => Promise<any[]>} tapStoreFn
  * @param {any} handle
  * @param {string} queryName
  * @param {{relation:'row-count'|'max-id'|'named-scalar', field?:string, column?:number}} spec
  * @param {any} before
+ * @param {{quiet_ms:number, max_ms:number}} [settle]
  * @returns {Promise<{rows:any[], value:any}>}
  */
-async function settleObservable(tapStoreFn, handle, queryName, spec, before) {
+async function settleObservable(tapStoreFn, handle, queryName, spec, before, settle) {
   const deadline = Date.now() + EXECUTION_SETTLE_MS;
   let rows = await tapStoreFn(handle, queryName);
   let value = observedValue(rows, spec);
@@ -506,6 +590,24 @@ async function settleObservable(tapStoreFn, handle, queryName, spec, before) {
     await sleep(EXECUTION_POLL_MS);
     rows = await tapStoreFn(handle, queryName);
     value = observedValue(rows, spec);
+  }
+  if (value === before || !settle) return { rows, value };
+
+  // The value moved — a recipe-declared settle spec keeps polling until it is UNCHANGED for
+  // quiet_ms (a debounced autosave), bounded overall by max_ms. Any further movement resets the
+  // quiet timer (mirrors a real autosave: a later edit pushes the settle point out).
+  const settleDeadline = Date.now() + (settle.max_ms ?? EXECUTION_SETTLE_MS);
+  let lastValue = value;
+  let stableSince = Date.now();
+  while (Date.now() < settleDeadline) {
+    if (Date.now() - stableSince >= (settle.quiet_ms ?? 0)) break;
+    await sleep(EXECUTION_POLL_MS);
+    rows = await tapStoreFn(handle, queryName);
+    value = observedValue(rows, spec);
+    if (value !== lastValue) {
+      lastValue = value;
+      stableSince = Date.now();
+    }
   }
   return { rows, value };
 }
@@ -521,22 +623,23 @@ async function settleObservable(tapStoreFn, handle, queryName, spec, before) {
  * @param {any} body
  * @param {Map<string,string>} jar
  * @param {string} [contentType]
+ * @param {{headers?:Record<string,string>, files?:import('./recipe.mjs').SetupStep['files'], recipeDir?:string}} [extra]
  * @returns {Promise<{status:number, text:string, json:any}>}
  */
-async function confirmHttpReq(fetchFn, method, url, body, jar, contentType) {
+async function confirmHttpReq(fetchFn, method, url, body, jar, contentType, extra = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
     /** @type {Record<string,string>} */
-    const headers = {};
+    const headers = { ...(extra.headers || {}) };
     const cookie = Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
     if (cookie) headers['Cookie'] = cookie;
     /** @type {RequestInit} */
     const init = { method, headers, redirect: 'manual', signal: controller.signal };
     if (body !== undefined && body !== null) {
-      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body);
+      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body, extra);
       headers['Content-Type'] = contentTypeHeader;
-      init.body = encoded;
+      init.body = /** @type {any} */ (encoded); // BodyInit narrows string|Buffer; Buffer (multipart) is genuinely valid at runtime
     }
     const res = await fetchFn(url, init);
     absorbSetCookies(res, jar);
@@ -565,15 +668,20 @@ async function confirmHttpReq(fetchFn, method, url, body, jar, contentType) {
  * harness saw move. The designated capture named `observed` (JSONPath or HTML regex, same as setup)
  * supplies the value freshBinds compares to the delta's `after`. No `confirm` steps declared, a
  * step failing, or no `observed` capture => an honest non-confirm (CND), never a fabricated one.
+ * `handle.captures` from the harness's own SETUP dance (e.g. a just-created team's numeric id,
+ * looked up via an `exec` step with no REST route of its own) are threaded in as `setupCaptures` —
+ * a confirm step's OWN captures shadow them by name; nothing here treats them as secret, they are
+ * just bootstrap-time bindings (an id/url), never a session credential.
  * @param {Object} args
  * @param {typeof fetch} args.fetchFn
  * @param {import('./recipe.mjs').Recipe} args.recipe
  * @param {string} args.recipeDir
  * @param {string} args.baseUrl
  * @param {any} args.afterValue the harness-observed post-walk observable value (the `{value}` placeholder)
+ * @param {Record<string,any>} [args.setupCaptures] captures from the SUT handle's own setup dance
  * @returns {Promise<{observed?:any, reason?:string}>}
  */
-async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }) {
+async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue, setupCaptures }) {
   const steps = recipe.confirm || [];
   if (steps.length === 0) {
     return { reason: 'no confirm[] steps declared in the recipe — the fresh-session confirm leg is skipped (effect will CND)' };
@@ -584,13 +692,25 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }
     await confirmHttpReq(fetchFn, recipe.auth_preflight.method, `${baseUrl}${recipe.auth_preflight.path}`, undefined, jar);
   }
   /** @type {Record<string,any>} */
-  const captures = {};
+  const captures = { ...(setupCaptures || {}) };
   for (const step of steps) {
+    if (step.exec) {
+      // confirm[] is a re-observation leg over HTTP (a genuinely fresh session); an out-of-band
+      // exec-capture belongs in setup (where a bootstrap value is resolved once), not here.
+      return { reason: `confirm step "${step.id}" declares exec, which is not supported in the confirm[] leg (declare it in setup instead)` };
+    }
+    const origin = step.origin ? resolvePlaceholders(step.origin, (n) => (n === 'value' ? afterValue : captures[n])) : baseUrl;
     let path;
     try {
-      path = resolvePlaceholders(step.path, (n) => (n === 'value' ? afterValue : captures[n]));
+      path = resolvePlaceholders(/** @type {string} */ (step.path), (n) => (n === 'value' ? afterValue : captures[n]));
     } catch (e) {
       return { reason: `confirm step "${step.id}" could not resolve its path: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    /** @type {Record<string,string>|undefined} */
+    let headers;
+    if (step.headers) {
+      headers = {};
+      for (const [hk, hv] of Object.entries(step.headers)) headers[hk] = resolvePlaceholders(hv, (n) => (n === 'value' ? afterValue : captures[n]));
     }
     let body;
     if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
@@ -602,7 +722,7 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }
         return { reason: `confirm step "${step.id}" could not resolve its body: ${e instanceof Error ? e.message : String(e)}` };
       }
     }
-    const res = await confirmHttpReq(fetchFn, step.method, `${baseUrl}${path}`, body, jar, step.content_type);
+    const res = await confirmHttpReq(fetchFn, /** @type {string} */ (step.method), `${origin}${path}`, body, jar, step.content_type, { headers, files: step.files, recipeDir });
     // 2xx and 3xx both mean "the app accepted the request" (mirrors conjure.mjs's setup-step
     // acceptance — a Django-style form login answers success with a 302 redirect).
     if (res.status < 200 || res.status >= 400) {
@@ -642,6 +762,8 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue }
  * @param {import('./proposer.mjs').LlmFn} [opts.llmFn] the proposer seam (default: the real Anthropic call)
  * @param {import('./proposer.mjs').Proposal} [opts.proposal] a pre-frozen proposal to replay (prove reuses the merge leg's across both legs)
  * @param {string} [opts.runDir] directory to persist the sealed receipt into (default: a fresh pb-catch- tmpdir)
+ * @param {number} [opts.introspectTimeoutMs] bounded wait for {@link introspectSettled} (default 20s; tests pass a small value to stay fast against a genuinely-empty parent-shaped world)
+ * @param {number} [opts.introspectPollMs] poll spacing for {@link introspectSettled} (default 1s)
  * @returns {Promise<CatchResult>}
  */
 export async function runCatch(opts) {
@@ -704,7 +826,7 @@ export async function runCatch(opts) {
       }
       // The HARNESS reaches the front door and reads it; the agent neither navigates nor runs the read.
       await client.navigate(handle.frontDoorUrl);
-      const introspection = await introspect(client);
+      const introspection = await introspectSettled(client, { timeoutMs: opts.introspectTimeoutMs, pollMs: opts.introspectPollMs });
       // Freeze the proposal ONCE: consult the seam only at the first reproduction; a success OR a
       // deterministic rejection is frozen, so the seam is never re-consulted this run.
       if (!proposal && !proposalFrozen) {
@@ -724,14 +846,14 @@ export async function runCatch(opts) {
         /* the confirmation text is informational only */
       }
 
-      const { rows: afterRows, value: after } = await settleObservable(tapStoreFn, handle, queryName, spec, before);
+      const { rows: afterRows, value: after } = await settleObservable(tapStoreFn, handle, queryName, spec, before, /** @type {any} */ (recipe.store_tap).settle);
       const countAfter = afterRows.length;
       const changed = after !== before;
 
       let freshObserved;
       let confirmReason;
       if (changed) {
-        const confirm = await runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl: handle.baseUrl, afterValue: after });
+        const confirm = await runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl: handle.baseUrl, afterValue: after, setupCaptures: handle.captures });
         freshObserved = confirm.observed;
         confirmReason = confirm.reason;
         if (confirmReason) diagnosis.push(`catch: ${confirmReason}`);

@@ -74,8 +74,14 @@ const SYSTEM_PROMPT = [
   '- walk: the ordered user gestures. Use ONLY find/type/click (clickAt/pointer for a canvas surface',
   '  with no DOM node). Reference elements by STABLE selectors built from name/type/tag (e.g.',
   '  input[name="..."], button[type="submit"], textarea) — never a generated #id or an absolute',
-  '  element handle. Do NOT navigate and do NOT run scripts: the harness owns navigation and every',
-  '  observation.',
+  '  element handle. The introspection also lists `buttons` (each with type/title/ariaLabel/text +',
+  '  a computed `selector` CSS path) for a button with no distinguishing name/aria-label attribute —',
+  '  match it by its `text`, then find/click ITS `selector` verbatim. It also lists `canvases` (each',
+  '  with a `selector` and its viewport x/y/width/height) for a DOM-less surface (e.g. a PDF/Konva',
+  '  editor): compute a clickAt point as the canvas rect\'s x/y PLUS an offset inside it (e.g.',
+  '  canvas.x+120, canvas.y+140), never raw page coordinates. clickAt -> {"x":n,"y":n,"shift":true?}',
+  '  (hold Shift for the click — a multi-select gesture on a canvas). Do NOT navigate and do NOT run',
+  '  scripts: the harness owns navigation and every observation.',
   '- claim: the single effect you expect to persist, bound to ONE of the disclosed observables',
   '  (entity), with expectedAfterRelation describing how that observable should move (e.g. increased).',
   '  Set quantified:true only for a universal claim (any/all/every user).',
@@ -152,7 +158,8 @@ function validateArgs(op, args, i) {
     case 'clickAt':
       requireNumber(args.x, `walk[${i}].args.x`);
       requireNumber(args.y, `walk[${i}].args.y`);
-      return { x: args.x, y: args.y };
+      if (args.shift !== undefined && typeof args.shift !== 'boolean') bad(`walk[${i}].args.shift must be a boolean when present`);
+      return { x: args.x, y: args.y, ...(args.shift !== undefined ? { shift: args.shift } : {}) };
     case 'pointer':
       if (!Array.isArray(args.actions) || args.actions.length === 0) bad(`walk[${i}].args.actions must be a non-empty array`);
       if (args.pointerType !== undefined) requireString(args.pointerType, `walk[${i}].args.pointerType`);
@@ -411,7 +418,8 @@ export function buildCliPrompt({ intent, introspection, observables }) {
     '  }',
     '}',
     'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
-      'clickAt → {"x":<number>,"y":<number>}; pointer → {"actions":[...],"pointerType":"..."}.',
+      'clickAt → {"x":<number>,"y":<number>,"shift":true? (hold Shift for a multi-select gesture)}; ' +
+      'pointer → {"actions":[...],"pointerType":"..."}.',
   ].join('\n');
 }
 

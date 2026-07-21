@@ -2,7 +2,19 @@
 # heap overlay (docker/Dockerfile.mem). Used together with the repo's own
 # docker/testing/compose.yml. build.context is inherited from the base file
 # (../../ = repo root); only the dockerfile is swapped.
+#
+# NEXT_PUBLIC_WEBAPP_URL: the base compose.yml's env_file (.env.example) does not set this, so
+# server-side code that derives the app's own origin (e.g. the signup-confirmation email's
+# verification link, `packages/lib/server-only/auth/send-confirmation-email.ts`) falls back to
+# 'http://localhost:3000' — a host-facing URL that is wrong from INSIDE the chromium sidecar
+# container the browser-drive runs in (see browserdrive.mjs's hostToContainer rewrite: only the
+# harness's own navigate() calls get rewritten, not a URL baked into an email body). Setting it to
+# host.docker.internal here keeps every app-emitted absolute URL consistent with how the sidecar
+# reaches the SUT. The compose conjure path ignores recipe conjure.env (documenso self-bootstraps
+# via its own env_file), so this env addition goes in the overlay, not recipe.json.
 services:
   documenso:
     build:
       dockerfile: docker/Dockerfile.mem
+    environment:
+      - NEXT_PUBLIC_WEBAPP_URL=http://host.docker.internal:3000

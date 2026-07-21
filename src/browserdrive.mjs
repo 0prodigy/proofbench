@@ -52,6 +52,9 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 /** The W3C element-reference key every find-element response wraps the opaque id in. */
 const W3C_ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 
+/** The W3C/Selenium "Shift" key code point, for a held-shift multi-select gesture (clickAt shift:true). */
+const SHIFT_KEY_CODE = '';
+
 /** The session capabilities — headless chrome, exactly the disclosed sandbox-safe args. */
 const SESSION_BODY = Object.freeze({
   capabilities: {
@@ -100,7 +103,7 @@ const SESSION_BODY = Object.freeze({
  * @property {(elementId:string, text:string)=>Promise<void>} type send keys to a found element
  * @property {(elementId:string)=>Promise<string>} text read an element's rendered text
  * @property {(script:string, args?:any[])=>Promise<any>} execute run JS in the page (the JS escape hatch)
- * @property {(x:number, y:number)=>Promise<void>} clickAt left-click at VIEWPORT coords — the canvas placement gesture (move→down→up)
+ * @property {(x:number, y:number, opts?:{shift?:boolean})=>Promise<void>} clickAt left-click at VIEWPORT coords — the canvas placement gesture (move→down→up); opts.shift holds Shift for the duration of the click (a multi-select gesture)
  * @property {(actions:Array<Record<string,any>>, pointerType?:string)=>Promise<void>} pointer drive a raw W3C pointer-action sequence (the coordinate/canvas escape hatch)
  * @property {(cookie:{name:string, value:string})=>Promise<void>} addCookie W3C Add Cookie into the CURRENT page's origin (navigate to the origin first) — how a setup-session cookie reaches the drive
  * @property {()=>Promise<void>} teardown DELETE the session then `docker rm -f` the sidecar (idempotent)
@@ -348,20 +351,41 @@ export async function openBrowser(opts = {}) {
         steps.push({ op: 'execute', script: head(script), value });
         return value;
       },
-      async clickAt(x, y) {
+      async clickAt(x, y, opts) {
         // The canvas placement gesture: move the real pointer to a viewport coordinate the caller
         // computed from the rendered surface (e.g. a .react-pdf__Page center), then press+release.
         // Drives the app's OWN pointer path (the field-drop mouseup listener) — no per-field DOM node.
-        await pointerSeq(
-          [
-            { type: 'pointerMove', duration: 10, origin: 'viewport', x, y },
-            { type: 'pointerDown', button: 0 },
-            { type: 'pause', duration: 60 },
-            { type: 'pointerUp', button: 0 },
-          ],
-          'mouse'
-        );
-        steps.push({ op: 'clickAt', x, y });
+        const pointerActions = [
+          { type: 'pointerMove', duration: 10, origin: 'viewport', x, y },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pause', duration: 60 },
+          { type: 'pointerUp', button: 0 },
+        ];
+        if (opts && opts.shift) {
+          // A multi-select gesture (documenso Shift+click): a SECOND 'key' input source held down
+          // across the SAME ticks as the pointer's move→down→pause→up, so the click lands with
+          // Shift genuinely down at pointerdown (the app reads event.evt.shiftKey synchronously) —
+          // never a separate keyDown/keyUp request, which would release Shift before the click.
+          await wd(fetchFn, 'POST', `${base}/actions`, {
+            actions: [
+              { type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: pointerActions },
+              {
+                type: 'key',
+                id: 'keyboard',
+                actions: [
+                  { type: 'keyDown', value: SHIFT_KEY_CODE },
+                  { type: 'pause', duration: 0 },
+                  { type: 'pause', duration: 0 },
+                  { type: 'keyUp', value: SHIFT_KEY_CODE },
+                ],
+              },
+            ],
+          });
+          steps.push({ op: 'clickAt', x, y, shift: true });
+        } else {
+          await pointerSeq(pointerActions, 'mouse');
+          steps.push({ op: 'clickAt', x, y });
+        }
       },
       async pointer(actions, pointerType = 'mouse') {
         await pointerSeq(actions, pointerType);

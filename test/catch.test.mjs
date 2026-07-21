@@ -462,7 +462,10 @@ test('runCatch DIFFERENTIAL (mock llmFn): merge=WORKS ∧ parent=CND — the SAM
     assert.equal(merge.verdict.state, Verdict.WORKS, merge.verdict.reasons.join(' | '));
     assert.ok(merge.proposal, 'the merge leg froze a proposal');
     // PARENT leg: replay the SAME frozen {walk, claim} against a feature-absent world → could-not-execute → CND.
-    const parent = await runCatch({ recipeDir: N8N_RECIPE, buildSha: 'PARENT', runDir: parentDir, proposal: merge.proposal || undefined, ...parentSeams() });
+    // introspectTimeoutMs kept tiny: this parent-shaped seam is genuinely feature-absent (empty
+    // DOM forever), not a slow-rendering canvas, so the bounded introspect retry (live default
+    // 20s) would otherwise add dead time to every test run without changing the outcome.
+    const parent = await runCatch({ recipeDir: N8N_RECIPE, buildSha: 'PARENT', runDir: parentDir, proposal: merge.proposal || undefined, introspectTimeoutMs: 10, introspectPollMs: 5, ...parentSeams() });
     assert.equal(parent.verdict.state, Verdict.COULD_NOT_DETERMINE, parent.verdict.reasons.join(' | '));
     // Apples-to-apples: the parent leg judged the EXACT frozen proposal from merge (claim from the proposal).
     assert.deepEqual(parent.proposal, merge.proposal, 'the identical {walk, claim} was replayed at the parent leg');

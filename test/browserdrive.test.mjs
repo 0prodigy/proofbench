@@ -170,6 +170,40 @@ test('browserdrive: clickAt drives a W3C Actions pointer click at viewport coord
   assert.deepEqual(client.steps[0], { op: 'clickAt', x: 210, y: 320 });
 });
 
+test('browserdrive: clickAt({shift:true}) drives a two-source W3C Actions payload (pointer + held Shift key) and records shift:true', async () => {
+  const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
+  const fetchFn = fakeFetch(happyRouter);
+  const client = await openBrowser({ docker: asAny(docker), fetchFn: asAny(fetchFn) });
+  await client.clickAt(150, 260, { shift: true });
+  const actions = fetchFn.calls.find((c) => c.path === '/session/sess-1/actions' && c.method === 'POST');
+  assert.deepEqual(actions?.body, {
+    actions: [
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 10, origin: 'viewport', x: 150, y: 260 },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pause', duration: 60 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+      {
+        type: 'key',
+        id: 'keyboard',
+        actions: [
+          { type: 'keyDown', value: '' },
+          { type: 'pause', duration: 0 },
+          { type: 'pause', duration: 0 },
+          { type: 'keyUp', value: '' },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(client.steps[0], { op: 'clickAt', x: 150, y: 260, shift: true });
+});
+
 test('browserdrive: pointer drives a raw W3C pointer-action sequence and records the walk verbatim', async () => {
   const docker = fakeDocker([{ status: 0, stdout: 'container-id' }]);
   const fetchFn = fakeFetch(happyRouter);

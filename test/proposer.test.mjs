@@ -78,6 +78,16 @@ test('validateProposal: REJECTS a wrong-shape arg (type without text; clickAt wi
   assert.throws(() => validateProposal(badCoord, { observables: OBSERVABLES }), /walk\[0\]\.args\.x must be a finite number/);
 });
 
+test('validateProposal: clickAt accepts an optional boolean shift (a multi-select gesture) and rejects a non-boolean one', () => {
+  const withShift = { walk: [{ op: 'clickAt', args: { x: 10, y: 20, shift: true } }], claim: goodRaw().claim };
+  const { walk } = validateProposal(withShift, { observables: OBSERVABLES });
+  assert.deepEqual(walk[0], { op: 'clickAt', args: { x: 10, y: 20, shift: true } });
+  const noShift = { walk: [{ op: 'clickAt', args: { x: 10, y: 20 } }], claim: goodRaw().claim };
+  assert.deepEqual(validateProposal(noShift, { observables: OBSERVABLES }).walk[0], { op: 'clickAt', args: { x: 10, y: 20 } });
+  const badShift = { walk: [{ op: 'clickAt', args: { x: 10, y: 20, shift: 'yes' } }], claim: goodRaw().claim };
+  assert.throws(() => validateProposal(badShift, { observables: OBSERVABLES }), /walk\[0\]\.args\.shift must be a boolean/);
+});
+
 test('validateProposal: REJECTS an out-of-menu entity (FW-P1-C) and a bad relation op', () => {
   const outOfMenu = { walk: goodRaw().walk, claim: { entity: 'order.total', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
   assert.throws(() => validateProposal(outOfMenu, { observables: OBSERVABLES }), /entity must be one of the harness-enumerated observables|FW-P1-C/);

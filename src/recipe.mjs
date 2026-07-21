@@ -85,16 +85,45 @@ import { join } from 'node:path';
 /**
  * @typedef {Object} SetupStep
  * @property {string} id
- * @property {string} method HTTP method
- * @property {string} path request path (may reference a prior capture, e.g. `/x/{workflow_id}`)
+ * @property {string} [method] HTTP method — required unless `exec` is set
+ * @property {string} [path] request path (may reference a prior capture, e.g. `/x/{workflow_id}`) — required unless `exec` is set
  * @property {any} [body] inline JSON body (mutually exclusive with body_file)
  * @property {string} [body_file] path (relative to recipeDir) to a JSON body file
- * @property {'json'|'form'} [content_type] how `body` is encoded on the wire; defaults to 'json'.
- *   'form' sends `application/x-www-form-urlencoded` (URLSearchParams over the body object) —
- *   the shape a Django-style HTML form login expects.
+ * @property {'json'|'form'|'multipart'} [content_type] how `body` is encoded on the wire; defaults
+ *   to 'json'. 'form' sends `application/x-www-form-urlencoded` (URLSearchParams over the body
+ *   object) — the shape a Django-style HTML form login expects. 'multipart' sends
+ *   `multipart/form-data` (body's top-level fields as form fields + `files`, see below) — the
+ *   shape a file-upload create endpoint expects (e.g. documenso's `POST /envelope/create`).
+ * @property {Record<string,string>} [headers] extra request headers, placeholder-resolved
+ *   the same way `path`/`body` are (e.g. `{"x-team-id":"{team_id}"}`)
+ * @property {string} [origin] an absolute `http(s)://host:port` override for this ONE step,
+ *   placeholder-resolved; absent defaults to the SUT's own `baseUrl` (a cross-service capture,
+ *   e.g. an inbucket mailbox at a different published port on the same host)
+ * @property {{field:string, path:string, content_type?:string}[]} [files] file parts to attach
+ *   when `content_type` is 'multipart' — `path` is relative to recipeDir (a recipe-local asset,
+ *   e.g. a blank PDF); `content_type` defaults to `application/octet-stream`
  * @property {Record<string,string|HtmlCapture>} [capture] name -> a JSONPath string read from the
  *   JSON response (default, unchanged), or an {@link HtmlCapture} regex read from the response HTML
- *   (e.g. Django's csrfmiddlewaretoken hidden input)
+ *   (e.g. Django's csrfmiddlewaretoken hidden input, or a token embedded in an inbucket-captured
+ *   email body)
+ * @property {ExecCapture} [exec] an out-of-band SETUP-TIME store read (mutually exclusive with
+ *   method/path/body/content_type/headers/origin/files) — the disclosed fallback for a bootstrap
+ *   value with NO REST route (e.g. a just-created team's id/url); NEVER the store_tap
+ *   ground-truth read the verdict binds to. When present, `capture` (if any) maps a name to a
+ *   zero-based COLUMN INDEX into the first returned row (not a JSONPath).
+ */
+
+/**
+ * A setup-time, out-of-band store read used ONLY to resolve a bootstrap value with no REST route
+ * (§6 fallback) — e.g. looking up a just-created team's numeric id/url slug. This is a disclosed
+ * convenience for SETUP, never the store_tap ground-truth read the verdict binds to (that stays
+ * `store_tap`, unconditionally). `query` is placeholder-resolved like a REST step's `path`.
+ * @typedef {Object} ExecCapture
+ * @property {'postgres'} engine
+ * @property {string} container the DB container to `docker exec` into
+ * @property {string} user postgres role
+ * @property {string} db database name
+ * @property {string} query a single read-only SQL statement (placeholder-resolved)
  */
 
 /**
@@ -155,6 +184,16 @@ import { join } from 'node:path';
  * @property {Record<string,ObservableSpec>} [observables] per-query engine-shaped relation (§6); absent per-query defaults to named-scalar over column 0
  * @property {number} [busy_timeout_ms] optional and unused for postgres — MVCC readers never block on writers
  * @property {boolean} [transient_lock_is_expected]
+ * @property {SettleSpec} [settle] after the observable first moves, keep polling until it is
+ *   UNCHANGED for `quiet_ms` (bounded by `max_ms`) before reading `after` — a debounced autosave
+ *   (e.g. documenso's ~2s field-persist debounce) can otherwise be read mid-flight. Absent = read
+ *   the instant the value first moves (unchanged prior behavior).
+ */
+
+/**
+ * @typedef {Object} SettleSpec
+ * @property {number} quiet_ms how long the observable must stop changing before it is read
+ * @property {number} max_ms the overall bound on the settle wait (never polls forever)
  */
 
 /**
@@ -252,6 +291,30 @@ function validateSteps(steps, field, recipeDir) {
   steps.forEach((/** @type {any} */ step, /** @type {number} */ i) => {
     if (!isObject(step)) bad(`${field}[${i}]`, 'must be an object');
     if (typeof step.id !== 'string' || !step.id) bad(`${field}[${i}].id`, 'must be a non-empty string');
+
+    if (step.exec !== undefined) {
+      // An out-of-band SETUP-TIME store read (§6 fallback) — mutually exclusive with every
+      // REST-step field; never the store_tap ground-truth read the verdict binds to.
+      for (const f of ['method', 'path', 'body', 'body_file', 'content_type', 'headers', 'origin', 'files']) {
+        if (step[f] !== undefined) bad(`${field}[${i}]`, `must not combine exec with ${f}`);
+      }
+      const ex = step.exec;
+      if (!isObject(ex)) bad(`${field}[${i}].exec`, 'must be an object');
+      if (ex.engine !== 'postgres') bad(`${field}[${i}].exec.engine`, `must be 'postgres' (got ${JSON.stringify(ex.engine)})`);
+      for (const f of ['container', 'user', 'db', 'query']) {
+        if (typeof ex[f] !== 'string' || !ex[f]) bad(`${field}[${i}].exec.${f}`, 'must be a non-empty string');
+      }
+      if (step.capture !== undefined) {
+        if (!isObject(step.capture)) bad(`${field}[${i}].capture`, 'must be an object of name -> zero-based column index when exec is present');
+        for (const [name, col] of Object.entries(step.capture)) {
+          if (typeof col !== 'number' || !Number.isInteger(col) || col < 0) {
+            bad(`${field}[${i}].capture.${name}`, 'must be a non-negative integer column index when exec is present');
+          }
+        }
+      }
+      return; // exec steps skip the REST-step validation below entirely
+    }
+
     if (typeof step.method !== 'string' || !step.method) bad(`${field}[${i}].method`, 'must be a non-empty string');
     if (typeof step.path !== 'string' || !step.path) bad(`${field}[${i}].path`, 'must be a non-empty string');
     if (step.body !== undefined && step.body_file !== undefined) bad(`${field}[${i}]`, 'must not set both body and body_file');
@@ -259,8 +322,30 @@ function validateSteps(steps, field, recipeDir) {
       if (typeof step.body_file !== 'string' || !step.body_file) bad(`${field}[${i}].body_file`, 'must be a non-empty string');
       if (!existsSync(join(recipeDir, step.body_file))) bad(`${field}[${i}].body_file`, `references a missing file: ${step.body_file}`);
     }
-    if (step.content_type !== undefined && step.content_type !== 'json' && step.content_type !== 'form') {
-      bad(`${field}[${i}].content_type`, `must be 'json' or 'form' when present (got ${JSON.stringify(step.content_type)})`);
+    if (step.content_type !== undefined && !['json', 'form', 'multipart'].includes(step.content_type)) {
+      bad(`${field}[${i}].content_type`, `must be 'json', 'form', or 'multipart' when present (got ${JSON.stringify(step.content_type)})`);
+    }
+    if (step.headers !== undefined) {
+      if (!isObject(step.headers)) bad(`${field}[${i}].headers`, 'must be an object of header name -> string value when present');
+      for (const [hk, hv] of Object.entries(step.headers)) {
+        if (typeof hv !== 'string') bad(`${field}[${i}].headers.${hk}`, 'must be a string value');
+      }
+    }
+    if (step.origin !== undefined && (typeof step.origin !== 'string' || !/^https?:\/\//i.test(step.origin))) {
+      bad(`${field}[${i}].origin`, 'must be an absolute http(s) origin string when present');
+    }
+    if (step.files !== undefined) {
+      if (step.content_type !== 'multipart') bad(`${field}[${i}].content_type`, "must be 'multipart' when files is present");
+      if (!Array.isArray(step.files) || step.files.length === 0) bad(`${field}[${i}].files`, 'must be a non-empty array of {field,path[,content_type]} when present');
+      step.files.forEach((/** @type {any} */ f, /** @type {number} */ fi) => {
+        if (!isObject(f)) bad(`${field}[${i}].files[${fi}]`, 'must be an object');
+        if (typeof f.field !== 'string' || !f.field) bad(`${field}[${i}].files[${fi}].field`, 'must be a non-empty string');
+        if (typeof f.path !== 'string' || !f.path) bad(`${field}[${i}].files[${fi}].path`, 'must be a non-empty string');
+        if (!existsSync(join(recipeDir, f.path))) bad(`${field}[${i}].files[${fi}].path`, `references a missing file: ${f.path}`);
+        if (f.content_type !== undefined && (typeof f.content_type !== 'string' || !f.content_type)) {
+          bad(`${field}[${i}].files[${fi}].content_type`, 'must be a non-empty string when present');
+        }
+      });
     }
     if (step.capture !== undefined) {
       if (!isObject(step.capture)) bad(`${field}[${i}].capture`, 'must be an object of name -> JSONPath string (default) or {from:"html",pattern}');
@@ -425,6 +510,11 @@ export function loadRecipe(recipeDir) {
   if (!isObject(st)) bad('store_tap', 'must be an object');
   if (!isObject(st.queries) || Object.keys(st.queries).length === 0) bad('store_tap.queries', 'must be a non-empty object of named queries');
   if (st.transient_lock_is_expected !== undefined && typeof st.transient_lock_is_expected !== 'boolean') bad('store_tap.transient_lock_is_expected', 'must be a boolean');
+  if (st.settle !== undefined) {
+    if (!isObject(st.settle)) bad('store_tap.settle', 'must be an object when present');
+    if (typeof st.settle.quiet_ms !== 'number') bad('store_tap.settle.quiet_ms', 'must be a number');
+    if (typeof st.settle.max_ms !== 'number') bad('store_tap.settle.max_ms', 'must be a number');
+  }
   if (st.engine === 'sqlite') {
     if (typeof st.db_path !== 'string' || !st.db_path) bad('store_tap.db_path', "is required for engine 'sqlite'");
     if (typeof st.busy_timeout_ms !== 'number') bad('store_tap.busy_timeout_ms', "is required (a number) for engine 'sqlite' (the rollback-journal busy-timeout)");

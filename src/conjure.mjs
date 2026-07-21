@@ -23,8 +23,9 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { registerReap, deregisterReap } from './reaper.mjs';
@@ -400,14 +401,43 @@ export function absorbSetCookies(res, jar) {
 /**
  * Encode a setup-step body per content_type: 'json' (default, byte-identical to before) sends
  * `application/json` + JSON.stringify; 'form' sends `application/x-www-form-urlencoded` via
- * URLSearchParams over the body object (the shape a Django-style HTML form login expects).
- * @param {string|undefined} contentType 'json' (default) | 'form'
+ * URLSearchParams over the body object (the shape a Django-style HTML form login expects);
+ * 'multipart' sends `multipart/form-data` — a hand-rolled boundary encoder (zero deps): each of
+ * `body`'s top-level fields becomes a form field (non-string values JSON.stringify'd, e.g.
+ * documenso's `payload` field), followed by one part per `opts.files` entry (the recipe-local
+ * asset read off disk, e.g. a blank PDF). Returns a Buffer for 'multipart' (binary-safe); a
+ * string for 'json'/'form' (unchanged).
+ * @param {string|undefined} contentType 'json' (default) | 'form' | 'multipart'
  * @param {any} body
- * @returns {{contentTypeHeader:string, encoded:string}}
+ * @param {{files?:import('./recipe.mjs').SetupStep['files'], recipeDir?:string}} [opts] required for 'multipart' when files are attached
+ * @returns {{contentTypeHeader:string, encoded:string|Buffer}}
  */
-export function encodeSetupBody(contentType, body) {
+export function encodeSetupBody(contentType, body, opts = {}) {
   if (contentType === 'form') {
     return { contentTypeHeader: 'application/x-www-form-urlencoded', encoded: new URLSearchParams(body).toString() };
+  }
+  if (contentType === 'multipart') {
+    const boundary = `pbBoundary${randomUUID().replace(/-/g, '')}`;
+    /** @type {Buffer[]} */
+    const parts = [];
+    for (const [name, v] of Object.entries(body || {})) {
+      const value = typeof v === 'string' ? v : JSON.stringify(v);
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`, 'utf8'));
+    }
+    for (const f of opts.files || []) {
+      const data = readFileSync(opts.recipeDir ? join(opts.recipeDir, f.path) : f.path);
+      const ct = f.content_type || 'application/octet-stream';
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${basename(f.path)}"\r\nContent-Type: ${ct}\r\n\r\n`,
+          'utf8'
+        )
+      );
+      parts.push(data);
+      parts.push(Buffer.from('\r\n', 'utf8'));
+    }
+    parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
+    return { contentTypeHeader: `multipart/form-data; boundary=${boundary}`, encoded: Buffer.concat(parts) };
   }
   return { contentTypeHeader: 'application/json', encoded: JSON.stringify(body) };
 }
@@ -419,23 +449,24 @@ export function encodeSetupBody(contentType, body) {
  * @param {string} url
  * @param {any} body inline body, or undefined for none
  * @param {Map<string,string>} jar
- * @param {string} [contentType] 'json' (default) | 'form' — how `body` is encoded on the wire
+ * @param {string} [contentType] 'json' (default) | 'form' | 'multipart' — how `body` is encoded on the wire
+ * @param {{headers?:Record<string,string>, files?:import('./recipe.mjs').SetupStep['files'], recipeDir?:string}} [extra] extra request headers (already placeholder-resolved) + the multipart file parts
  * @returns {Promise<{status:number, text:string, json:any}>}
  */
-async function httpReq(method, url, body, jar, contentType) {
+async function httpReq(method, url, body, jar, contentType, extra = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
     /** @type {Record<string,string>} */
-    const headers = {};
+    const headers = { ...(extra.headers || {}) };
     const cookie = cookieHeader(jar);
     if (cookie) headers['Cookie'] = cookie;
     /** @type {RequestInit} */
     const init = { method, headers, signal: controller.signal, redirect: 'manual' };
     if (body !== undefined && body !== null) {
-      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body);
+      const { contentTypeHeader, encoded } = encodeSetupBody(contentType, body, extra);
       headers['Content-Type'] = contentTypeHeader;
-      init.body = encoded;
+      init.body = /** @type {any} */ (encoded); // BodyInit narrows string|Buffer; Buffer (multipart) is genuinely valid at runtime
     }
     const res = await fetch(url, init);
     absorbSetCookies(res, jar);
@@ -695,13 +726,33 @@ export async function conjure(recipeDir, opts = {}) {
     /** @type {Record<string,any>} */ const captures = {};
     /** @type {Record<string,any>} */ const bodyDerived = {};
     for (const step of recipe.setup) {
-      const path = resolvePlaceholders(step.path, (n) => captures[n]);
+      if (step.exec) {
+        // An out-of-band SETUP-TIME store read (§6 fallback for a bootstrap value with no REST
+        // route, e.g. a just-created team's id/url) — never the store_tap ground-truth read.
+        const query = resolvePlaceholders(step.exec.query, (n) => captures[n]);
+        const execRes = docker.run(['exec', step.exec.container, 'psql', '-U', step.exec.user, '-d', step.exec.db, '-At', '-F', '\t', '-c', query], DOCKER_TIMEOUT_MS);
+        if (execRes.status !== 0) throw new Error(`conjure: setup step "${step.id}" (exec) failed (exit ${execRes.status}): ${tail(execRes.stderr || execRes.stdout)}`);
+        const firstRow = (execRes.stdout || '').split('\n')[0] || '';
+        const cols = firstRow.split('\t');
+        if (step.capture) {
+          for (const [name, col] of Object.entries(step.capture)) captures[name] = cols[/** @type {any} */ (col)];
+        }
+        continue;
+      }
+      const origin = step.origin ? resolvePlaceholders(step.origin, (n) => captures[n]) : baseUrl;
+      const path = resolvePlaceholders(/** @type {string} */ (step.path), (n) => captures[n]);
+      /** @type {Record<string,string>|undefined} */
+      let headers;
+      if (step.headers) {
+        headers = {};
+        for (const [hk, hv] of Object.entries(step.headers)) headers[hk] = resolvePlaceholders(hv, (n) => captures[n]);
+      }
       let body;
       if (step.body_file !== undefined) body = JSON.parse(readFileSync(join(recipeDir, step.body_file), 'utf8'));
       else if (step.body !== undefined) body = step.body;
       if (body !== undefined) body = resolveBodyPlaceholders(body, (n) => captures[n]);
       if (body !== undefined) collectScalars(body, bodyDerived);
-      const res = await httpReq(step.method, `${baseUrl}${path}`, body, jar, step.content_type);
+      const res = await httpReq(/** @type {string} */ (step.method), `${origin}${path}`, body, jar, step.content_type, { headers, files: step.files, recipeDir });
       // 2xx and 3xx both mean "the app accepted the request" (redirect: manual, so a 3xx here is
       // an unfollowed redirect, not a client error) — a Django-style form login answers a SUCCESSFUL
       // POST with 302 to LOGIN_REDIRECT_URL and only re-renders 200-with-errors on failure; treating

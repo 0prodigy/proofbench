@@ -115,6 +115,41 @@ test('recipe: the documenso Envelope Fields recipe validates (compose mode + pos
   assert.deepEqual(r.setup, []);
 });
 
+test('recipe: a setup step may combine headers/origin/multipart+files, an exec-capture step validates its own shape, and store_tap.settle loads', () => {
+  {
+    const o = /** @type {any} */ (validRecipe());
+    o.store_tap = { engine: 'postgres', container: 'c', user: 'u', db: 'd', queries: { q: 'SELECT 1;' }, settle: { quiet_ms: 2000, max_ms: 15000 } };
+    o.setup = [
+      { id: 'lookup-team', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd', query: "SELECT id, url FROM \"Team\" WHERE 1=1;" }, capture: { team_id: 0, team_url: 1 } },
+      {
+        id: 'create-envelope',
+        method: 'POST',
+        path: '/api/v2/envelope/create',
+        content_type: 'multipart',
+        headers: { 'x-team-id': '{team_id}' },
+        origin: 'http://localhost:3000',
+        body: { payload: '{"title":"x"}' },
+        files: [{ field: 'files', path: 'blank.pdf', content_type: 'application/pdf' }],
+        capture: { envelope_id: '$.id' },
+      },
+    ];
+    const rdir = writeRecipeDir(o);
+    // writeRecipeDir made ITS OWN tmpdir; blank.pdf must live there, not in `dir`.
+    writeFileSync(join(rdir, 'blank.pdf'), '%PDF-1.4 fake');
+    try {
+      const r = loadRecipe(rdir);
+      assert.equal(r.setup[0].exec?.engine, 'postgres');
+      assert.deepEqual(r.setup[0].capture, { team_id: 0, team_url: 1 });
+      assert.equal(r.setup[1].headers?.['x-team-id'], '{team_id}');
+      assert.equal(r.setup[1].origin, 'http://localhost:3000');
+      assert.equal(r.setup[1].files?.[0].field, 'files');
+      assert.equal(/** @type {any} */ (r.store_tap).settle.quiet_ms, 2000);
+    } finally {
+      rmSync(rdir, { recursive: true, force: true });
+    }
+  }
+});
+
 test('recipe: absent setup and absent drive default honestly (empty setup, deferred drive)', () => {
   const o = /** @type {any} */ (validRecipe());
   delete o.setup; // a SUT that self-bootstraps needs no REST dance
@@ -290,6 +325,15 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'observables bogus relation', mutate: (o) => (o.store_tap.observables = { q: { relation: 'sum' } }), match: /store_tap\.observables\.q\.relation/ },
     { label: 'observables non-number column', mutate: (o) => (o.store_tap.observables = { q: { column: 'zero' } }), match: /store_tap\.observables\.q\.column/ },
     { label: 'bogus drive.mode', mutate: (o) => (o.drive = { mode: 'telepathy' }), match: /drive\.mode/ },
+    { label: 'setup step bogus header value', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', headers: { 'x-team-id': 7 } }]), match: /headers\.x-team-id/ },
+    { label: 'setup step bogus origin', mutate: (o) => (o.setup = [{ id: 's', method: 'GET', path: '/x', origin: 'not-a-url' }]), match: /origin/ },
+    { label: 'setup step files without multipart content_type', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', files: [{ field: 'files', path: 'blank.pdf' }] }]), match: /content_type.*multipart/ },
+    { label: 'setup step files entry missing on disk', mutate: (o) => (o.setup = [{ id: 's', method: 'POST', path: '/x', content_type: 'multipart', files: [{ field: 'files', path: 'nope.pdf' }] }]), match: /missing file/ },
+    { label: 'exec step combined with method', mutate: (o) => (o.setup = [{ id: 's', method: 'GET', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd', query: 'SELECT 1;' } }]), match: /must not combine exec with method/ },
+    { label: 'exec step bogus engine', mutate: (o) => (o.setup = [{ id: 's', exec: { engine: 'mysql', container: 'c', user: 'u', db: 'd', query: 'SELECT 1;' } }]), match: /exec\.engine/ },
+    { label: 'exec step missing query', mutate: (o) => (o.setup = [{ id: 's', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd' } }]), match: /exec\.query/ },
+    { label: 'exec step capture non-integer column', mutate: (o) => (o.setup = [{ id: 's', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd', query: 'SELECT 1;' }, capture: { x: 'zero' } }]), match: /non-negative integer column/ },
+    { label: 'store_tap.settle missing max_ms', mutate: (o) => (o.store_tap.settle = { quiet_ms: 100 }), match: /store_tap\.settle\.max_ms/ },
   ];
   for (const { label, mutate, match } of cases) {
     const o = validRecipe();
