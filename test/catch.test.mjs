@@ -421,6 +421,41 @@ test('runCatch: an "equals" claim whose value never matches the persisted value 
   }
 });
 
+test('runCatch: a setup-dance capture happening to be named "observed" cannot bypass the confirm leg (false-WORKS regression)', async () => {
+  // Root-cause regression: runConfirmLeg used to seed its captures map with setupCaptures BEFORE
+  // running any confirm[] steps, and its only gate was `'observed' in captures`. A confirm[] that
+  // never itself re-captures `observed` (e.g. login-only) would still pass that gate if the SUT
+  // handle's own setup dance happened to capture something named `observed` — a stale, pre-walk
+  // value satisfying what must be a FRESH re-observation. Build exactly that shape: confirm[] with
+  // only a login step (no capture), and a conjureFn whose handle.captures carries `observed` equal
+  // to the post-walk store value — the fabricated confirm a real setup-capture name collision would
+  // produce. This must NOT reach WORKS.
+  const recipeDir = mkdtempSync(join(tmpdir(), 'pb-catch-recipe-'));
+  try {
+    for (const f of ['owner.json', 'workflow.json']) {
+      writeFileSync(join(recipeDir, f), readFileSync(join(N8N_RECIPE, f)));
+    }
+    const recipeJson = JSON.parse(readFileSync(join(N8N_RECIPE, 'recipe.json'), 'utf8'));
+    recipeJson.confirm = [{ id: 'login', method: 'POST', path: '/rest/login', body_file: 'owner.json' }]; // no capture at all
+    writeFileSync(join(recipeDir, 'recipe.json'), JSON.stringify(recipeJson));
+
+    const runDir = mkdtempSync(join(tmpdir(), 'pb-catch-test-'));
+    try {
+      const seams = catchSeams();
+      const baseConjureFn = seams.conjureFn;
+      // Seed the setup-dance captures with a value named `observed` equal to whatever the store will
+      // settle at (1, after the mocked single click) — the fabricated pre-walk "confirm".
+      seams.conjureFn = asAny(async (/** @type {any} */ dir, /** @type {any} */ o) => ({ ...(await baseConjureFn(dir, o)), captures: { observed: 1 } }));
+      const result = await runCatch({ recipeDir, runDir, ...seams });
+      assert.notEqual(result.verdict.state, Verdict.WORKS, 'a seeded setup capture named "observed" must never substitute for a real confirm-step re-observation');
+    } finally {
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(recipeDir, { recursive: true, force: true });
+  }
+});
+
 /**
  * PARENT-leg seams: a feature-absent world — the front door serves no fillable field and the frozen
  * merge selector matches nothing (find throws), so the replayed walk cannot execute. Nothing persists.

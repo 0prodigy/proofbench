@@ -671,7 +671,9 @@ async function confirmHttpReq(fetchFn, method, url, body, jar, contentType, extr
  * `handle.captures` from the harness's own SETUP dance (e.g. a just-created team's numeric id,
  * looked up via an `exec` step with no REST route of its own) are threaded in as `setupCaptures` —
  * a confirm step's OWN captures shadow them by name; nothing here treats them as secret, they are
- * just bootstrap-time bindings (an id/url), never a session credential.
+ * bootstrap-time bindings (an id/url), never a session credential. EXCEPT `observed` itself: it is
+ * never inherited from `setupCaptures` (a pre-walk value can never satisfy a FRESH re-observation),
+ * so it can only ever come from a confirm step's own `capture` in this run.
  * @param {Object} args
  * @param {typeof fetch} args.fetchFn
  * @param {import('./recipe.mjs').Recipe} args.recipe
@@ -693,6 +695,11 @@ async function runConfirmLeg({ fetchFn, recipe, recipeDir, baseUrl, afterValue, 
   }
   /** @type {Record<string,any>} */
   const captures = { ...(setupCaptures || {}) };
+  // `observed` MUST come from a confirm step's OWN capture — a fresh re-observation is the whole
+  // point of this leg. A setup-dance capture that happens to be named `observed` (a pre-walk value,
+  // never a re-read) must never seed the fresh-confirm gate below; drop any inherited one so a
+  // confirm[] that never re-captures `observed` honestly falls through to the "nothing to bind" CND.
+  delete captures.observed;
   for (const step of steps) {
     if (step.exec) {
       // confirm[] is a re-observation leg over HTTP (a genuinely fresh session); an out-of-band
