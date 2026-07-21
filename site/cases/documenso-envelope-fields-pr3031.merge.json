@@ -1,0 +1,408 @@
+{
+  "intent": "An author on the Add Fields step (click the tab whose data-testid is envelope-editor-step-addFields if it is not already showing) places three fields on the PDF canvas AT THREE CLEARLY SEPARATED POSITIONS (e.g. top-left, center, bottom-right of the canvas — close/overlapping placements land the next click on the already-placed field's own shape instead of empty canvas), selects the first with a plain click, adds the second to the selection with a Shift+click, then MUST ACTUALLY CLICK the floating toolbar's Remove button (the button whose title attribute is 'Remove' — find it, then click it, not just find it) to remove the selected pair; exactly one field row remains persisted for the envelope afterward.",
+  "actorIdentity": "pb-operator",
+  "claims": [
+    {
+      "id": "form-submit-persists-execution",
+      "kind": "effect",
+      "scope": "envelope's persisted field rows after placing 3 fields and removing a shift-selected pair",
+      "effectCheck": {
+        "entity": "Field.rows",
+        "expectedAfterRelation": {
+          "op": "equals",
+          "value": 1
+        },
+        "deltaReceiptId": "store-delta",
+        "confirmLegReceiptId": "fresh-execution"
+      },
+      "receiptIds": [
+        "store-delta",
+        "browser-drive",
+        "fresh-execution"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "id": "fingerprint",
+      "kind": "fingerprint",
+      "provenance": "harness",
+      "data": {
+        "mode": "from_tree",
+        "sha": "97835b8dbb2ca24670c8a410972d949c982c8f61",
+        "image_digest": "sha256:5e547a657963d6ebb4bf75ce4623d458b06907945a7601469ba79bb9c88107a0",
+        "version_label": "2.14.0",
+        "image_ref_or_tag": "documenso-test-documenso",
+        "container": "documenso-test-documenso-1"
+      },
+      "sha256": "cc20b7bb2ad95a55289b8632c0f32aaa13b8f19a38bcb2d30e05bc45013cede8"
+    },
+    {
+      "id": "store-delta",
+      "kind": "delta",
+      "provenance": "harness",
+      "identity": "form-visitor",
+      "sourcePR": false,
+      "data": {
+        "entity": "Field.rows",
+        "before": 0,
+        "after": 1,
+        "countBefore": 0,
+        "countAfter": 1
+      },
+      "sha256": "f2cad545230b7092b3591776d27d004f6719f072908904f2b24600867945b6f4"
+    },
+    {
+      "id": "browser-drive",
+      "kind": "attempt",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "request": "browser-drive http://localhost:3010/t/personal_khosyfltedaxbttf/documents/envelope_uynydeivmawetamy/edit?step=addFields",
+        "frontDoorUrl": "http://localhost:3010/t/personal_khosyfltedaxbttf/documents/envelope_uynydeivmawetamy/edit?step=addFields",
+        "steps": [
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:3010"
+          },
+          {
+            "op": "addCookie",
+            "name": "sessionId"
+          },
+          {
+            "op": "navigate",
+            "url": "http://host.docker.internal:3010/t/personal_khosyfltedaxbttf/documents/envelope_uynydeivmawetamy/edit?step=addFields"
+          },
+          {
+            "op": "execute",
+            "script": "\n  function pbSelectorHint(el) {\n    if (el.id) return '#' + el.id;\n    var path = [];\n    var cur = el;\n    while (cur && cur.nodeType === 1 && cur !== documen…",
+            "value": {
+              "buttons": [],
+              "canvases": [],
+              "fields": [],
+              "viewport": {
+                "height": 1061,
+                "width": 1600
+              }
+            }
+          },
+          {
+            "op": "execute",
+            "script": "\n  function pbSelectorHint(el) {\n    if (el.id) return '#' + el.id;\n    var path = [];\n    var cur = el;\n    while (cur && cur.nodeType === 1 && cur !== documen…",
+            "value": {
+              "buttons": [
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(1)",
+                  "text": "Attachments",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(2)",
+                  "text": "",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(3)",
+                  "text": "Send Document",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(1)",
+                  "text": "Document & RecipientsUpload documents and add recipients",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(2)",
+                  "text": "Add FieldsPlace and configure form fields in the document",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(3)",
+                  "text": "PreviewPreview the document before sending",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(1)",
+                  "text": "Document Settings",
+                  "title": "Settings",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(2)",
+                  "text": "Send Document",
+                  "title": "Send Envelope",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(3)",
+                  "text": "Duplicate Document",
+                  "title": "Duplicate Envelope",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(4)",
+                  "text": "Save as Template",
+                  "title": "Save as Template",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(5)",
+                  "text": "Download PDF",
+                  "title": "Download PDF",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(6)",
+                  "text": "Delete Document",
+                  "title": "Delete Envelope",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1)",
+                  "text": "1blank.pdf0 Fields",
+                  "title": "blank.pdf",
+                  "type": ""
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(1) > button:nth-of-type(1)",
+                  "text": "PB Catch (catch-shiftclick@documenso.com)",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(1)",
+                  "text": "Signature",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(2)",
+                  "text": "Email",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(3)",
+                  "text": "Name",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(4)",
+                  "text": "Initials",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(5)",
+                  "text": "Date",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(6)",
+                  "text": "Text",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(7)",
+                  "text": "Number",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(8)",
+                  "text": "Radio",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(9)",
+                  "text": "Checkbox",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(10)",
+                  "text": "Dropdown",
+                  "title": "",
+                  "type": "button"
+                },
+                {
+                  "ariaLabel": "",
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > button:nth-of-type(1)",
+                  "text": "Detect with AI",
+                  "title": "",
+                  "type": "button"
+                }
+              ],
+              "canvases": [
+                {
+                  "height": 1130.1875,
+                  "selector": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > canvas:nth-of-type(1)",
+                  "width": 800,
+                  "x": 393.5,
+                  "y": 172
+                }
+              ],
+              "fields": [
+                {
+                  "name": null,
+                  "tag": "input",
+                  "type": "text"
+                }
+              ],
+              "viewport": {
+                "height": 1061,
+                "width": 1600
+              }
+            }
+          },
+          {
+            "op": "find",
+            "css": "[data-testid=\"envelope-editor-step-addFields\"]",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.31"
+          },
+          {
+            "op": "find",
+            "css": "[data-testid=\"envelope-editor-step-addFields\"]",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.31"
+          },
+          {
+            "op": "click",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.31"
+          },
+          {
+            "op": "find",
+            "css": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(6)",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "click",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "clickAt",
+            "x": 474,
+            "y": 252
+          },
+          {
+            "op": "find",
+            "css": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(6)",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "click",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "clickAt",
+            "x": 794,
+            "y": 572
+          },
+          {
+            "op": "find",
+            "css": "main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(6)",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "click",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.33"
+          },
+          {
+            "op": "clickAt",
+            "x": 1094,
+            "y": 922
+          },
+          {
+            "op": "clickAt",
+            "x": 474,
+            "y": 252
+          },
+          {
+            "op": "clickAt",
+            "x": 794,
+            "y": 572,
+            "shift": true
+          },
+          {
+            "op": "find",
+            "css": "button[title=\"Remove\"]",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.110"
+          },
+          {
+            "op": "find",
+            "css": "button[title=\"Remove\"]",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.110"
+          },
+          {
+            "op": "click",
+            "elementId": "f.93EC81D2D0E5FA56949759E2E3974B3F.d.E12E76440C447A6D00D62467B78F1315.e.110"
+          },
+          {
+            "op": "execute",
+            "script": "return document.body ? document.body.innerText : \"\"",
+            "value": "PB Shift-Click Catch\nDraft\nAttachments\nSend Document\nDocument Editor\nStep 2/3\nDocument & Recipients\nUpload documents and add recipients\nAdd Fields\nPlace and configure form fields in the document\nPreview\nPreview the document before sending\nQuick Actions\nDocument Settings\nSend Document\nDuplicate Document\nSave as Template\nDownload PDF\nDelete Document\nReturn to documents\n1\nblank.pdf\n1 Field\n\nPage 1 of 1\n\nSelected Recipient\nPB Catch (catch-shiftclick@documenso.com)\nAdd Fields\n\nSignature\n\nEmail\n\nName\n\nInitials\n\nDate\n\nText\n\nNumber\n\nRadio\n\nCheckbox\n\nDropdown\n\nDetect with AI"
+          }
+        ],
+        "observed": "PB Shift-Click Catch\nDraft\nAttachments\nSend Document\nDocument Editor\nStep 2/3\nDocument & Recipients\nUpload documents and add recipients\nAdd Fields\nPlace and configure form fields in the document\nPreview\nPreview the document before sending\nQuick Actions\nDocument Settings\nSend Document\nDuplicate Document\nSave as Template\nDownload PDF\nDelete Document\nReturn to documents\n1\nblank.pdf\n1 Field\n\nPage 1 of 1\n\nSelected Recipient\nPB Catch (catch-shiftclick@documenso.com)\nAdd Fields\n\nSignature\n\nEmail\n\nName\n\nInitials\n\nDate\n\nText\n\nNumber\n\nRadio\n\nCheckbox\n\nDropdown\n\nDetect with AI",
+        "after": 1
+      },
+      "sha256": "ccc31716548420f9581a57907c77b3174080c0b4f5a07e725272b63a2f793251"
+    },
+    {
+      "id": "fresh-execution",
+      "kind": "fresh-session",
+      "provenance": "tool",
+      "identity": "form-visitor",
+      "data": {
+        "entity": "Field.rows",
+        "after": 1,
+        "observed": 1
+      },
+      "sha256": "d3e40b783a89018c752e9ff8833ef115edf269af476f54881594a09752660f76"
+    }
+  ],
+  "reproduce": {
+    "k": 2,
+    "n": 2,
+    "kFail": 0
+  },
+  "seal": {
+    "algorithm": "ed25519",
+    "digest": "1f722d1dc9a7e2a49a5cf63b741b814f51f21a7ecfa7676401af48f6311ef755",
+    "signature": "At9GbwfbVQv4ImxIxkiDT7C1AtZGPvJ/K+6z0uMTHrBUMSTfLQuXFQAy/8fJ3i92bKXHYxlseG6ZDQaXBXAGAg==",
+    "publicKey": "MCowBQYDK2VwAyEAWVraDBYONTy4mH+BdMJDVL2XgZNg4e6NFjt+GX8bwpo="
+  }
+}
