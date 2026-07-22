@@ -224,7 +224,9 @@ function requiredCaptureContractLines(introspection) {
     'its store reads by that captured id (the introspection\'s `serves`, when present, describes how the',
     'entrypoint\'s response resolves to it). The LAST step must be the single terminal state-changing call',
     'the claim is about: the harness observes the store between the resolve phase and that final step, and',
-    'again after it.',
+    'again after it. Every {name} placeholder used in a step\'s path or body MUST be an operator_env name',
+    'disclosed in the introspection or a `capture` name declared by an EARLIER step — a made-up placeholder',
+    'is refused before execution.',
   ];
 }
 
@@ -364,6 +366,25 @@ function validateArgs(op, args, i) {
 }
 
 /**
+ * Collect every `{name}` placeholder in a string — or in an object's/array's string leaves — into
+ * `out`. The SAME replacement grammar as conjure.mjs's resolvePlaceholders (any non-'}' run), so the
+ * static resolvability check below simulates exactly what the executor will try to resolve.
+ * @param {any} node
+ * @param {Set<string>} out
+ * @returns {Set<string>}
+ */
+function collectPlaceholders(node, out) {
+  if (typeof node === 'string') {
+    for (const m of node.matchAll(/\{([^}]+)\}/g)) out.add(m[1]);
+  } else if (Array.isArray(node)) {
+    for (const x of node) collectPlaceholders(x, out);
+  } else if (node && typeof node === 'object') {
+    for (const v of Object.values(node)) collectPlaceholders(v, out);
+  }
+  return out;
+}
+
+/**
  * Validate the proposed claim: `entity` MUST be one of the harness-enumerated observables
  * (FW-P1-C — no free-form entity), the relation op MUST be in the frozen relation set, `scope` a
  * non-empty string, and `quantified` (if present) a boolean. Returns a clean ProposedClaim.
@@ -402,11 +423,19 @@ function validateClaim(claim, observables) {
  * {op, args} whose ops are all in `allowedOps` (find/type/click/clickAt/pointer — execute/navigate
  * excluded, FW-P1-D) with well-shaped args; the claim must bind an in-menu entity (FW-P1-C) and a
  * frozen relation op. ANY violation throws — an honest could-not-execute (→ CND), not a bypass.
+ *
+ * `placeholderNames` (when provided — the names resolvable at run time: operator_env + any
+ * harness-seeded names) additionally simulates placeholder resolvability IN STEP ORDER: every
+ * `{name}` in a step's path/body must be in that set or declared by an EARLIER step's capture (a
+ * step's own capture cannot feed its own path), and each step's capture names join the set after
+ * it. Catches a made-up placeholder (the fifth live CND: `{stageName}` copy-pasted from the serves
+ * prose) at PROPOSAL time instead of wasting a cluster round-trip to die at resolvePlaceholders.
+ * Absent → behavior unchanged.
  * @param {any} raw the untrusted proposal (an llmFn's tool input)
- * @param {{observables:string[], allowedOps?:readonly string[]}} opts
+ * @param {{observables:string[], allowedOps?:readonly string[], placeholderNames?:readonly string[]}} opts
  * @returns {Proposal}
  */
-export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_OPS }) {
+export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_OPS, placeholderNames }) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('proposal must be an object');
   if (!Array.isArray(raw.walk) || raw.walk.length === 0) bad('proposal.walk must be a non-empty array of steps');
   const opSet = new Set(allowedOps);
@@ -422,6 +451,22 @@ export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_O
     if (!step.args || typeof step.args !== 'object' || Array.isArray(step.args)) bad(`walk[${i}].args must be an object`);
     return { op: step.op, args: validateArgs(step.op, step.args, i) };
   });
+  if (placeholderNames) {
+    const available = new Set(placeholderNames);
+    walk.forEach((step, i) => {
+      const used = collectPlaceholders(step.args.body, collectPlaceholders(step.args.path, new Set()));
+      for (const name of used) {
+        if (!available.has(name)) {
+          bad(
+            `walk[${i}] uses the placeholder {${name}} which nothing resolves at run time — not an ` +
+              `operator_env/harness-seeded name and not an EARLIER step's capture ` +
+              `(names available at this step: ${[...available].sort().join(', ') || '(none)'})`
+          );
+        }
+      }
+      if (step.args.capture) for (const name of Object.keys(step.args.capture)) available.add(name);
+    });
+  }
   const claim = validateClaim(raw.claim, observables);
   return { walk, claim };
 }
@@ -667,12 +712,12 @@ export async function claudeCliLlmFn({ intent, introspection, observables, allow
  * the llmFn input so the prompt teaches the same vocabulary the validator enforces (mode-blindness
  * — a browser prompt on an http-only drive — made every note-lifecycle proposal a guaranteed CND).
  * @param {{intent:any, introspection:any, observables:string[]}} input
- * @param {{llmFn?:LlmFn, allowedOps?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS for the argo/note-lifecycle drives)
+ * @param {{llmFn?:LlmFn, allowedOps?:readonly string[], placeholderNames?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS for the argo/note-lifecycle drives); placeholderNames enables the static resolvability check (see validateProposal)
  * @returns {Promise<Proposal>}
  */
 export async function proposeWalkAndClaim({ intent, introspection, observables }, opts = {}) {
   const allowedOps = opts.allowedOps || ALLOWED_WALK_OPS;
   const llmFn = opts.llmFn || /** @type {LlmFn} */ ((input) => defaultLlmFn(input));
   const raw = await llmFn({ intent, introspection, observables, allowedOps });
-  return validateProposal(raw, { observables, allowedOps });
+  return validateProposal(raw, { observables, allowedOps, placeholderNames: opts.placeholderNames });
 }

@@ -147,6 +147,40 @@ test('validateProposal: the "http" op rejects a hostile path that could re-targe
   }
 });
 
+test('validateProposal: placeholderNames — a made-up {placeholder} is refused AT PROPOSAL time, in step order (the fifth live CND: {stageName} wasted a cluster round-trip)', () => {
+  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'changed' }, scope: 's' } };
+  const opts = { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS, placeholderNames: ['PB_SCENARIO_ID'] };
+  const stageNameWalk = [
+    { op: 'http', args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', capture: { parent_id: '$.id' } } },
+    { op: 'http', args: { method: 'PATCH', path: '/executions/{parent_id}/stages/{stageName}' } },
+  ];
+  // The live shape: {stageName} copy-pasted from prose — refused naming the step, the name, and the menu.
+  assert.throws(
+    () => validateProposal({ walk: stageNameWalk, ...base }, opts),
+    /walk\[1\] uses the placeholder \{stageName\} which nothing resolves at run time — not an operator_env\/harness-seeded name and not an EARLIER step's capture \(names available at this step: PB_SCENARIO_ID, parent_id\)/
+  );
+  // A later step drawing on an EARLIER step's capture (path AND body) passes.
+  const ok = validateProposal(
+    {
+      walk: [
+        { op: 'http', args: { method: 'POST', path: '/x', capture: { id: '$.id' } } },
+        { op: 'http', args: { method: 'PATCH', path: '/y/{id}', body: { scenario: '{PB_SCENARIO_ID}' } } },
+      ],
+      ...base,
+    },
+    opts
+  );
+  assert.equal(ok.walk.length, 2);
+  // A step's OWN capture cannot feed its own path (captures land AFTER the step runs).
+  assert.throws(
+    () => validateProposal({ walk: [{ op: 'http', args: { method: 'POST', path: '/x/{id}', capture: { id: '$.id' } } }], ...base }, { ...opts, placeholderNames: [] }),
+    /walk\[0\] uses the placeholder \{id\}.*names available at this step: \(none\)/
+  );
+  // Absent placeholderNames → old behavior: the same {stageName} walk validates (backward compatible).
+  const legacy = validateProposal({ walk: stageNameWalk, ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS });
+  assert.equal(legacy.walk.length, 2);
+});
+
 test('validateProposal: an "http" op is rejected under the default (browser) allowedOps — walk vocabularies stay scoped per drive', () => {
   const raw = { walk: [{ op: 'http', args: { method: 'GET', path: '/x' } }], claim: goodRaw().claim };
   assert.throws(() => validateProposal(raw, { observables: OBSERVABLES }), /walk\[0\]\.op must be one of/);
@@ -378,6 +412,7 @@ test('buildCliPrompt: an introspection-disclosed required_capture adds the resol
   assert.match(p, /capture named exactly "child_execution_id"/);
   assert.match(p, /The LAST step must be the single terminal state-changing call/);
   assert.match(p, /observes the store between the resolve phase and that final step/);
+  assert.match(p, /a made-up placeholder\s+is refused before execution/); // the placeholder-resolvability rule (fifth live CND)
   // Without the disclosure the prompt is unchanged — the contract is drive-disclosed, not http-generic.
   assert.doesNotMatch(buildCliPrompt({ ...input, introspection: { surface: 's' } }), /AT LEAST 2 steps/);
 });

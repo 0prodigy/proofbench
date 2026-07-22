@@ -1616,7 +1616,13 @@ async function runNoteLifecycleCatch(opts, recipe, runDir) {
         };
         if (!proposal && !proposalFrozen) {
           proposalFrozen = true;
-          proposal = await proposeWalkAndClaim({ intent, introspection, observables }, { llmFn: opts.llmFn, allowedOps: ALLOWED_HTTP_OPS });
+          // placeholderNames = the run-time-resolvable names (captures is seeded with exactly the
+          // operator_env values here; the walk's own captures are modeled by the simulation itself)
+          // — a made-up {placeholder} is refused at PROPOSAL time, never after a cluster round-trip.
+          proposal = await proposeWalkAndClaim(
+            { intent, introspection, observables },
+            { llmFn: opts.llmFn, allowedOps: ALLOWED_HTTP_OPS, placeholderNames: Object.keys(captures) }
+          );
           diagnosis.push(
             `catch: agent proposed a ${proposal.walk.length}-step http walk claiming ${proposal.claim.entity} ${proposal.claim.expectedAfterRelation.op} — frozen and replayed verbatim across reproductions.`
           );

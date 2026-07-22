@@ -361,6 +361,20 @@ test('runNoteLifecycleCatch: the propose-seam input discloses the harness-owned 
   assert.deepEqual(observables, ['stage_controls_queued.row-count']);
 });
 
+test('runNoteLifecycleCatch: a proposed walk using a MADE-UP {placeholder} is refused at PROPOSAL time (CND naming it) — the operator_env menu threads through as placeholderNames', async () => {
+  const bad = {
+    walk: [
+      NOTE_PROPOSAL_RAW.walk[0],
+      { op: 'http', args: { method: 'PATCH', path: '/executions/{parent_execution_id}/stages/{stageName}' } },
+    ],
+    claim: NOTE_PROPOSAL_RAW.claim,
+  };
+  const result = await runNoteLifecycle(() => 0, asAny(async () => bad));
+  assert.equal(result.verdict.state, Verdict.COULD_NOT_DETERMINE, result.verdict.reasons.join(' | '));
+  assert.match(result.diagnosis.join(' '), /uses the placeholder \{stageName\} which nothing resolves at run time/);
+  assert.match(result.diagnosis.join(' '), /names available at this step: PB_SCENARIO_ID, child_execution_id, parent_execution_id/);
+});
+
 test('runNoteLifecycleCatch FALSIFIED: the terminal step never clears the queued stagecontrols (reproduced) => DOES_NOT_WORK', async () => {
   const result = await runNoteLifecycle(() => 1); // stays queued after the terminal step, every rep
   assert.equal(result.verdict.state, Verdict.DOES_NOT_WORK, result.verdict.reasons.join(' | '));
