@@ -33,8 +33,11 @@ import {
   podDigestsFrom,
   podRestartCountsFrom,
   podImageRefsFrom,
+  podUidsFrom,
   expectedImagesBind,
   detectDrift,
+  sutScopeFrom,
+  filterPodListToScope,
   mintK8sAttachIdentity,
   checkK8sAttachDrift,
 } from '../src/conjure.mjs';
@@ -439,6 +442,33 @@ test('conjure: detectDrift is clean on a stable snapshot and flags a pod-set cha
   const restarted = detectDrift(before, { pods: before.pods, digests: before.digests, restarts: { 'a/app': 1 } });
   assert.equal(restarted.drifted, true);
   assert.match(restarted.reason || '', /restart count increased/);
+
+  // Pod REPLACEMENT (same name, new uid — a recreated StatefulSet pod resets restartCount, so
+  // name/digest/restart checks all miss the swap): flagged via metadata.uid when both sides have it.
+  const replaced = detectDrift({ ...before, uids: { a: 'u1' } }, { pods: before.pods, digests: before.digests, restarts: before.restarts, uids: { a: 'u2' } });
+  assert.equal(replaced.drifted, true);
+  assert.match(replaced.reason || '', /pod a was replaced \(uid u1 -> u2\) — same name, different pod instance/);
+  // Fixtures without uids (either side) keep validating — no uid, no comparison.
+  assert.equal(detectDrift({ ...before, uids: { a: 'u1' } }, { pods: before.pods, digests: before.digests, restarts: before.restarts }).drifted, false);
+});
+
+test('conjure: sutScopeFrom derives the sentinel scope from the recipe (expected_images repos + store_tap pod); filterPodListToScope keeps only that set — empty scope stays whole-namespace', () => {
+  const scope = sutScopeFrom(asAny(validK8sAttachRecipe()));
+  assert.deepEqual(scope, { repos: ['us-docker.pkg.dev/x/appservice'], pods: ['mongodb-0'] });
+  const list = {
+    items: [
+      { metadata: { name: 'appservice-abc123' }, status: { containerStatuses: [{ name: 'appservice', imageID: `us-docker.pkg.dev/x/appservice@${GOOD_DIGEST}` }] } },
+      { metadata: { name: 'mongodb-0' }, status: { containerStatuses: [{ name: 'mongod', imageID: `docker.io/library/mongo@${OTHER_DIGEST}` }] } },
+      { metadata: { name: 'sync-compute-instances-29183760-x' }, status: { containerStatuses: [{ name: 'job', imageID: `us-docker.pkg.dev/x/cron@sha256:${'c'.repeat(64)}` }] } },
+    ],
+  };
+  assert.deepEqual(
+    filterPodListToScope(list, scope).items.map((/** @type {any} */ p) => p.metadata.name),
+    ['appservice-abc123', 'mongodb-0'] // the cron pod is out of scope; mongodb-0 is in by NAME, appservice by REPO
+  );
+  // An empty scope (no expected_images, no store_tap pod) never silently watches nothing.
+  assert.equal(filterPodListToScope(list, { repos: [], pods: [] }).items.length, 3);
+  assert.deepEqual(podUidsFrom({ items: [{ metadata: { name: 'a', uid: 'u1' } }, { metadata: { name: 'no-uid' } }] }), { a: 'u1' });
 });
 
 test('conjure: waitForPortForwardReady resolves once "Forwarding from" appears on stdout', async () => {
@@ -635,6 +665,66 @@ test('conjure: checkK8sAttachDrift throws naming reconcile-drift on an un-caused
     const handle = await conjure(dir, { spawnFn: asAny(fakeSpawn.spawnFn), execFn: asAny(fakeExec) });
     await mintK8sAttachIdentity(handle);
     await assert.rejects(checkK8sAttachDrift(handle), /reconcile-drift/);
+    await handle.teardown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A BUSY-namespace pod list (the live attempt-9 shape): the in-scope appservice + mongodb-0 pods
+ * plus out-of-scope neighbors (cron jobs aging out/in, an unrelated operator webhook).
+ * @param {{appDigest?:string, mongoUid?:string, cronName?:string, webhookRestarts?:number}} [o]
+ */
+function busyPodList({ appDigest = GOOD_DIGEST, mongoUid = 'uid-mongo-1', cronName = 'sync-compute-instances-a', webhookRestarts = 4 } = {}) {
+  return {
+    items: [
+      { metadata: { name: 'appservice-abc123', uid: 'uid-app-1' }, status: { containerStatuses: [{ name: 'appservice', imageID: `us-docker.pkg.dev/x/appservice@${appDigest}`, restartCount: 0 }] } },
+      { metadata: { name: 'mongodb-0', uid: mongoUid }, status: { containerStatuses: [{ name: 'mongod', imageID: `docker.io/library/mongo@${OTHER_DIGEST}`, restartCount: 0 }] } },
+      { metadata: { name: cronName, uid: `uid-${cronName}` }, status: { containerStatuses: [{ name: 'job', imageID: `us-docker.pkg.dev/x/cron@sha256:${'c'.repeat(64)}`, restartCount: 0 }] } },
+      { metadata: { name: 'spark-operator-webhook-x', uid: 'uid-webhook-1' }, status: { containerStatuses: [{ name: 'webhook', imageID: `us-docker.pkg.dev/x/spark-operator@sha256:${'d'.repeat(64)}`, restartCount: webhookRestarts }] } },
+    ],
+  };
+}
+
+test('conjure: the drift sentinel is SUT-SCOPED — out-of-scope namespace churn (cron pods aging out/in, an unrelated webhook restart) never kills the run, and the fingerprint DISCLOSES the scope (live attempt 9)', async () => {
+  const dir = writeRecipeDir(validK8sAttachRecipe());
+  const fakeSpawn = fakePortForwardSpawn();
+  const fakeExec = fakeK8sExec([
+    { status: 0, stdout: JSON.stringify(busyPodList()) }, // attach
+    { status: 0, stdout: JSON.stringify(busyPodList()) }, // drive-time baseline
+    // after the verdict window: cron pod aged out and a NEW one appeared, the webhook restarted — all OUT of scope
+    { status: 0, stdout: JSON.stringify(busyPodList({ cronName: 'sync-compute-instances-b', webhookRestarts: 5 })) },
+  ]);
+  try {
+    const handle = await conjure(dir, { spawnFn: asAny(fakeSpawn.spawnFn), execFn: asAny(fakeExec) });
+    const fp = await mintK8sAttachIdentity(handle);
+    await checkK8sAttachDrift(handle); // does not throw — walks that executed cleanly are no longer a coin flip
+    // Evidence honesty: the narrower watch is DISCLOSED in the sealed fingerprint (rule + scoped set).
+    assert.deepEqual(/** @type {any} */ (fp.data).drift_scope, {
+      rule: 'expected_images repos + store_tap pod',
+      repos: ['us-docker.pkg.dev/x/appservice'],
+      pods: ['mongodb-0'],
+      scoped_pods: ['appservice-abc123', 'mongodb-0'],
+    });
+    await handle.teardown();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('conjure: the drift sentinel keeps IN-SCOPE checks at full strength — a store pod REPLACED under the same name (mongodb-0, new uid, restarts reset) throws reconcile-drift', async () => {
+  const dir = writeRecipeDir(validK8sAttachRecipe());
+  const fakeSpawn = fakePortForwardSpawn();
+  const fakeExec = fakeK8sExec([
+    { status: 0, stdout: JSON.stringify(busyPodList()) }, // attach
+    { status: 0, stdout: JSON.stringify(busyPodList()) }, // drive-time baseline
+    { status: 0, stdout: JSON.stringify(busyPodList({ mongoUid: 'uid-mongo-2' })) }, // swapped store pod, same name
+  ]);
+  try {
+    const handle = await conjure(dir, { spawnFn: asAny(fakeSpawn.spawnFn), execFn: asAny(fakeExec) });
+    await mintK8sAttachIdentity(handle);
+    await assert.rejects(checkK8sAttachDrift(handle), /reconcile-drift.*pod mongodb-0 was replaced \(uid uid-mongo-1 -> uid-mongo-2\)/);
     await handle.teardown();
   } finally {
     rmSync(dir, { recursive: true, force: true });

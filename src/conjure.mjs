@@ -82,6 +82,10 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  *   ref-matching material {@link expectedImagesBind} needs for a digestless `expected_images` entry
  *   (repo+tag matching); the deduped `digests` set above can't do this since it drops the
  *   ref<->digest pairing. Optional so a pure detectDrift-only test fixture need not supply it.
+ * @property {Record<string,string>} [uids] podName -> metadata.uid — the pod-REPLACEMENT signal
+ *   (a deleted+recreated pod keeps a StatefulSet name like mongodb-0 and RESETS restartCount, so
+ *   name/digest/restart checks alone miss the swap; a new uid does not). Optional so pure test
+ *   fixtures without uids keep validating.
  */
 
 /**
@@ -1097,13 +1101,85 @@ export function podRestartCountsFrom(poList) {
 }
 
 /**
- * Read a point-in-time {@link ClusterSnapshot} of every pod in the attached namespace — a
- * store-DIRECT `kubectl get pods` read, never through an app endpoint.
+ * podName -> metadata.uid across a `kubectl get pods -o json` list — the drift sentinel's
+ * pod-REPLACEMENT raw material (see ClusterSnapshot.uids). A pod without a uid is skipped.
+ * @param {any} poList
+ * @returns {Record<string,string>}
+ */
+export function podUidsFrom(poList) {
+  const items = poList && Array.isArray(poList.items) ? poList.items : [];
+  /** @type {Record<string,string>} */
+  const out = {};
+  for (const pod of items) {
+    const name = pod && pod.metadata && pod.metadata.name;
+    const uid = pod && pod.metadata && pod.metadata.uid;
+    if (typeof name === 'string' && name && typeof uid === 'string' && uid) out[name] = uid;
+  }
+  return out;
+}
+
+/**
+ * The SUT pod-scope rule, derived from the recipe (never hardcoded): the drift sentinel watches
+ * (1) any pod running an image whose REPO (registry/path, ignoring tag/digest) matches a
+ *     `conjure.expected_images` entry's repo — the identity-bound services, and
+ * (2) the `store_tap.pod` by exact name (ground-truth reads must not silently survive a store pod
+ *     swap).
+ * Pods backing the port-forwarded `conjure.services` are NOT separately derived (that would need a
+ * `get svc` + label-selector match per service); the expected_images set covers the drive-path
+ * services. An EMPTY scope (no expected_images and no store_tap pod) means "nothing to scope by":
+ * callers fall back to the whole-namespace watch — scoping may only ever NARROW deliberately,
+ * never silently watch nothing.
+ * @param {import('./recipe.mjs').Recipe} recipe
+ * @returns {{repos:string[], pods:string[]}}
+ */
+export function sutScopeFrom(recipe) {
+  const expected = /** @type {string[]} */ (/** @type {any} */ (recipe.conjure).expected_images || []);
+  const repos = [...new Set(expected.map((ref) => splitRepoTag(stripDigestSuffix(ref)).repo))].sort();
+  const storePod = /** @type {any} */ (recipe.store_tap) && /** @type {any} */ (recipe.store_tap).pod;
+  return { repos, pods: typeof storePod === 'string' && storePod ? [storePod] : [] };
+}
+
+/**
+ * Filter a `kubectl get pods -o json` list to the {@link sutScopeFrom} pod set: a pod is IN scope
+ * when its name is scoped exactly, or when ANY of its containers' image references (the spec's
+ * requested `image` OR the status's `image`/resolved `imageID`) shares a scoped repo. An empty
+ * scope returns the list unfiltered (the whole-namespace fallback).
+ * @param {any} poList
+ * @param {{repos:string[], pods:string[]}} scope
+ * @returns {any}
+ */
+export function filterPodListToScope(poList, scope) {
+  if (!scope || (scope.repos.length === 0 && scope.pods.length === 0)) return poList;
+  const items = poList && Array.isArray(poList.items) ? poList.items : [];
+  const repoSet = new Set(scope.repos);
+  const nameSet = new Set(scope.pods);
+  return {
+    items: items.filter((/** @type {any} */ pod) => {
+      const name = pod && pod.metadata && pod.metadata.name;
+      if (typeof name === 'string' && nameSet.has(name)) return true;
+      const spec = (pod && pod.spec) || {};
+      const st = (pod && pod.status) || {};
+      const refs = [
+        ...[...(spec.containers || []), ...(spec.initContainers || [])].map((/** @type {any} */ c) => c && c.image),
+        ...[...(st.containerStatuses || []), ...(st.initContainerStatuses || [])].flatMap((/** @type {any} */ cs) => (cs ? [cs.image, cs.imageID] : [])),
+      ];
+      return refs.some((r) => typeof r === 'string' && r && repoSet.has(splitRepoTag(stripDigestSuffix(r)).repo));
+    }),
+  };
+}
+
+/**
+ * Read a point-in-time {@link ClusterSnapshot} — a store-DIRECT `kubectl get pods` read, never
+ * through an app endpoint. `scope` (when provided and non-empty — see {@link sutScopeFrom}) narrows
+ * the snapshot to the SUT pod set BEFORE anything is computed, so the identity binding and the
+ * drift sentinel watch the same disclosed set and out-of-scope namespace churn (cron pods aging
+ * out/in, an unrelated operator restarting) never kills a run.
  * @param {K8sExecRunner} execFn
  * @param {{kubeContext:string, namespace:string}} kubeArgs
+ * @param {{repos:string[], pods:string[]}} [scope]
  * @returns {Promise<ClusterSnapshot>}
  */
-async function snapshotCluster(execFn, { kubeContext, namespace }) {
+async function snapshotCluster(execFn, { kubeContext, namespace }, scope) {
   const res = execFn.run(['--context', kubeContext, '-n', namespace, 'get', 'pods', '-o', 'json'], K8S_GET_TIMEOUT_MS);
   if (res.error) throw new Error(`conjure: k8s-attach kubectl get pods failed to run: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`conjure: k8s-attach kubectl get pods failed (exit ${res.status}): ${tail(res.stderr || res.stdout)}`);
@@ -1113,11 +1189,13 @@ async function snapshotCluster(execFn, { kubeContext, namespace }) {
   } catch (e) {
     throw new Error(`conjure: k8s-attach could not parse 'get pods -o json' output: ${e instanceof Error ? e.message : String(e)}`);
   }
+  if (scope) list = filterPodListToScope(list, scope);
   return {
     pods: podNamesFrom(list),
     digests: podDigestsFrom(list),
     restarts: podRestartCountsFrom(list),
     imageRefs: podImageRefsFrom(list),
+    uids: podUidsFrom(list),
   };
 }
 
@@ -1251,6 +1329,17 @@ export function detectDrift(before, after) {
     const afterCount = after.restarts[key];
     if (typeof afterCount === 'number' && afterCount > beforeCount) {
       reasons.push(`${key} restart count increased (${beforeCount} -> ${afterCount})`);
+    }
+  }
+  // Pod REPLACEMENT: a deleted+recreated pod keeps a StatefulSet name (mongodb-0) and RESETS its
+  // restartCount, so the three checks above all miss the swap — the uid does not. Compared only
+  // when both snapshots recorded a uid for the name (older fixtures without uids stay valid).
+  const beforeUids = before.uids || {};
+  const afterUids = after.uids || {};
+  for (const [name, beforeUid] of Object.entries(beforeUids)) {
+    const afterUid = afterUids[name];
+    if (typeof afterUid === 'string' && afterUid && afterUid !== beforeUid) {
+      reasons.push(`pod ${name} was replaced (uid ${beforeUid} -> ${afterUid}) — same name, different pod instance`);
     }
   }
   return reasons.length ? { drifted: true, reason: reasons.join('; ') } : { drifted: false };
@@ -1403,7 +1492,10 @@ async function conjureK8sAttach(recipe, opts) {
 export async function mintK8sAttachIdentity(handle) {
   const attach = handle._k8sAttach;
   if (!attach) throw new Error('conjure: mintK8sAttachIdentity called on a non-k8s-attach handle');
-  const driveSnapshot = await snapshotCluster(attach.execFn, attach.kubeArgs);
+  // SUT-scoped snapshot (see sutScopeFrom): identity binding and the drift sentinel watch the same
+  // recipe-derived pod set — a busy namespace's unrelated churn never turns a run into a coin flip.
+  const scope = sutScopeFrom(handle.recipe);
+  const driveSnapshot = await snapshotCluster(attach.execFn, attach.kubeArgs, scope);
   const expectedImages = /** @type {any} */ (handle.recipe.conjure).expected_images || [];
   if (expectedImages.length) {
     const { bound, reason } = expectedImagesBind(driveSnapshot.digests, expectedImages, driveSnapshot.imageRefs);
@@ -1433,6 +1525,17 @@ export async function mintK8sAttachIdentity(handle) {
       namespace: attach.kubeArgs.namespace,
       drive_time_digests: driveSnapshot.digests,
       expected_images: expectedImages,
+      // Evidence honesty: the seal discloses WHAT was watched (the scoped pod set) and BY WHAT RULE
+      // — a narrower sentinel, declared, never a silent one.
+      drift_scope: {
+        rule:
+          scope.repos.length || scope.pods.length
+            ? 'expected_images repos + store_tap pod'
+            : 'whole namespace (no expected_images/store_tap pod to scope by)',
+        repos: scope.repos,
+        pods: scope.pods,
+        scoped_pods: driveSnapshot.pods,
+      },
       ...multiRepoIdentity,
     },
   });
@@ -1453,7 +1556,9 @@ export async function checkK8sAttachDrift(handle) {
   const attach = handle._k8sAttach;
   if (!attach) throw new Error('conjure: checkK8sAttachDrift called on a non-k8s-attach handle');
   if (!attach.driveSnapshot) throw new Error('conjure: checkK8sAttachDrift called before mintK8sAttachIdentity (no drive-time baseline snapshot)');
-  const after = await snapshotCluster(attach.execFn, attach.kubeArgs);
+  // The SAME recipe-derived scope as the mint baseline (both sides of detectDrift must watch the
+  // same set) — out-of-scope namespace churn is ignored entirely; in-scope checks at full strength.
+  const after = await snapshotCluster(attach.execFn, attach.kubeArgs, sutScopeFrom(handle.recipe));
   const { drifted, reason } = detectDrift(attach.driveSnapshot, after);
   if (drifted) {
     throw new Error(`conjure: k8s-attach drift sentinel — reconcile-drift: ${reason}`);
