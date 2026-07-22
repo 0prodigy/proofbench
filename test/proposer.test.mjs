@@ -181,6 +181,40 @@ test('validateProposal: placeholderNames — a made-up {placeholder} is refused 
   assert.equal(legacy.walk.length, 2);
 });
 
+test("validateProposal: placeholderNames — a capture SHADOWING an already-bound name is refused, naming the first binder (the sixth live CND: a redundant re-capture missed and killed the run)", () => {
+  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'changed' }, scope: 's' } };
+  const opts = { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS, placeholderNames: ['PB_SCENARIO_ID'] };
+  // The live shape: step 2 re-captured a name step 0 already bound — refused at proposal time.
+  const shadowWalk = [
+    { op: 'http', args: { method: 'POST', path: '/x', capture: { child_execution_id: '$.notes[0]._id' } } },
+    { op: 'http', args: { method: 'GET', path: '/y/{child_execution_id}' } },
+    { op: 'http', args: { method: 'PATCH', path: '/z', capture: { child_execution_id: '$.id' } } },
+  ];
+  assert.throws(
+    () => validateProposal({ walk: shadowWalk, ...base }, opts),
+    /walk\[2\] re-captures 'child_execution_id' which is already bound \(captured by walk\[0\]\) — captures must introduce NEW names; drop the redundant capture/
+  );
+  // Shadowing an operator_env/harness-seeded name is refused the same way, naming the seed.
+  assert.throws(
+    () => validateProposal({ walk: [{ op: 'http', args: { method: 'POST', path: '/x', capture: { PB_SCENARIO_ID: '$.id' } } }], ...base }, opts),
+    /walk\[0\] re-captures 'PB_SCENARIO_ID' which is already bound \(an operator_env\/harness-seeded name\)/
+  );
+  // All-NEW consumed captures pass unchanged (no over-refusal).
+  const ok = validateProposal(
+    {
+      walk: [
+        { op: 'http', args: { method: 'POST', path: '/x', capture: { parent_id: '$.id', child_id: '$.notes[0]._id' } } },
+        { op: 'http', args: { method: 'PATCH', path: '/y/{parent_id}/{child_id}' } },
+      ],
+      ...base,
+    },
+    opts
+  );
+  assert.equal(ok.walk.length, 2);
+  // Absent placeholderNames → old behavior: the shadowing walk validates (backward compatible).
+  assert.equal(validateProposal({ walk: shadowWalk, ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }).walk.length, 3);
+});
+
 test('validateProposal: an "http" op is rejected under the default (browser) allowedOps — walk vocabularies stay scoped per drive', () => {
   const raw = { walk: [{ op: 'http', args: { method: 'GET', path: '/x' } }], claim: goodRaw().claim };
   assert.throws(() => validateProposal(raw, { observables: OBSERVABLES }), /walk\[0\]\.op must be one of/);
@@ -413,6 +447,8 @@ test('buildCliPrompt: an introspection-disclosed required_capture adds the resol
   assert.match(p, /The LAST step must be the single terminal state-changing call/);
   assert.match(p, /observes the store between the resolve phase and that final step/);
   assert.match(p, /a made-up placeholder\s+is refused before execution/); // the placeholder-resolvability rule (fifth live CND)
+  assert.match(p, /never re-capture a name you\s+already have/); // the shadow-capture rule (sixth live CND)…
+  assert.match(p, /"child_execution_id" is the exception, consumed by the harness itself/); // …with the harness-consumed exemption named
   // Without the disclosure the prompt is unchanged — the contract is drive-disclosed, not http-generic.
   assert.doesNotMatch(buildCliPrompt({ ...input, introspection: { surface: 's' } }), /AT LEAST 2 steps/);
 });

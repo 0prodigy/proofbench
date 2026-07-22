@@ -226,7 +226,9 @@ function requiredCaptureContractLines(introspection) {
     'the claim is about: the harness observes the store between the resolve phase and that final step, and',
     'again after it. Every {name} placeholder used in a step\'s path or body MUST be an operator_env name',
     'disclosed in the introspection or a `capture` name declared by an EARLIER step — a made-up placeholder',
-    'is refused before execution.',
+    'is refused before execution. Declare a capture ONLY for a NEW name — never re-capture a name you',
+    'already have (refused before execution) — and only when a LATER step\'s path or body consumes it;',
+    `"${name}" is the exception, consumed by the harness itself.`,
   ];
 }
 
@@ -429,8 +431,9 @@ function validateClaim(claim, observables) {
  * `{name}` in a step's path/body must be in that set or declared by an EARLIER step's capture (a
  * step's own capture cannot feed its own path), and each step's capture names join the set after
  * it. Catches a made-up placeholder (the fifth live CND: `{stageName}` copy-pasted from the serves
- * prose) at PROPOSAL time instead of wasting a cluster round-trip to die at resolvePlaceholders.
- * Absent → behavior unchanged.
+ * prose) at PROPOSAL time instead of wasting a cluster round-trip to die at resolvePlaceholders;
+ * likewise refuses a capture that SHADOWS an already-bound name (the sixth: a redundant re-capture
+ * that missed killed a run over a value nothing needed). Absent → behavior unchanged.
  * @param {any} raw the untrusted proposal (an llmFn's tool input)
  * @param {{observables:string[], allowedOps?:readonly string[], placeholderNames?:readonly string[]}} opts
  * @returns {Proposal}
@@ -452,19 +455,33 @@ export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_O
     return { op: step.op, args: validateArgs(step.op, step.args, i) };
   });
   if (placeholderNames) {
-    const available = new Set(placeholderNames);
+    // name -> where it was first bound, so both refusals (an unresolvable use AND a shadowing
+    // re-capture — the sixth live CND: a redundant re-capture missed and wasted a round-trip on a
+    // value nothing needed) can name the binding site.
+    /** @type {Map<string,string>} */
+    const boundBy = new Map(placeholderNames.map((n) => [n, 'an operator_env/harness-seeded name']));
     walk.forEach((step, i) => {
       const used = collectPlaceholders(step.args.body, collectPlaceholders(step.args.path, new Set()));
       for (const name of used) {
-        if (!available.has(name)) {
+        if (!boundBy.has(name)) {
           bad(
             `walk[${i}] uses the placeholder {${name}} which nothing resolves at run time — not an ` +
               `operator_env/harness-seeded name and not an EARLIER step's capture ` +
-              `(names available at this step: ${[...available].sort().join(', ') || '(none)'})`
+              `(names available at this step: ${[...boundBy.keys()].sort().join(', ') || '(none)'})`
           );
         }
       }
-      if (step.args.capture) for (const name of Object.keys(step.args.capture)) available.add(name);
+      if (step.args.capture) {
+        for (const name of Object.keys(step.args.capture)) {
+          if (boundBy.has(name)) {
+            bad(
+              `walk[${i}] re-captures '${name}' which is already bound (${boundBy.get(name)}) — ` +
+                'captures must introduce NEW names; drop the redundant capture'
+            );
+          }
+          boundBy.set(name, `captured by walk[${i}]`);
+        }
+      }
     });
   }
   const claim = validateClaim(raw.claim, observables);
