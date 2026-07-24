@@ -1,11 +1,15 @@
 {
   "name": "proofbench",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Proof-of-work for AI change — sealed, tri-state verdicts (WORKS / DOES NOT WORK / COULD NOT DETERMINE) an agent cannot fake.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/0prodigy/proofbench.git"
+  },
+  "homepage": "https://github.com/0prodigy/proofbench#readme",
+  "bugs": {
+    "url": "https://github.com/0prodigy/proofbench/issues"
   },
   "engines": {
     "node": ">=20"

@@ -19,7 +19,7 @@ the recipe surface and the CLI you run against it.
   `docker run` / `docker compose`, and `docker exec` to conjure the SUT, tap its store
   out-of-band, and (for a browser-driven front door) run a pinned Chromium sidecar
   container. No Kubernetes, no cloud account — everything runs in local containers.
-- **git** — a `from_tree` recipe (the only code-identity mode either shipped recipe uses)
+- **git** — a `from_tree` recipe (the only code-identity mode the shipped recipes use)
   clones the target repo at an exact SHA; `git` must be on `PATH`.
 - **An agent to propose the walk** — either:
   - the `claude` CLI, authenticated via `claude setup-token` (subscription OAuth, no API
@@ -104,8 +104,8 @@ it works.
   base image ships a corepack whose pnpm resolution breaks under Node 18); never a silent
   patch — every overlay line is in the recipe file you can read.
 - The other identity mode, `pinned_image` (`image_ref` + `image_digest`), pins an
-  already-built image by digest instead of building from source — neither shipped recipe
-  uses it; see the JSDoc in `src/recipe.mjs` if you need it.
+  already-built image by digest instead of building from source — none of the shipped
+  recipes use it; see the JSDoc in `src/recipe.mjs` if you need it.
 
 ### `conjure` — bringing the SUT up
 

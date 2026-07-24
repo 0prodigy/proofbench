@@ -274,12 +274,12 @@ The acid test: *the common-PR → deploy-check → cluster → browser-drive flo
 | Step | Framework mechanism | Lyric specifics (from the partner ticket recon) |
 |---|---|---|
 | Common PR opened | (out of band — human) | PR against a service repo; SRM must have already run once so privileges/users/workspaces exist |
-| Image built for SHA | **CI-integration contract** (`pb-buildrecord-v1`) | `docker_publish` fires a `git_tag_overwrite` tag-push; wheels/images publish to GCP AR under the `dev<ticket>` convention. Lyric's CI exposes the BuildRecord (registry-referrer or `.pb/builds/<sha>.json`); pb pulls **by digest** and runs containment. |
+| Image built for SHA | **CI-integration contract** (`pb-buildrecord-v1`) | the partner's CI publishes wheels/images to its own registry under a ticket-scoped dev-version convention and exposes the BuildRecord (registry-referrer or `.pb/builds/<sha>.json`); pb pulls **by digest** and runs containment. |
 | Deploy-check | **Readiness** `argocd` adapter (gate) | `<svc>-<env>` Application on the partner's dedicated per-tenant cluster environment; encode F2 tracked-ref + tag-peel + tag-exists traps |
 | Acquire sandbox | **Environment** `k8s-attach` provider | the partner's dedicated per-tenant cluster environment (personal, no shared-branch contention); the partner's deploy-tooling power-start + status-wait commands to wake |
 | Verify code-identity | Code-Identity runner (`ci_attested`) | pb reads the running pod's imageID **manifest** digest itself; containment via differential-content (**Python services: tier 3 zero-integration**) or, for TS→JS `appservice`, tier-2 provenance or `from_tree` fallback (**caps at CND on differential-content**). Tag name `<cluster>-<sha>` is **`unbound`**, never admissible. |
 | Browser drive | **Drive** `browser` provider (existing `browserdrive.mjs`) | drives `ui-monorepo` at the studio subdomain — see gap below |
-| Ground-truth tap | **Tap** `k8s-exec` engine | `kubectl exec mongodb-0 -c mongod -- mongosh` out-of-band, array-argv (P6) — **never** the app's own REST read path; run-scoped nonce round-trip (P2) |
+| Ground-truth tap | **Tap** `k8s-exec` engine | `kubectl exec` into the store pod with `mongosh` out-of-band, array-argv (P6) — **never** the app's own REST read path; run-scoped nonce round-trip (P2) |
 | Lineage check | org-config `lineage` assertion (Readiness veto) | Lyric F3 base-skew: a service deployed off the cluster's compatibility set ⇒ readiness CND with F3's named fingerprint |
 
 **Named gaps this instance inherits (honestly recorded):**
