@@ -31,6 +31,7 @@
       <a href="#pipeline">How it works</a>
       <a href="#catch">The Catch</a>
       <a href="#stacks">Supported stacks</a>
+      <a href="#install">Install</a>
       <a href="case.html">Case file</a>
       <a href="https://github.com/0prodigy/proofbench">GitHub</a>
     </nav>
@@ -203,7 +204,7 @@ EVIDENCE SEALED ed25519</code></pre>
       <div class="section-head">
         <p class="eyebrow">the magic moment</p>
         <h2>The Catch: the PR <em>is</em> why it works.</h2>
-        <p>A single WORKS proves nothing — the feature might have worked before your change. So Proofbench runs the identical agent-proposed walk on the merge and on its parent and reports the <strong>differential</strong>. It passes only when the merge WORKS and the parent does not. Three real recipes have run this, on two different stacks — the sealed evidence for each is linked below.</p>
+        <p>A single WORKS proves nothing — the feature might have worked before your change. So Proofbench runs the identical agent-proposed walk on the merge and on its parent and reports the <strong>differential</strong>. It passes only when the merge WORKS and the parent does not. Four real recipes have run this, across three different stacks — the sealed evidence for each is linked below.</p>
       </div>
 
       <div class="case-block">
@@ -284,6 +285,33 @@ EVIDENCE SEALED ed25519</code></pre>
           <summary>Raw commit identity + sealed evidence</summary>
           <p>merge <code>3ddc176dfa2d3d99a328a29a3a8613e35ff456a0</code> · parent <code>869b8f14caaf334f011bcd87d3928dc8ab41f62e</code></p>
           <p><a href="cases/n8n-form-trigger-pr7130.merge.json">merge receipt (sealed JSON)</a> · <a href="cases/n8n-form-trigger-pr7130.parent.json">parent receipt (sealed JSON)</a> · <a href="case.html">interactive case file (self-verifies offline)</a></p>
+        </details>
+      </div>
+
+      <div class="case-block">
+        <h3 class="case-block-title">documenso · PR #3031 <span class="badge badge-dnw">the third catch</span></h3>
+        <p class="case-block-desc">A third stack entirely — Postgres, and a real Konva <code>&lt;canvas&gt;</code> front door driven with an actual shift-click, not a form post — proof the differential holds past plain HTML forms.</p>
+        <div class="diff-grid">
+          <div class="diff-leg is-primary">
+            <span class="diff-leg-label">merge</span>
+            <span class="badge badge-works">WORKS</span>
+            <span class="diff-leg-note">Place 3 fields, shift-click to select two, click the floating toolbar's Remove → <code>Field.rows</code> 0 → 1, confirmed by a fresh out-of-band re-read, reproduced across k=2 fresh worlds.</span>
+          </div>
+          <div class="diff-op">
+            <span class="diff-verb">∧</span>
+            <span>merge WORKS<br/>parent ≠ WORKS</span>
+          </div>
+          <div class="diff-leg">
+            <span class="diff-leg-label">parent</span>
+            <span class="badge badge-dnw">DOES NOT WORK</span>
+            <span class="diff-leg-note">Identical walk, same canvas: the parent's field-click handler ignores Shift and replaces the selection instead of extending it, so Remove only drops the last-clicked field — <code>Field.rows</code> lands at 2, not 1. Falsified, reproduced 2 of 2.</span>
+          </div>
+        </div>
+        <div class="diff-result"><span>DIFFERENTIAL:</span> <span class="pass">PASS</span> <span style="color:var(--ink-3);">— the fix is why it works, not the environment.</span></div>
+        <details class="case-raw">
+          <summary>Raw commit identity + sealed evidence</summary>
+          <p>merge <code>97835b8dbb2ca24670c8a410972d949c982c8f61</code> · parent <code>977d07330b97ce451fb834447807b9d4163fc6bd</code></p>
+          <p><a href="cases/documenso-envelope-fields-pr3031.merge.json">merge receipt (sealed JSON)</a> · <a href="cases/documenso-envelope-fields-pr3031.parent.json">parent receipt (sealed JSON)</a></p>
         </details>
       </div>
 
@@ -404,7 +432,7 @@ EVIDENCE SEALED ed25519</code></pre>
           <tr>
             <td>Kubernetes / Helm / a live cluster</td>
             <td><span class="badge badge-cnd">CND</span></td>
-            <td><code>store_tap.engine: "k8s-exec"</code> and <code>drive.mode: "argo-workflows"</code> are declared in the recipe schema, but the k8s-exec tap is a hard throw today and there's no k8s-attach conjure. Scheduled as <a href="../docs/ROADMAP.md">R3</a> — not a workaround, not built yet.</td>
+            <td>Not supported — no k8s-attach conjure, no k8s-exec tap; the recipe schema no longer declares any k8s values. The integration seam a new substrate would implement is documented in <a href="../docs/integration.md">docs/integration.md</a>; entry is earned via an executed live verdict, never ahead of one. Scheduled <a href="../docs/ROADMAP.md">R3</a> — not built yet.</td>
           </tr>
           <tr>
             <td>Serverless / fully-managed backends</td>
@@ -427,6 +455,32 @@ EVIDENCE SEALED ed25519</code></pre>
     </div>
   </section>
 
+  <!-- ============ INSTALL ============ -->
+  <section id="install" class="contrast">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">install honestly, in under a minute</p>
+        <h2>Not on npm yet. Clone and run.</h2>
+        <p><code>package.json</code>'s name is already <code>proofbench</code> with a <code>pb</code> bin, but the npm publish itself is a still-open <a href="../docs/ROADMAP.md">ROADMAP</a> item (R1 Distribution) — nothing on this page claims otherwise. Until it lands, run the same smoke test from a clone; it needs Node only, no Docker and no agent. The repo's default branch predates this rewrite and is historical only — clone <code>product-v1</code> explicitly, as below.</p>
+      </div>
+      <div class="code-frame"><pre><code>git clone -b product-v1 https://github.com/0prodigy/proofbench.git
+cd proofbench
+node src/cli.mjs gate</code></pre><button class="copy-btn" type="button" data-copy-target aria-label="Copy install command">Copy</button></div>
+      <p class="demo-caption"><code>pb gate</code> is the E1 malicious-driver honesty gate — deterministic, Docker-free, network-free, seconds. A <code>PASS</code> is your install smoke test. Once the npm publish lands, the same check becomes <code>npx proofbench gate</code> — not usable yet. Full recipe-authoring path (Docker + an agent, a real sealed verdict in under an hour): <a href="../docs/getting-started.md">docs/getting-started.md</a>.</p>
+    </div>
+  </section>
+
+  <!-- ============ INTEGRATE ============ -->
+  <section id="integrate">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">pb-integration-v1</p>
+        <h2>One recipe schema. One resolution point.</h2>
+        <p>A recipe selects its substrate through four fields — <code>conjure.mode</code>, <code>code_identity.mode</code>, <code>store_tap.engine</code>, and <code>drive.mode</code> — and <code>src/registry.mjs</code> is the single point that resolves each field to its provider; an unrecognized value fails loudly, never a silent fallthrough. Docker (run or compose) is the one substrate pb ships today. A new substrate — Kubernetes included — earns its way into the registry only by passing an executed live verdict, never ahead of one. Full contract, adapter shape, and the <code>--json</code>/exit-code surface: <a href="../docs/integration.md">docs/integration.md</a>.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ QUICKSTART ============ -->
   <section id="quickstart">
     <div class="container">
@@ -441,7 +495,7 @@ EVIDENCE SEALED ed25519</code></pre>
           <button class="tab-btn" role="tab" type="button" aria-selected="false" id="tab-verify" aria-controls="panel-verify" tabindex="-1">self-verify</button>
         </div>
         <div class="tab-panel is-active" id="panel-prove" role="tabpanel" aria-labelledby="tab-prove">
-          <div class="code-frame"><pre><code>git clone https://github.com/0prodigy/proofbench
+          <div class="code-frame"><pre><code>git clone -b product-v1 https://github.com/0prodigy/proofbench
 cd proofbench
 
 # run the same user walk on merge and parent, report the differential
@@ -547,6 +601,8 @@ open site/case.html          # or double-click the .html file</code></pre><butto
         <a href="#pipeline">How it works</a>
         <a href="#catch">The Catch</a>
         <a href="#stacks">Supported stacks</a>
+        <a href="#install">Install</a>
+        <a href="#integrate">Integrate</a>
         <a href="case.html">Case file</a>
         <a href="https://github.com/0prodigy/proofbench">GitHub</a>
       </div>
