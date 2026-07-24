@@ -4,8 +4,8 @@ pb answers one question about a change: **does it actually work, for a real user
 the change itself *why*?** It brings the real system up from a recipe, drives its front
 door as a visitor would, reads ground truth *out of band*, seals the evidence, and lets a
 **frozen, deterministic verdict** decide `WORKS` / `DOES_NOT_WORK` / `COULD_NOT_DETERMINE`
-— a lying prosecutor cannot manufacture a `WORKS`. See `docs/phase-3-theory.md` (§0–§2, §7)
-for the property (P′) this encodes and `docs/pb-extensibility-foundation.md` for the recipe/
+— a lying prosecutor cannot manufacture a `WORKS`. See `docs/internal/phase-3-theory.md` (§0–§2, §7)
+for the property (P′) this encodes and `docs/internal/pb-extensibility-foundation.md` for the recipe/
 org-config/provider model.
 
 ## The honesty core (frozen)

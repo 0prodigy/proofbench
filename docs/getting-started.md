@@ -293,8 +293,11 @@ anti-tautology that proves the PR itself, not just the repo in general, is why i
 the parent worked too and the target didn't actually discriminate — reported as a real
 finding, not silently retried) and `2` on a usage problem (missing `<recipeDir>`, or a
 recipe with no `parent_sha` to build a baseline from — the differential literally cannot
-be attempted). `pb gate`, `pb phase1`, `pb phase2`, and `pb phase3` each exit `0` only on
-their own WORKS/PASS state.
+be attempted). `pb gate` exits `0` pass / `1` fail (a deterministic gate, not a verdict).
+`pb phase1`/`pb phase2`/`pb phase3` exit CLAUDE.md's frozen four-way contract on their own
+verdict state: `0` WORKS / `1` DOES_NOT_WORK / `2` COULD_NOT_DETERMINE / `3` anything else
+(internal). `pb conjure` exits `0` on a successful bring-up and `2` on an honest CND
+(could not conjure — a bring-up/setup failure, never evidence against the change).
 
 The three committed, sealed differential Catches — n8n #9157 (merge WORKS ∧ parent DOES
 NOT WORK — the first live regression catch), linkding #1170 (merge WORKS ∧ parent DOES

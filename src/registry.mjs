@@ -2,7 +2,7 @@
 /**
  * The PROVIDER REGISTRY — the config-keyed DEFAULT wiring for pb's phase seams (M2 seam extraction).
  *
- * docs/pb-extensibility-foundation.md §2.2 settles this: the per-phase "providers" are not a new
+ * docs/internal/pb-extensibility-foundation.md §2.2 settles this: the per-phase "providers" are not a new
  * interface invented here — they are a PROMOTION of the injectable seams runCatch already proves out
  * (catch.mjs:518-529 conjureFn/tapStoreFn/openBrowserFn). Today those seams are passed by hand in unit
  * tests; this module promotes them to a DECLARED registry keyed by the recipe's config, so the live

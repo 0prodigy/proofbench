@@ -194,7 +194,8 @@ The enterprise substrate — currently paper. Built strictly in the order that f
 cheapest, each step ending in an executed run. This is where the Lyric blockers
 (A1–A8 below) are scheduled — not before.
 
-- [ ] **k8s-exec store tap implemented** (today a hard throw, `argoworkflows.mjs:396`)
+- [ ] **k8s-exec store tap implemented** (today a hard throw, `argoworkflows.mjs:396`
+      — excised at `b807169`; resurrect-ref in DEFERRED.md)
       + `mongo` engine wrapping the proven out-of-band read (`lyric-mongo.sh` shape).
 - [ ] **k8s-attach conjure:** attach to an existing deployment (port-forward, read
       image digests at DRIVE time and seal those), never creating cluster objects.

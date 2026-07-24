@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * E1 — the malicious-driver suite (docs/phase-3-theory.md §5, the keystone).
+ * E1 — the malicious-driver suite (docs/internal/phase-3-theory.md §5, the keystone).
  *
  * Each driver replaces the honest drive agent with a scripted *lying prosecutor*:
  * a bundle of evidence engineered to sneak a false WORKS past the verdict. This

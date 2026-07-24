@@ -3,7 +3,7 @@
  * Core enums + JSDoc typedefs for the pb honesty core (Phase 3 / E1).
  *
  * Node built-ins only, ES modules. These are the frozen nouns every other module
- * reads. See docs/phase-3-theory.md §0-§2, §7 for the property (P') they encode.
+ * reads. See docs/internal/phase-3-theory.md §0-§2, §7 for the property (P') they encode.
  */
 
 /**

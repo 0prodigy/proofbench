@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * Adversarial FIXTURE attacks on phase 3 — real two-service HTTP apps driven end to end
- * through the actual runPhase3 entrypoint (docs/phase-3-theory.md §1.1, FW-1/FW-5).
+ * through the actual runPhase3 entrypoint (docs/internal/phase-3-theory.md §1.1, FW-1/FW-5).
  *
  * (a) shop-cache-echo — the whole app surface lies (response AND fresh GET echo the
  *     discount from a cache) while the store handle holds the un-discounted base. The

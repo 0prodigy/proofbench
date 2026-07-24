@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * One test per verdict rule (1-7), each with a minimal bundle. See
- * docs/phase-3-theory.md §0-§2/§7 and src/verdict.mjs for the rule text.
+ * docs/internal/phase-3-theory.md §0-§2/§7 and src/verdict.mjs for the rule text.
  */
 
 import test from 'node:test';

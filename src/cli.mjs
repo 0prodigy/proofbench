@@ -6,8 +6,9 @@
  * Wires `pb gate` to the E1 malicious-driver gate, `pb phase1|phase2|phase3` to the three
  * phase runners, and `pb prove <recipeDir>` to the DIFFERENTIAL Catch — the same user walk run
  * at the merge SHA and its parent SHA, proving merge=WORKS ∧ parent≠WORKS (the PR IS why it
- * works). Every command produces harness receipts + claims and calls the pure verdict; exit 0
- * only on WORKS / differential PASS.
+ * works). Every command produces harness receipts + claims and calls the pure verdict; the phase
+ * commands and `conjure`'s CND path exit the frozen 0/1/2/3 contract (exitCodeForVerdict below),
+ * `gate` stays a pass/fail 0/1, and `prove` exits 0 only on differential PASS (else 1).
  */
 
 import { resolve } from 'node:path';
@@ -39,7 +40,9 @@ function usage() {
     '  prove <recipeDir>|--random [--json]   run the differential Catch at the merge SHA and the parent SHA (--random: pick one from the pool) → PASS iff merge=WORKS ∧ parent≠WORKS; --json emits ONE pb-verdict-v1 JSON document on stdout (render-layer only — exit codes unchanged), human-readable rendering moves to stderr',
     '  help            show this help',
     '',
-    'Phase commands exit 0 only on WORKS; prove exits 0 only on differential PASS.',
+    'Phase commands (phase1/phase2/phase3) exit the frozen contract: 0 WORKS / 1 DOES_NOT_WORK / 2 COULD_NOT_DETERMINE / 3 internal.',
+    'conjure exits 0 on a successful bring-up and 2 on an honest CND (could not conjure — not evidence against your change).',
+    'gate exits 0 pass / 1 fail. prove exits 0 only on differential PASS, else 1.',
   ].join('\n');
 }
 
@@ -230,6 +233,19 @@ export function buildVerdictJson({ recipeName, merge, parent, pass, exitCode }) 
 }
 
 /**
+ * The frozen exit-code contract (CLAUDE.md): 0 WORKS / 1 DOES_NOT_WORK / 2 COULD_NOT_DETERMINE /
+ * 3 internal (anything else — a broken seal state, an unrecognized string).
+ * @param {string} state
+ * @returns {number}
+ */
+export function exitCodeForVerdict(state) {
+  if (state === Verdict.WORKS) return 0;
+  if (state === Verdict.DOES_NOT_WORK) return 1;
+  if (state === Verdict.COULD_NOT_DETERMINE) return 2;
+  return 3;
+}
+
+/**
  * Select the proposer backend WITHOUT adding a config key: PB_PROPOSER forces it
  * (`claude-cli` | `api`); otherwise auto — use the local `claude` CLI (subscription OAuth, no key)
  * UNLESS ANTHROPIC_API_KEY is set, in which case use the Anthropic API path. Returns the LlmFn seam
@@ -268,7 +284,7 @@ async function main() {
       result = await runPhase3({ appDir: abs, intent });
     }
     process.stdout.write(renderPhase(result) + '\n');
-    process.exit(result.verdict.state === Verdict.WORKS ? 0 : 1);
+    process.exit(exitCodeForVerdict(result.verdict.state));
   }
 
   if (cmd === 'conjure') {
@@ -299,7 +315,7 @@ async function main() {
     } catch (e) {
       // Honest failure: a bring-up/setup error is CND, never evidence against the change.
       process.stdout.write(`CND (could not conjure): ${String((e && /** @type {any} */ (e).message) || e)} — this is not evidence against your change\n`);
-      code = 1;
+      code = 2;
     } finally {
       if (handle && !keep) await teardownSut(handle);
     }

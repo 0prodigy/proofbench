@@ -208,25 +208,25 @@ never a silent partial run.
 
 ### Exit codes (`src/cli.mjs`, verified against the current implementation)
 
-`pb prove`/`pb conjure`/`pb gate`/`pb phase1`/`pb phase2`/`pb phase3` today implement
-**three** exit codes, not the four-way split CLAUDE.md's frozen contract names as the
-target end-state:
+`phase1`/`phase2`/`phase3` and `conjure`'s honest CND path implement CLAUDE.md's frozen
+four-way contract (`exitCodeForVerdict` in `src/cli.mjs`); `gate` and `prove` are their
+own pass/fail contracts, not a single verdict state:
 
-- **`0`** — success: `WORKS` (phase commands, `conjure`) or differential `PASS`
-  (`merge = WORKS ∧ parent ≠ WORKS`, `prove`).
-- **`1`** — not success: `DOES_NOT_WORK`, `COULD_NOT_DETERMINE`, an unconjurable SUT, a
-  differential `FAIL`, or an uncaught internal error (`main()`'s top-level catch also
-  exits `1`) all currently collapse into this one code.
-- **`2`** — a CLI usage problem: a missing/unrecognized `<dir>`/`<recipeDir>`, an unknown
-  subcommand, an empty recipe pool for `--random`, or (for `prove`) a recipe with no
-  `from_tree` + `parent_sha` to build a differential baseline from — the run never
-  started, so there is nothing to verdict.
+- **`phase1`/`phase2`/`phase3`** — `0` `WORKS` / `1` `DOES_NOT_WORK` / `2`
+  `COULD_NOT_DETERMINE` / `3` anything else (internal — e.g. an uncaught error reaching
+  `main()`'s top-level catch).
+- **`conjure`** — `0` on a successful bring-up; `2` on an honest CND (could not conjure —
+  a bring-up/setup failure, never evidence against the change).
+- **`gate`** — `0` pass / `1` fail (a deterministic malicious-driver gate, not a verdict).
+- **`prove`** — `0` only on differential `PASS` (`merge = WORKS ∧ parent ≠ WORKS`), else
+  `1` (a `FAIL`, or a recipe missing `from_tree` + `parent_sha` exits `2` before any run
+  starts — a usage problem, not a verdict).
+- **`2`** (all commands) — also used for a CLI usage problem: a missing/unrecognized
+  `<dir>`/`<recipeDir>`, an unknown subcommand, or an empty recipe pool for `--random`.
 
-Splitting `1` into a distinct `DOES_NOT_WORK`/`COULD_NOT_DETERMINE`/internal-failure code
-(the `1`/`2`/`3` CLAUDE.md describes as frozen) is tracked as an open ROADMAP R2 item
-(`docs/ROADMAP.md`, "Machine verdict: `--json` verdict document ... alongside the frozen
-exit codes 0/1/2/3") — an integrator scripting against exit codes **today** should treat
-non-zero as "not WORKS, see stdout/stderr for which state," not assume a 4-way split yet.
+An integrator scripting against exit codes can rely on the 0/1/2/3 split for the phase
+commands and `conjure`'s CND path today; `gate` and `prove` stay pass/fail (0/1), with `2`
+reserved for a usage problem that never produced a verdict at all.
 
 ### `--json` (in progress, parallel slice)
 
@@ -277,7 +277,8 @@ ceiling, not a hidden one.
 
 A minimal PR-gate integration: run `pb prove <recipeDir>` (or, once shipped, `--json`)
 on the PR's SHA as `code_identity.sha`/`parent_sha`; consume the process exit code for
-pass/fail today (see the caveat above), or parse the `--json` document once it lands;
+pass/fail today (0 only on differential PASS, per the exit-code table above), or parse
+the `--json` document once it lands;
 upload the sealed case file (`result.receiptPath` per leg) as a build artifact so a
 reviewer can open it and self-verify offline; gate merge on the exit code / `verdict`
 field via branch protection. pb never merges, approves, or deploys — it only produces

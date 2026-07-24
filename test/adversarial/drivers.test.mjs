@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Adversarial DRIVER attacks on the honesty core (docs/phase-3-theory.md §1-§2, §7).
+ * Adversarial DRIVER attacks on the honesty core (docs/internal/phase-3-theory.md §1-§2, §7).
  *
  * Each test is a scripted *lying prosecutor*: a sealed evidence bundle engineered to
  * sneak a false WORKS past the pure verdict. The property is asymmetric — every attack

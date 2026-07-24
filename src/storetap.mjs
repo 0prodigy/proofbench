@@ -8,7 +8,7 @@
  * own API. It is engine-discriminated: sqlite (n8n) is a store FILE inside the SUT container read
  * with `sqlite3 -json`; postgres (documenso) is a SEPARATE DB container read with `psql -At`. An
  * app-endpoint read is only TOOL provenance and can never be the persisted leg
- * (docs/phase-3-theory.md §1.1/§4); if the store cannot be read out of band, this module throws
+ * (docs/internal/phase-3-theory.md §1.1/§4); if the store cannot be read out of band, this module throws
  * rather than fall back to an app read — for every engine.
  *
  * tapStore runs a recipe's named read-only query and returns the parsed rows. Per M1's

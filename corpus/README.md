@@ -5,7 +5,7 @@ Real merged PRs the tool must verdict correctly. Every case was **blind battle-t
 gate: **false-WORKS = 0 across the corpus is release-blocking.**
 
 Blind Sonnet campaign verdict distribution: {"WORKS": 4, "COULD_NOT_DETERMINE": 7, "DOES_NOT_WORK": 1} — **no false-WORKS across 12.**
-See `../docs/battle-test-campaign-summary.md` and `../docs/battle-test-01-calcom-webhooks.md`.
+See `../docs/internal/battle-test-campaign-summary.md` and `../docs/internal/battle-test-01-calcom-webhooks.md`.
 
 Each `battle-tests/*.json` holds the compiled discriminating promise, conjure feasibility,
 the blind verdict + basis, holds/breaks, and the new-vector findings for one PR. As conjure
