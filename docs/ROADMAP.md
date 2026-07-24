@@ -8,7 +8,7 @@ report. Decisions logged here are settled; do not reopen them.*
 Agents implement; pb verifies with unfakeable evidence; a human (later: policy) approves;
 prod deploys. pb is the verification layer — it never implements, never owns the deploy.
 
-**Where we are (2026-07-21, honest):** the honesty core is done, frozen, and green
+**Where we are (2026-07-24, honest):** the honesty core is done, frozen, and green
 (tests + gate + typecheck, 189/189). FOUR differential Catches have executed live:
 n8n #7130 (additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK
 catch — a real regression, not absent code), linkding #1170 (the first non-n8n
@@ -22,10 +22,12 @@ autoincrement assumption). README and site now lead with the #9157 catch, not a
 green PASS, with all four cases linked to committed `site/cases/*.json` evidence.
 `docs/getting-started.md` and a launch-page supported-stacks matrix are both done.
 Distribution is staged (package.json + prepack version-gate + tag committed, cold
-tarball install verified) but `npm publish`/`git push` are HELD for the founder. Still
-open: the Lyric/argo path's store tap throws. The enterprise substrate is designed on
-paper with zero running code; all pipeline glue was explicitly cut from v1. Full issue
-register at the bottom.
+tarball install verified) but `npm publish`/`git push` are HELD for the founder. The
+Lyric/k8s substrate (the argo-workflows drive, its k8s-exec tap, k8s-attach conjure) has
+been EXCISED (commit `b807169`) as unwired surface ahead of a live verdict — Docker
+(`run`/`compose`) is now the one shipped substrate; the excised path resurrects at R3 on
+invariant 7's terms, refs in `DEFERRED.md`. The integration seam ships as documentation
+(`docs/integration.md`, pb-integration-v1) instead. Full issue register at the bottom.
 
 ---
 
@@ -280,3 +282,7 @@ introspection only" page (→ R3, written with the Lyric dogfood).
 - 2026-07-18 (founder): repo-agnostic, never overfit to n8n; pool random-pick stays.
 - 2026-07-18 (founder): no whole-world deps in pb; SUT deps live in its container.
 - Frozen forever: exit codes 0/1/2/3; `false-WORKS = 0` release gate; the 8 invariants.
+- 2026-07-24 (founder): release-endline directive — pb ships Docker-only; the Lyric/k8s
+  substrate path was excised at b807169 (resurrect-refs in DEFERRED.md, scheduled R3);
+  the integration seam ships as documentation (docs/integration.md, pb-integration-v1);
+  Lyric integrates through the public interface like any other platform.

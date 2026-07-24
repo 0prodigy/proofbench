@@ -1,86 +1,92 @@
 # Proofbench
 
 > When an AI agent says a feature is done, get **proof, not its word**, that a real user
-> can actually do the thing — across every service it touches — as a verdict the agent
-> **cannot fake**, with evidence you can **replay**.
-
-**Status:** built and green on branch `product-v1` (`node --test` all passing,
-`node src/cli.mjs gate` PASS, `npm run typecheck` clean). Three full differential
-Catches have executed live and sealed — each pair committed under `site/cases/`:
-
-- **n8n #9157** — merge `6c63cd97` = WORKS ∧ parent `91e59120` = DOES NOT WORK
-  (reproduced 2/2, falsified — the first live regression catch).
-- **linkding #1170** — merge `6c874aff` = WORKS ∧ parent `723b843c` = DOES NOT WORK
-  (reproduced 2/2) — a second repo, a different stack (Django + sqlite, not Node).
-- **n8n #7130** — merge `3ddc176d` = WORKS ∧ parent `869b8f14` = COULD NOT DETERMINE
-  (feature absent at the parent — the earned green before the harness could catch a
-  live regression). Interactive, self-verifying case file at `site/case.html`.
-
-Everything past these three recipes — a second execution engine beyond docker-compose
-conjure, a Postgres-class discriminator, the k8s/Lyric attach path, `orgconfig.mjs`
-org-level policy — is designed, not yet exercised live, and reported as such (not
-claimed) in `docs/ROADMAP.md`. Agents read `CLAUDE.md` first. Prior code and ADRs live
-on `main` / `ENG-17397-proofbench-k8s-attach` and are historical only.
-
----
+> can actually do the thing — as a verdict the agent **cannot fake**, with evidence you
+> can **replay**.
 
 ## What it is
 
-A CLI you run at the moment of maximum doubt. One plain sentence in. The product brings
-your whole (multi-service) system to life, drives it like a hostile first user, and returns
-one of three verdicts — **WORKS · DOES NOT WORK · COULD NOT DETERMINE** — bound to the exact
-code that ran, as one self-contained HTML **case file** where every claim has a replayable
-receipt. On WORKS it shows the evidence; on DOES NOT WORK it shows the broken moment.
+pb is the verification layer between an AI agent's claim of "done" and a human's (later:
+policy's) approval to deploy. The agent only ever **proposes** — the interpretation of a
+plain-English intent, the walk to try; a deterministic **harness disposes** — it brings
+your real system up, drives it, reads the persisted effect out-of-band, seals the
+evidence, and computes one of three verdicts by fixed rules the agent cannot touch:
+**WORKS · DOES NOT WORK · COULD NOT DETERMINE**, bound to the exact code (SHA or image
+digest) that ran. Uncertainty is the honest default — a failure must reproduce (k≥2 from
+a fresh world) to become a conviction, so the agent's own unreliability can only ever cost
+you a WORKS, never manufacture a false one. pb never implements a change and never
+deploys it.
 
-## Why a works/doesn't verdict on top of AI agents is hard — and how we make it trustworthy
+## Install / quickstart
 
-Agents are non-deterministic and will claim success they can't substantiate. The one
-principle that makes the verdict trustworthy:
+`proofbench` is not yet on the npm registry (publish is a pending step — see
+`docs/ROADMAP.md`'s Distribution item). Today, run it from source:
 
-**The AI agent only ever _proposes_; a deterministic harness _disposes_.**
+```
+git clone -b product-v1 https://github.com/0prodigy/proofbench.git && cd proofbench
+node src/cli.mjs gate
+```
 
-- The **agent** proposes (fallible, revisable): the interpretation of the sentence, the user
-  actions to try, the human-readable narration.
-- The **harness** disposes (authoritative): it executes the actions, records ground truth
-  *out of the agent's reach*, seals the evidence, and computes the verdict by fixed rules.
-- The agent is structurally unable to (a) write the verdict, (b) fabricate the evidence, or
-  (c) touch the seal.
-- Uncertainty is **COULD NOT DETERMINE by default** — never rounded up to green. A failure
-  must **reproduce** to become a conviction; a one-off is reported as "observed once, could
-  not reproduce," never dropped, never a verdict.
+`pb gate` runs the E1 malicious-driver honesty gate — deterministic, Docker-free,
+network-free, seconds to run — and is the install smoke test. Everything past `gate`
+(`conjure`, `prove`) needs Docker and an agent (the `claude` CLI or `ANTHROPIC_API_KEY`);
+see [docs/getting-started.md](docs/getting-started.md) for prerequisites and the full
+recipe-authoring walkthrough. (The repo's default branch, `main`, predates this rewrite
+and is historical only — clone `product-v1` explicitly, as above.)
 
-**The asymmetry is the whole game:** the agent's unreliability can only ever *cost us a
-WORKS* (it degrades to COULD NOT DETERMINE) — it can **never manufacture a false WORKS.**
+## Four differential catches, executed live and sealed
 
-## It runs on your infra (one default per phase)
+Every case below ran the identical agent-proposed walk twice — once built at the PR's
+merge SHA, once at its parent — so the verdict pair proves the PR itself, not just the
+repo in general, is why it works (`merge = WORKS ∧ parent ≠ WORKS`). Each pair is
+committed as a sealed, ed25519-signed evidence bundle under `site/cases/`; see
+[docs/integration.md](docs/integration.md) for the case-file format.
 
-Phases split into two kinds:
+- **n8n #9157** — merge [`6c63cd97`](site/cases/n8n-respondwebhook-formtrigger-pr9157.merge.json)
+  = WORKS ∧ parent [`91e59120`](site/cases/n8n-respondwebhook-formtrigger-pr9157.parent.json)
+  = DOES NOT WORK (falsified, reproduced 2/2) — the first live regression catch: a form
+  submit's execution row goes missing at the parent SHA.
+- **linkding #1170** — merge [`6c874aff`](site/cases/linkding-default-mark-shared-pr1170.merge.json)
+  = WORKS ∧ parent [`723b843c`](site/cases/linkding-default-mark-shared-pr1170.parent.json)
+  = DOES NOT WORK (reproduced 2/2) — a second repo, a different stack (Django + sqlite,
+  not Node).
+- **n8n #7130** — merge [`3ddc176d`](site/cases/n8n-form-trigger-pr7130.merge.json) =
+  WORKS ∧ parent [`869b8f14`](site/cases/n8n-form-trigger-pr7130.parent.json) = COULD NOT
+  DETERMINE — the earned green: the feature is simply absent at the parent, not broken.
+  Interactive, self-verifying case file at `site/case.html`.
+- **documenso #3031** — merge [`97835b8d`](site/cases/documenso-envelope-fields-pr3031.merge.json)
+  = WORKS ∧ parent [`977d0733`](site/cases/documenso-envelope-fields-pr3031.parent.json)
+  = DOES NOT WORK (kFail=2/2) — a second execution engine (Postgres tap + a real Konva
+  `<canvas>` browser drive): the identical shift-click-multiselect walk leaves 2 field
+  rows instead of 1 at the parent, because its click handler ignores Shift and replaces
+  the selection instead of extending it.
 
-- **Seam phases — yours to swap:** *Environment*, *Readiness*, *Drive*. Each is an interface
-  with **one default we ship**; plug your own tool that satisfies the contract to run on your
-  own infrastructure.
-- **Trust phases — ours, not swappable:** *Capture/Seal* and *Verdict*. These are the honesty
-  anchor. If they were swappable the product would merely relocate the lie. You can *verify*
-  them (the case file self-verifies offline); you cannot replace them.
+## What's supported today
 
-## The pipeline
+- **Docker is the one shipped substrate** — `conjure.mode: 'run'` (a single container,
+  e.g. n8n) or `'compose'` (a multi-service graph, e.g. documenso's app + postgres +
+  inbucket). No Kubernetes, no cloud account, no `pb`-managed cloud infra.
+- **Code identity:** build from source at an exact SHA (`from_tree`, with an optional
+  `parent_sha` for the differential), or pin an already-built image by digest
+  (`pinned_image`).
+- **Store tap** (the out-of-band, harness-only read of the persisted effect): a sqlite
+  file inside the container, or a separate Postgres container via `docker exec`.
+- **Drive:** an HTTP walk, or a real click/type/click walk through a pinned Chromium
+  sidecar.
+- **Honest CND, not silent failure**, outside that shape: no Dockerfile / not
+  container-buildable, Kubernetes / a live cluster (designed, then excised as unwired
+  surface — see `DEFERRED.md`), serverless/managed backends, and mobile/native front
+  doors all decline today, naming exactly what's missing rather than guessing a verdict.
 
-| # | Phase | Contract (in → out) | Default we ship | Bring-your-own |
-|---|---|---|---|---|
-| 1 | **Intent → Promise** | sentence + system → frozen `PromiseContract` | our compiler (Claude) | your model/agent |
-| 2 | **Environment** | repo + fingerprint → live `SystemUnderTest` | docker-compose (conjure) | Signadot / vcluster / your staging (attach) |
-| 3 | **Readiness** | SUT + expected versions → `READY` / CND | our health+version prober | your probes / Testkube |
-| 4 | **Drive (skeptical user)** | promise + SUT → `Observation` stream | Playwright / browser-use + HTTP | Skyvern / Stagehand / Keploy (traffic replay) |
-| 5 | **Capture & Seal** 🔒 | observations → sealed `EvidenceBundle` | **ours only** | — |
-| 6 | **Verdict** 🔒 | evidence + promise → `Verdict` + case file | **ours only** | — |
-| 7 | **Ledger** | case files → queryable record | *deferred v1* (local files) | your store |
+## Learn more
 
-Full detail: **[docs/phase-contracts.md](docs/phase-contracts.md)**. Product vision &
-build contract: **[docs/product-plan.md](docs/product-plan.md)**.
+- [docs/getting-started.md](docs/getting-started.md) — recipe authoring, the full
+  `pb-recipe-v1` field walkthrough, and what a verdict means, worked end to end.
+- [docs/integration.md](docs/integration.md) — the integration contract for wiring pb
+  into a pipeline: the recipe field reference, the substrate-selector/registry seam,
+  the adapter contract, exit codes, the sealed case-file format, and a CI sketch.
+- `site/index.html` — the launch page (the four catches above, a supported-stacks
+  matrix, and the honesty model in more depth); `site/case.html` is a live, offline
+  self-verifying case file you can open directly.
 
-## v1 scope (the guardrail against "start but never deliver")
-
-v1 verifies **one flow shape brilliantly** — a signed-in user performs a state-changing
-action through a web front door, across ≥2 services and a real datastore, and the promised
-effect must actually hold in the data. Everything off that straight line is cut (see the
-cut list in the phase-contracts doc). The magic moment is **"The Catch."**
+Agents working in this repo read `CLAUDE.md` first — it is binding.

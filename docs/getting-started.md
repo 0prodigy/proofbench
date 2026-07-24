@@ -5,8 +5,11 @@ end — writing a `recipe.json`, running `pb prove` — gets you a real sealed v
 under an hour. This is G1's bar (`docs/ROADMAP.md`); this doc is the path.
 
 For what pb is and why the tri-state verdict is trustworthy, see [README.md](../README.md).
-For the full phase contract, see [docs/phase-contracts.md](phase-contracts.md). This doc
-only teaches the recipe surface and the CLI you run against it.
+For the integration contract (recipe field reference, substrate selectors, exit codes,
+`--json`), see [docs/integration.md](integration.md). For the full phase contract (an
+internal engineering doc, not user-facing), see
+[docs/internal/phase-contracts.md](internal/phase-contracts.md). This doc only teaches
+the recipe surface and the CLI you run against it.
 
 ## Prerequisites
 
@@ -45,9 +48,12 @@ the npm publish itself is a still-open ROADMAP item (`docs/ROADMAP.md`'s R1
 "Distribution"). Until that lands, run the same smoke test from a clone:
 
 ```
-git clone https://github.com/0prodigy/proofbench.git && cd proofbench
+git clone -b product-v1 https://github.com/0prodigy/proofbench.git && cd proofbench
 node src/cli.mjs gate
 ```
+
+(The repo's default branch is still `main`, which predates this rewrite and is
+historical only — clone `product-v1` explicitly, as above, until publish lands.)
 
 Everything past `gate` (`conjure`, `prove`) needs Docker and an agent, per the
 Prerequisites above. Every `pb <command>` below is `node src/cli.mjs <command>` run from
@@ -185,10 +191,12 @@ This is never an app endpoint — it's a direct read of the SUT's own datastore,
 harness, never the agent. Two engines ship: `sqlite` (a store **file** inside the
 container — `busy_timeout_ms` is required because rollback-journal mode means a reader
 can collide with a writer) and `postgres` (a **separate** DB container, `docker exec …
-psql` — no busy-timeout needed, MVCC readers never block on writers). A third,
-`k8s-exec`, is declared for the cluster-attach path but not yet built (`src/recipe.mjs`
-rejects any `url`/`base_url`/`endpoint` field on it — a store tap must stay store-direct,
-never an app call).
+psql` — no busy-timeout needed, MVCC readers never block on writers). `src/recipe.mjs`
+rejects any other `store_tap.engine` value naming the field — a store tap must stay
+store-direct, never an app call. A cluster-attach class (`k8s-exec`) was designed and
+partly built, then excised (commit `b807169`) as an unwired substrate ahead of its live
+verdict (CLAUDE.md pattern 1); it resurrects at R3 on the same terms invariant 7 requires
+— see [docs/integration.md](integration.md)'s adapter-contract section.
 
 `observables` is how a named query's rows reduce to the one comparable value a claim's
 `entity` binds — engine-shaped, not hardcoded to n8n's autoincrement assumption:
@@ -222,10 +230,11 @@ using the recipe's own auth/setup surface. Absent defaults to empty (n8n's recip
 ```
 
 How the front door gets driven: `http` (raw HTTP), `browser` (a real click/type/click
-walk through the pinned Chromium sidecar — what both shipped recipes use), `note-
-lifecycle` and `argo-workflows` (the Lyric/k8s class, R3, not reachable today), or
-`deferred` (no driver built for this front door — an honest CND, never a forced fit; a
-recipe with no `drive` field defaults here).
+walk through the pinned Chromium sidecar — what both shipped recipes use), or `deferred`
+(no driver built for this front door — an honest CND, never a forced fit; a recipe with
+no `drive` field defaults here). These are the only three values `src/recipe.mjs`
+accepts; a Lyric/k8s drive class (R3, not reachable today) was excised at `b807169` and
+resurrects only on invariant 7's terms — see [docs/integration.md](integration.md).
 
 ### `intent` — only when the discriminating behavior isn't "persists a row"
 
@@ -308,10 +317,12 @@ drive over HTTP or a real browser. Outside that shape, today's honest answers ar
   compile step has no recipe path yet (`docs/ROADMAP.md`'s issue register: "no-Dockerfile
   repos need a pre-build compile hook, undesigned"). Unblock: add a Dockerfile, or wait
   for that hook.
-- **Kubernetes / a live cluster** — `drive.mode: "argo-workflows"` + `store_tap.engine:
-  "k8s-exec"` are declared in `src/recipe.mjs` for the Lyric/Argo class, but the k8s-exec
-  tap is a hard throw today (`argoworkflows.mjs:396`) and there's no k8s-attach conjure
-  (R3, `docs/ROADMAP.md`). Unblock: none yet — this is scheduled work, not a workaround.
+- **Kubernetes / a live cluster** — Docker (`run`/`compose`) is the one shipped
+  substrate; the Lyric/k8s attach path (a k8s-exec tap, an argo-workflows drive,
+  k8s-attach conjure) was designed, partly built, then excised at `b807169` as unwired
+  surface ahead of its live verdict. It resurrects at R3 on invariant 7's terms — see
+  `DEFERRED.md`'s resurrect-refs and [docs/integration.md](integration.md). Unblock: none
+  yet — this is scheduled work, not a workaround.
 - **Serverless / fully-managed backends** — no recipe conjures a managed service pb
   doesn't control the container for. Declared honest CND with no code planned until a
   real paying case demands it.
