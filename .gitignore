@@ -2,3 +2,6 @@ node_modules/
 *.log
 .DS_Store
 /scratchpad
+merge-case.json
+.claude/
+docs/RESUME.md

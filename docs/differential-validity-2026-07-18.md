@@ -134,12 +134,13 @@ stage `conjure.mjs` does not yet perform).
   `browserdrive.mjs`, a postgres-shaped delta in `catch.mjs` (today's `rows.length`/max-id logic is
   sqlite/n8n-shaped), a documenso confirm leg (the current one calls n8n-only REST routes), and
   multipart bodies + per-step headers + cross-service captures in recipe setup. Not a drop-in.
-- **Lyric (ENG-17397) — cluster-gated (not headless-startable).** Headless auth is fully ready (gh
-  as `0prodigy`; `mic` decision-engine JWT re-mints headlessly from the gh token; `akashpathak`
-  kubeconfig uses a static client-certificate — no interactive auth). The **sole** blocker is that
-  the base-coherent lyriclet `akashpathak` (namespace `delta`, substrate `k8s-attach`, ENG-17397
-  A&C appservice digest `sha256:a31e0593…97709`) is **HIBERNATED**; waking it requires the mutating,
-  confirmation-gated `mic byoc power akashpathak start` — which auto/headless mode cannot authorize.
-  Go-path: a human runs `mic byoc power akashpathak start` → `mic byoc status akashpathak --wait` →
-  confirm ns `delta` pods are base-coherent → hand to pb `k8s-attach`. The 7 currently-healthy
-  lyriclets are **not** valid targets (none carries the ENG-17397 A&C build).
+- **Lyric (the partner ticket) — cluster-gated (not headless-startable).** Headless auth is fully
+  ready (gh as `0prodigy`; the partner's deploy tooling re-mints a JWT headlessly from the gh
+  token; the target lyriclet's kubeconfig uses a static client-certificate — no interactive
+  auth). The **sole** blocker is that the base-coherent target lyriclet (target namespace,
+  substrate `k8s-attach`, the partner ticket's A&C appservice digest `sha256:a31e0593…97709`) is
+  **HIBERNATED**; waking it requires a mutating, confirmation-gated call into the partner's
+  deploy tooling — which auto/headless mode cannot authorize. Go-path: a human runs the
+  partner's deploy-tooling wake command → waits for ready status → confirms the target
+  namespace's pods are base-coherent → hands off to pb `k8s-attach`. The 7 currently-healthy
+  lyriclets are **not** valid targets (none carries the partner ticket's A&C build).

@@ -197,14 +197,14 @@ cheapest, each step ending in an executed run. This is where the Lyric blockers
 - [ ] **k8s-attach conjure:** attach to an existing deployment (port-forward, read
       image digests at DRIVE time and seal those), never creating cluster objects.
 - [ ] **Multi-repo code identity** (`code_identity.mode:"multi_repo"`: repos[] +
-      wheels[] + images[] per the ENG-17397 draft) with rollup verdict.
+      wheels[] + images[] per the partner ticket draft) with rollup verdict.
 - [ ] **Shared-cluster fresh-world:** `fresh_world:"new-instance-per-iteration"`
       (new note/exec per k-iteration, nonce-scoped, iteration ids must differ).
 - [ ] **Base-coherence preflight** (hard L3 gate vs base-skew F3 / reconcile-revert F2 —
       the two known ways a cluster manufactures a FALSE DNW before pb runs).
 - [ ] **Operator-ratify mode:** destructive/gated steps require same-turn human
       confirmation; pb marks them in the recipe and refuses headless execution.
-- [ ] **Lyric dogfood:** ENG-17397 live on a base-coherent lyriclet — merge=WORKS
+- [ ] **Lyric dogfood:** the partner ticket live on a base-coherent lyriclet — merge=WORKS
       (controls expire + ack-proceed) ∧ parent=stuck-queued DNW, sealed from the
       cluster. The first L4/L5 behavioral verdict Lyric has ever had.
 
@@ -262,11 +262,11 @@ introspection only" page (→ R3, written with the Lyric dogfood).
 
 - 2026-07-21 (founder, same-turn): G1 build complete; `git push origin product-v1 v0.2.1`
   executed (npm publish pending founder `npm login`). **Lyric lyriclet dogfood (the R3
-  subset scoped in `docs/lyric-integration-contract.md`) is pulled AHEAD of G2** — pb
-  ships the control surface, Lyric team integrates once, then autopilot; first substrate
-  = BYOC lyriclet via decision-engine; target = ENG-17397 live differential. Founder also
-  authorized waking the hibernated `akashpathak` lyriclet for this work. G2 items remain
-  next after the dogfood.
+  subset scoped in an internal contract doc, since removed from the public repo) is pulled
+  AHEAD of G2** — pb ships the control surface, Lyric team integrates once, then autopilot;
+  first substrate = BYOC lyriclet via the partner's deploy tooling; target = the partner
+  ticket live differential. Founder also authorized waking the hibernated target lyriclet
+  for this work. G2 items remain next after the dogfood.
 - 2026-07-20 (founder, product audit): fundamentals CONFIRMED right — the 8 invariants,
   recipe seam, differential Catch stand; the gap is coverage/cost/onboarding, all
   additive. No rewrite, ever. Adoption metrics block above is binding at every gate.

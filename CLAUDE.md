@@ -69,8 +69,9 @@ kill adoption faster than any missed hardening.
 
 ## Session protocol
 
-- Start: read this file → `docs/RESUME.md` → `docs/ROADMAP.md`. Work ONLY on the current
-  gate's checklist. Do not reopen decided questions (decisions are logged in ROADMAP.md).
+- Start: read this file → `docs/RESUME.md` (local, untracked) → `docs/ROADMAP.md`. Work
+  ONLY on the current gate's checklist. Do not reopen decided questions (decisions are
+  logged in ROADMAP.md).
 - Verify: `node --test` green, `node src/cli.mjs gate` PASS, `npm run typecheck` clean —
   before AND after your change. A live-run claim requires the run's evidence committed.
 - End: update `docs/RESUME.md` (state) and check off ROADMAP items. Commit each verified

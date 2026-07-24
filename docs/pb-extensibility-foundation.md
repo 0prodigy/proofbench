@@ -1,7 +1,7 @@
 # pb Extensibility Foundation — Org-Config → Sandbox-Acquisition Contract + Per-Phase Providers + CI-Integration Contract
 
 **Status:** DESIGN / ADR **v2** — for human approval. No code in this document; nothing here is implemented or committed. (v2 hardens v1 with: honesty guarantees reframed as *mint preconditions*, the `pb-buildrecord-v1` CI-integration contract + local-build provider replacing the old "push Lyric to attest" framing, an explicit single-repo-spine multi-repo rollup model, and a second adversarial pass on the CI contract.)
-**Scope:** The foundation that lets pb acquire and verify a test sandbox from **untrusted org-maintained config**, prove **one repo's PR works end-to-end** as the non-negotiable spine, integrate an org's **own CI build pipeline** through a thin contract (pb never owns the build), and add per-phase provider adapters (Argo CD, CI) over time — keeping native single-service `from_tree`/local-docker as the zero-integration default, and Lyric (ENG-17397) as the first pure-configuration enterprise instance.
+**Scope:** The foundation that lets pb acquire and verify a test sandbox from **untrusted org-maintained config**, prove **one repo's PR works end-to-end** as the non-negotiable spine, integrate an org's **own CI build pipeline** through a thin contract (pb never owns the build), and add per-phase provider adapters (Argo CD, CI) over time — keeping native single-service `from_tree`/local-docker as the zero-integration default, and Lyric (the partner ticket) as the first pure-configuration enterprise instance.
 **Non-negotiable:** false-WORKS = 0. No provider — however dishonest or misconfigured — may manufacture a WORKS or hide a DNW. **Single-repo PR validation is the spine and must not regress** (`pb prove recipes/n8n-form-trigger-pr7130` stays byte-identical, `mode:"from_tree"`, tier 1).
 
 Grounding note: every pb citation below is verified against the tree at branch `product-v1`. Seam-map corrections carried into v2: `verdict.mjs` `satisfies()` is at 102-103 and `satisfiesPersisted()` at 115-116 (the circulating "102-104 / 115-117" figures are off by one); `Receipt.kind` is typed `ReceiptKind | string` (types.mjs:93) and conjure's `fingerprint` kind already lives **outside** the frozen enum — so new provider receipt kinds are open data and the frozen core needs **zero** changes for this entire design. The `code_identity` discriminated union is recipe.mjs:197 (`from_tree`) / 202 (`pinned_image`) / 206-209 (`else`→`bad`, the reject branch a third mode extends). The Lyric single-repo-SHA gap note is `src/lyric/manifest-adapter.mjs:161` (not 162), and `artifactProvenance()`'s MIN-of-declared-and-derived law is lines 92-105.
@@ -159,7 +159,7 @@ The seven mint-precondition fixes from the first adversarial pass:
   "source":   { "repo": "github.com/org/svc", "sha": "<full peeled commit SHA the build consumed>" },
   "artifact": {
     "type":   "oci-image" | "python-wheel" | "npm-tarball" | "generic",
-    "ref":    "us-docker.pkg.dev/.../svc:<tag-or-@sha256>",   // PULLABLE locator (pb pulls by DIGEST)
+    "ref":    "<registry-host>/.../svc:<tag-or-@sha256>",   // PULLABLE locator (pb pulls by DIGEST)
     "digest": "sha256:<manifest-digest>"                       // DECLARED — pb re-reads + cross-checks
   },
   "delivery": {                                                // UNTRUSTED HINTS ONLY (see adversarial fix)
@@ -265,18 +265,18 @@ The second adversarial pass rated the design **sound-with-fixes, breaksFrozenCor
 
 ---
 
-## 6. The Lyric ENG-17397 Instance — Pure Configuration
+## 6. The Lyric (Partner Ticket) Instance — Pure Configuration
 
 The acid test: *the common-PR → deploy-check → cluster → browser-drive flow must fall out of the roadmap as one configuration, with essentially no new pb code.* If it needs new framework surface, the framework is wrong.
 
 **The flow, expressed as framework config:**
 
-| Step | Framework mechanism | Lyric specifics (from ENG-17397 recon) |
+| Step | Framework mechanism | Lyric specifics (from the partner ticket recon) |
 |---|---|---|
 | Common PR opened | (out of band — human) | PR against a service repo; SRM must have already run once so privileges/users/workspaces exist |
 | Image built for SHA | **CI-integration contract** (`pb-buildrecord-v1`) | `docker_publish` fires a `git_tag_overwrite` tag-push; wheels/images publish to GCP AR under the `dev<ticket>` convention. Lyric's CI exposes the BuildRecord (registry-referrer or `.pb/builds/<sha>.json`); pb pulls **by digest** and runs containment. |
 | Deploy-check | **Readiness** `argocd` adapter (gate) | `<svc>-<env>` Application on a Model-B BYOC lyriclet; encode F2 tracked-ref + tag-peel + tag-exists traps |
-| Acquire sandbox | **Environment** `k8s-attach` provider | Model-B BYOC lyriclet (personal, no shared-branch contention); `mic byoc power start` + `status --wait` to wake |
+| Acquire sandbox | **Environment** `k8s-attach` provider | Model-B BYOC lyriclet (personal, no shared-branch contention); the partner's deploy-tooling power-start + status-wait commands to wake |
 | Verify code-identity | Code-Identity runner (`ci_attested`) | pb reads the running pod's imageID **manifest** digest itself; containment via differential-content (**Python services: tier 3 zero-integration**) or, for TS→JS `appservice`, tier-2 provenance or `from_tree` fallback (**caps at CND on differential-content**). Tag name `<cluster>-<sha>` is **`unbound`**, never admissible. |
 | Browser drive | **Drive** `browser` provider (existing `browserdrive.mjs`) | drives `ui-monorepo` at the studio subdomain — see gap below |
 | Ground-truth tap | **Tap** `k8s-exec` engine | `kubectl exec mongodb-0 -c mongod -- mongosh` out-of-band, array-argv (P6) — **never** the app's own REST read path; run-scoped nonce round-trip (P2) |
