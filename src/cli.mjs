@@ -36,7 +36,7 @@ function usage() {
     '  phase2 <dir>    bring up docker-compose + prove the front door serves → READY/CND',
     '  phase3 <dir> [--intent "..."]   HTTP-drive a fixture app + confirm the effect persists',
     '  conjure <recipeDir>|--random [--keep]   bring up a real SUT from a pb-recipe-v1 (--random: pick one from the pool) + mint its code-identity fingerprint',
-    '  prove <recipeDir>|--random   run the differential Catch at the merge SHA and the parent SHA (--random: pick one from the pool) → PASS iff merge=WORKS ∧ parent≠WORKS',
+    '  prove <recipeDir>|--random [--json]   run the differential Catch at the merge SHA and the parent SHA (--random: pick one from the pool) → PASS iff merge=WORKS ∧ parent≠WORKS; --json emits ONE pb-verdict-v1 JSON document on stdout (render-layer only — exit codes unchanged), human-readable rendering moves to stderr',
     '  help            show this help',
     '',
     'Phase commands exit 0 only on WORKS; prove exits 0 only on differential PASS.',
@@ -182,6 +182,54 @@ function renderDifferential(merge, parent, pass) {
 }
 
 /**
+ * One leg (merge | parent) of the `pb prove --json` document.
+ * @typedef {Object} VerdictJsonLeg
+ * @property {string} sha
+ * @property {string} verdict
+ * @property {string|null} reason
+ * @property {string|null} case_file
+ */
+
+/**
+ * Assemble the ONE JSON document `pb prove --json` emits on stdout — pure, render-layer only:
+ * every field is derived from the two CatchResults and the SAME pass/exit-code the human-readable
+ * path (renderCatch/renderDifferential) already computes, never a re-decision of the tri-state.
+ * `verdict` mirrors renderDifferential's own PASS/FAIL line (line ~171) rather than inventing a
+ * new non-discriminating-parent state; each leg's own failing state is still visible verbatim
+ * under `legs.<leg>.verdict`. `reason` joins verdict.reasons (VerdictResult carries a string[], not
+ * a single string) — empty only when the verdict recorded none. `case_file` is the sealed receipt
+ * persistCatchReceipt wrote for that leg (catch.mjs, always populated by runCatch today; null'd
+ * defensively for a future/foreign CatchResult that omits it).
+ * @param {Object} args
+ * @param {string} args.recipeName
+ * @param {import('./catch.mjs').CatchResult} args.merge
+ * @param {import('./catch.mjs').CatchResult} args.parent
+ * @param {boolean} args.pass
+ * @param {number} args.exitCode
+ * @returns {{schema:string, recipe:string, verdict:'PASS'|'FAIL', exit_code:number, legs:{merge:VerdictJsonLeg, parent:VerdictJsonLeg}, differential:{pass:boolean}}}
+ */
+export function buildVerdictJson({ recipeName, merge, parent, pass, exitCode }) {
+  /**
+   * @param {import('./catch.mjs').CatchResult} result
+   * @returns {VerdictJsonLeg}
+   */
+  const leg = (result) => ({
+    sha: result.sha,
+    verdict: result.verdict.state,
+    reason: result.verdict.reasons.length ? result.verdict.reasons.join(' ') : null,
+    case_file: result.receiptPath || null,
+  });
+  return {
+    schema: 'pb-verdict-v1',
+    recipe: recipeName,
+    verdict: pass ? 'PASS' : 'FAIL',
+    exit_code: exitCode,
+    legs: { merge: leg(merge), parent: leg(parent) },
+    differential: { pass },
+  };
+}
+
+/**
  * Select the proposer backend WITHOUT adding a config key: PB_PROPOSER forces it
  * (`claude-cli` | `api`); otherwise auto — use the local `claude` CLI (subscription OAuth, no key)
  * UNLESS ANTHROPIC_API_KEY is set, in which case use the Anthropic API path. Returns the LlmFn seam
@@ -259,6 +307,10 @@ async function main() {
   }
 
   if (cmd === 'prove') {
+    // --json is render-layer only (schema pb-verdict-v1): it moves the human-readable rendering
+    // to stderr and prints exactly one JSON document to stdout; the exit-code contract is untouched.
+    const json = process.argv.includes('--json');
+    const humanOut = json ? process.stderr : process.stdout;
     let dir = process.argv[3];
     if (process.argv.includes('--random')) {
       // Anti-overfit: pick a recipe from the pool each run — pb must not always prove n8n.
@@ -268,7 +320,7 @@ async function main() {
         process.exit(1);
       }
       const picked = pickRandom(pool);
-      process.stdout.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
+      humanOut.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
       dir = picked.dir;
     } else if (!dir || dir.startsWith('--')) {
       process.stderr.write(`pb prove: missing <recipeDir>\n\n${usage()}\n`);
@@ -279,7 +331,7 @@ async function main() {
 
     const ci = recipe.code_identity;
     if (ci.mode !== 'from_tree' || !ci.parent_sha) {
-      process.stdout.write(
+      humanOut.write(
         'pb prove: the differential Catch needs a from_tree code_identity with a parent_sha (the disclosed baseline); ' +
           'this recipe has none, so the anti-tautology (merge=WORKS ∧ parent≠WORKS) cannot be proven.\n'
       );
@@ -292,11 +344,15 @@ async function main() {
     const intent = recipe.intent;
     const merge = await runCatch({ recipeDir: abs, buildSha: ci.sha, llmFn, intent });
     const parent = await runCatch({ recipeDir: abs, buildSha: ci.parent_sha, proposal: merge.proposal || undefined, llmFn, intent });
-    process.stdout.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
-    process.stdout.write(renderCatch('PARENT', parent.sha, parent) + '\n');
+    humanOut.write(renderCatch('MERGE', merge.sha, merge) + '\n\n');
+    humanOut.write(renderCatch('PARENT', parent.sha, parent) + '\n');
     const pass = merge.verdict.state === Verdict.WORKS && parent.verdict.state !== Verdict.WORKS;
-    process.stdout.write(renderDifferential(merge, parent, pass) + '\n');
-    process.exit(pass ? 0 : 1);
+    humanOut.write(renderDifferential(merge, parent, pass) + '\n');
+    const exitCode = pass ? 0 : 1;
+    if (json) {
+      process.stdout.write(JSON.stringify(buildVerdictJson({ recipeName: recipe.name, merge, parent, pass, exitCode })) + '\n');
+    }
+    process.exit(exitCode);
   }
 
   if (cmd === undefined || cmd === 'help' || cmd === '--help' || cmd === '-h') {
