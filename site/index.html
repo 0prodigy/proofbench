@@ -460,13 +460,15 @@ EVIDENCE SEALED ed25519</code></pre>
     <div class="container">
       <div class="section-head">
         <p class="eyebrow">install honestly, in under a minute</p>
-        <h2>Not on npm yet. Clone and run.</h2>
-        <p><code>package.json</code>'s name is already <code>proofbench</code> with a <code>pb</code> bin, but the npm publish itself is a still-open <a href="../docs/ROADMAP.md">ROADMAP</a> item (R1 Distribution) — nothing on this page claims otherwise. Until it lands, run the same smoke test from a clone; it needs Node only, no Docker and no agent. The repo's default branch predates this rewrite and is historical only — clone <code>product-v1</code> explicitly, as below.</p>
+        <h2>On npm. <code>npx</code> it, or clone for recipes.</h2>
+        <p><code>proofbench</code> is published on the npm registry with a <code>pb</code> bin — no clone needed to run the honesty gate. The npm package ships only the engine (<code>src/</code>); the example <code>recipes/</code> and <code>fixtures/</code> don't ship, so authoring recipes or running the shipped examples still needs a clone. The repo's default branch predates this rewrite and is historical only — clone <code>product-v1</code> explicitly, as below.</p>
       </div>
+      <div class="code-frame"><pre><code>npx proofbench gate</code></pre><button class="copy-btn" type="button" data-copy-target aria-label="Copy install command">Copy</button></div>
+      <p class="demo-caption"><code>pb gate</code> is the E1 malicious-driver honesty gate — deterministic, Docker-free, network-free, seconds. A <code>PASS</code> is your install smoke test. To author recipes or run the shipped examples, clone instead:</p>
       <div class="code-frame"><pre><code>git clone -b product-v1 https://github.com/0prodigy/proofbench.git
 cd proofbench
-node src/cli.mjs gate</code></pre><button class="copy-btn" type="button" data-copy-target aria-label="Copy install command">Copy</button></div>
-      <p class="demo-caption"><code>pb gate</code> is the E1 malicious-driver honesty gate — deterministic, Docker-free, network-free, seconds. A <code>PASS</code> is your install smoke test. Once the npm publish lands, the same check becomes <code>npx proofbench gate</code> — not usable yet. Full recipe-authoring path (Docker + an agent, a real sealed verdict in under an hour): <a href="../docs/getting-started.md">docs/getting-started.md</a>.</p>
+node src/cli.mjs gate</code></pre><button class="copy-btn" type="button" data-copy-target aria-label="Copy clone command">Copy</button></div>
+      <p class="demo-caption">Full recipe-authoring path (Docker + an agent, a real sealed verdict in under an hour): <a href="../docs/getting-started.md">docs/getting-started.md</a>.</p>
     </div>
   </section>
 

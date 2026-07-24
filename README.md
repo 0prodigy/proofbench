@@ -19,20 +19,34 @@ deploys it.
 
 ## Install / quickstart
 
-`proofbench` is not yet on the npm registry (publish is a pending step — see
-`docs/ROADMAP.md`'s Distribution item). Today, run it from source:
+`proofbench` is on the npm registry — no clone needed to run the honesty gate:
+
+```
+npx proofbench gate
+```
+
+or install the `pb` CLI globally:
+
+```
+npm i -g proofbench
+pb gate
+```
+
+`pb gate` runs the E1 malicious-driver honesty gate — deterministic, Docker-free,
+network-free, seconds to run — and is the install smoke test. Everything past `gate`
+(`conjure`, `prove`) needs Docker and an agent (the `claude` CLI or `ANTHROPIC_API_KEY`);
+see [docs/getting-started.md](docs/getting-started.md) for prerequisites.
+
+The npm package ships only `src/` (the engine) — `recipes/` and `fixtures/` do not ship.
+To author recipes or run the shipped example recipes, clone the repo instead:
 
 ```
 git clone -b product-v1 https://github.com/0prodigy/proofbench.git && cd proofbench
 node src/cli.mjs gate
 ```
 
-`pb gate` runs the E1 malicious-driver honesty gate — deterministic, Docker-free,
-network-free, seconds to run — and is the install smoke test. Everything past `gate`
-(`conjure`, `prove`) needs Docker and an agent (the `claude` CLI or `ANTHROPIC_API_KEY`);
-see [docs/getting-started.md](docs/getting-started.md) for prerequisites and the full
-recipe-authoring walkthrough. (The repo's default branch, `main`, predates this rewrite
-and is historical only — clone `product-v1` explicitly, as above.)
+(The repo's default branch, `main`, predates this rewrite and is historical only — clone
+`product-v1` explicitly, as above.)
 
 ## Four differential catches, executed live and sealed
 

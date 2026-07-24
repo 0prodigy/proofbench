@@ -21,8 +21,8 @@ n8n-hardcoded: `catch.mjs`/`recipe.mjs` now resolve them from the recipe's own
 autoincrement assumption). README and site now lead with the #9157 catch, not a
 green PASS, with all four cases linked to committed `site/cases/*.json` evidence.
 `docs/getting-started.md` and a launch-page supported-stacks matrix are both done.
-Distribution is staged (package.json + prepack version-gate + tag committed, cold
-tarball install verified) but `npm publish`/`git push` are HELD for the founder. The
+Distribution shipped: `proofbench@0.3.0` published to the npm registry 2026-07-24; cold
+`npx -y --package proofbench@0.3.0 pb gate` → GATE: PASS exit 0. G1 is now fully closed. The
 Lyric/k8s substrate (the argo-workflows drive, its k8s-exec tap, k8s-attach conjure) has
 been EXCISED (commit `b807169`) as unwired surface ahead of a live verdict — Docker
 (`run`/`compose`) is now the one shipped substrate; the excised path resurrects at R3 on
@@ -123,13 +123,10 @@ pr1170/` is the R1 proof case: after the fixes, `pb prove` on it must yield merg
       `531a8f8` W3C Actions float-coordinate rounding, `5f8af83` viewport-aware
       introspection) — none touched the frozen core. `pb prove --random` (the full-pool
       gate) was NOT run this pass; a bonus, not required for this box.
-- [ ] **Distribution:** publish npm as `proofbench` (name verified free), bin `pb`,
+- [x] **Distribution:** publish npm as `proofbench` (name verified free), bin `pb`,
       drop `private:true`, version from git tag. `npx proofbench gate` works cold.
-      STAGED, not shipped: package.json/prepack version-gate/tag `v0.2.0` committed
-      (`f7dd9a9`), cold-install from a packed tarball verified (`npx pb gate` → PASS
-      in a fresh empty dir with zero deps beyond itself) — but the real `npm publish`
-      is HELD for the founder to run; box stays open until the package is actually on
-      the registry.
+      Done: published `proofbench@0.3.0` to the registry 2026-07-24; cold
+      `npx -y --package proofbench@0.3.0 pb gate` → GATE: PASS exit 0.
 - [x] **Getting-started doc:** recipe authoring guide with the two shipped recipes as
       worked examples; prerequisites stated (Node 20+, Docker, claude CLI or API key).
       Done: `docs/getting-started.md` — every field derived from `src/recipe.mjs`,

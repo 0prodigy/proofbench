@@ -34,18 +34,28 @@ the recipe surface and the CLI you run against it.
 
 ## Install
 
+`proofbench` is on the npm registry, so `npx` gets you the honesty gate with no clone:
+
 ```
 npx proofbench gate
 ```
 
+or install the `pb` CLI globally:
+
+```
+npm i -g proofbench
+pb gate
+```
+
 `pb gate` runs the E1 malicious-driver honesty gate — a deterministic, docker-free,
 network-free suite that proves the verdict logic can't be talked into a false WORKS. It
-takes seconds and needs none of the prerequisites above except Node. Treat a `PASS` here
-as your install smoke test before you touch Docker or an agent at all.
+takes seconds and needs none of the prerequisites above except Node (pb itself is
+zero-dependency; Docker and an agent are only needed once you go past `gate`, below).
+Treat a `PASS` here as your install smoke test before you touch Docker or an agent at all.
 
-`package.json`'s name is already `proofbench` with a `pb` bin and no `private` flag, but
-the npm publish itself is a still-open ROADMAP item (`docs/ROADMAP.md`'s R1
-"Distribution"). Until that lands, run the same smoke test from a clone:
+The npm package ships only the engine (`src/`) — the shipped `recipes/` and `fixtures/`
+used in the rest of this guide do not ship in the package. To author recipes or run the
+shipped example recipes, clone the repo instead:
 
 ```
 git clone -b product-v1 https://github.com/0prodigy/proofbench.git && cd proofbench
@@ -53,11 +63,11 @@ node src/cli.mjs gate
 ```
 
 (The repo's default branch is still `main`, which predates this rewrite and is
-historical only — clone `product-v1` explicitly, as above, until publish lands.)
+historical only — clone `product-v1` explicitly, as above.)
 
 Everything past `gate` (`conjure`, `prove`) needs Docker and an agent, per the
 Prerequisites above. Every `pb <command>` below is `node src/cli.mjs <command>` run from
-the repo root (or the installed `pb` bin, once published) — interchangeable.
+a clone (or the installed `pb` bin) — interchangeable.
 
 ## The pb-recipe-v1 surface
 
