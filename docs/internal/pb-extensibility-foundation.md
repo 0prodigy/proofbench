@@ -144,7 +144,7 @@ The seven mint-precondition fixes from the first adversarial pass:
 **Harness verify step (what keeps it honest):**
 - **Routing only.** not-Healthy/not-Synced ⇒ skip drive, CND with a minted reason receipt. Healthy/Synced ⇒ *permission to attempt*, never a substitute for pb's own front-door ready probe (which always runs — Argo health is the acquired system reporting on itself).
 - **tag-peel trap.** `git rev-parse <tag>` returns the annotated-tag object SHA; Argo reports the *peeled* commit SHA. Compare **peeled commit SHAs only**, or a naive compare false-mismatches. (Also: a tag and branch sharing a name resolve the tag under a bare `rev-parse` — read explicit `refs/heads/`·`refs/tags/`.)
-- **reconcile-revert trap (Lyric F2, verified 2026-07-07).** Lyric's in-cluster agent re-renders each app ~every 5 min from a ref in the `lyric-agent-state` ConfigMap, silently reverting a `create_release`-only pin — "Synced" can be true against the **wrong** ref. Per P3, the runner reads that tracked ref and **re-verifies the running pod digest immediately before drive and again after the last tap**; drive-time digest ≠ bring-up digest ⇒ CND (the leg is not minted).
+- **reconcile-revert trap (Lyric F2, verified 2026-07-07).** The partner's in-cluster agent re-renders each app ~every 5 min from a ref in its own reconciliation state, silently reverting a deploy-tool-only pin — "Synced" can be true against the **wrong** ref. Per P3, the runner reads that tracked ref and **re-verifies the running pod digest immediately before drive and again after the last tap**; drive-time digest ≠ bring-up digest ⇒ CND (the leg is not minted).
 - **tag-exists ≠ deployed.** The adapter never treats registry-tag existence as deployment; only the deployed pod's actual image digest is ground truth.
 
 ### 4.2 The CI-Integration Contract — `pb-buildrecord-v1` (pb does NOT own the build)
@@ -275,8 +275,8 @@ The acid test: *the common-PR → deploy-check → cluster → browser-drive flo
 |---|---|---|
 | Common PR opened | (out of band — human) | PR against a service repo; SRM must have already run once so privileges/users/workspaces exist |
 | Image built for SHA | **CI-integration contract** (`pb-buildrecord-v1`) | `docker_publish` fires a `git_tag_overwrite` tag-push; wheels/images publish to GCP AR under the `dev<ticket>` convention. Lyric's CI exposes the BuildRecord (registry-referrer or `.pb/builds/<sha>.json`); pb pulls **by digest** and runs containment. |
-| Deploy-check | **Readiness** `argocd` adapter (gate) | `<svc>-<env>` Application on a Model-B BYOC lyriclet; encode F2 tracked-ref + tag-peel + tag-exists traps |
-| Acquire sandbox | **Environment** `k8s-attach` provider | Model-B BYOC lyriclet (personal, no shared-branch contention); the partner's deploy-tooling power-start + status-wait commands to wake |
+| Deploy-check | **Readiness** `argocd` adapter (gate) | `<svc>-<env>` Application on the partner's dedicated per-tenant cluster environment; encode F2 tracked-ref + tag-peel + tag-exists traps |
+| Acquire sandbox | **Environment** `k8s-attach` provider | the partner's dedicated per-tenant cluster environment (personal, no shared-branch contention); the partner's deploy-tooling power-start + status-wait commands to wake |
 | Verify code-identity | Code-Identity runner (`ci_attested`) | pb reads the running pod's imageID **manifest** digest itself; containment via differential-content (**Python services: tier 3 zero-integration**) or, for TS→JS `appservice`, tier-2 provenance or `from_tree` fallback (**caps at CND on differential-content**). Tag name `<cluster>-<sha>` is **`unbound`**, never admissible. |
 | Browser drive | **Drive** `browser` provider (existing `browserdrive.mjs`) | drives `ui-monorepo` at the studio subdomain — see gap below |
 | Ground-truth tap | **Tap** `k8s-exec` engine | `kubectl exec mongodb-0 -c mongod -- mongosh` out-of-band, array-argv (P6) — **never** the app's own REST read path; run-scoped nonce round-trip (P2) |
@@ -285,7 +285,7 @@ The acid test: *the common-PR → deploy-check → cluster → browser-drive flo
 **Named gaps this instance inherits (honestly recorded):**
 - **ui-monorepo has no pb build/fingerprint path today.** v2 binds code-identity to the **service under test only**; the UI is treated as *environment*, not fingerprinted. Explicit assumption — revisit later.
 - **Differential on a live cluster is degraded to single-leg** (P3/P5, and the mixed-builder inadmissibility of §4.4): two sequential deploys under a ~5-min reconciler is a false-differential machine. The live path emits an honest **`non-differential`** single-leg `catch` (WORKS/CND on the merge SHA) with drive-time digest re-verification; the two-leg differential stays first-class only when both legs share a builder tier (both `from_tree` or both `ci_attested` with revert-safe pinning).
-- **Headless credential** is the hard blocker (§9, Q1): AWS SSO is interactive with no refresh; only the `notprod-lyric-deploy` MCP works headless.
+- **Headless credential** is the hard blocker (§9, Q1): the partner's cluster SSO is interactive with no refresh; only the partner's deploy tooling/API works headless.
 
 ---
 
@@ -316,7 +316,7 @@ The implementation is accepted only if **all** of these hold. false-WORKS = 0 is
 **Phase 2 — the acquire-and-verify integrations.**
 - **M3 (medium):** `k8s-attach` Environment provider + the harness-owned independent digest read (I2/P1). The honesty crux — pb's first path to a system it didn't build.
 - **M4 (medium):** the `ci_attested` Code-Identity path — `pb-buildrecord-v1` schema + validator, pull-by-digest, differential-content containment (total diff coverage + executed-path), the binding ladder, and the **containment/runner adversarial gate** (release-blocking). Generalizes v1's GitHub-specific corroborator to the CI-agnostic BuildRecord; forged-CI adversarial test is its gate.
-- **M5 (medium):** `argocd` Readiness gate with the three traps (F2 reconcile-revert incl. `lyric-agent-state` tracked ref, tag-peel, tag-exists) encoded as named checks.
+- **M5 (medium):** `argocd` Readiness gate with the three traps (F2 reconcile-revert incl. the partner's reconciler-tracked ref, tag-peel, tag-exists) encoded as named checks.
 
 **Phase 3 — Lyric as one configuration + rollup.**
 - **M6 (large; config + one `k8s-exec` tap engine only):** the Lyric org config + recipe. Its pass condition *is* that no new framework surface was needed. Gated on Q1/Q2.
@@ -335,7 +335,7 @@ The implementation is accepted only if **all** of these hold. false-WORKS = 0 is
 
 ## 9. Open Questions for the User
 
-1. **Headless cluster credential (blocks every live leg of M3/M5/M6).** AWS SSO is interactive with no refresh; `de-api.sh` raw reads are SSO-gated (401); only the `notprod-lyric-deploy` MCP works headless. pb's phase runners need at minimum headless `kubectl get pod/application` + `kubectl exec` (mongosh tap) on one BYOC lyriclet. **Can a long-lived service-account kubeconfig be provisioned for one lyriclet, and is MCP-only read access acceptable for the Argo/CI attestors?** Nothing in M1/M2/M4 waits on this — but M6-live does.
+1. **Headless cluster credential (blocks every live leg of M3/M5/M6).** The partner's cluster SSO is interactive with no refresh; direct API reads are SSO-gated (401); only the partner's deploy tooling/API works headless. pb's phase runners need at minimum headless `kubectl get pod/application` + `kubectl exec` (mongosh tap) on one tenant cluster environment. **Can a long-lived service-account kubeconfig be provisioned for one tenant environment, and is deploy-tooling-only read access acceptable for the Argo/CI attestors?** Nothing in M1/M2/M4 waits on this — but M6-live does.
 
 2. **Differential semantics on an acquired cluster.** Recommendation: the live path ships a **`non-differential` single-leg `catch`** (honest WORKS/CND on the merge SHA) with drive-time digest re-verification, deferring the two-leg differential on live clusters until deploy-swap is revert-safe (pin on the agent-tracked ref first, per F2) **and both legs share a builder tier** (no mixed CI-merge/pb-parent). **Accept single-leg `non-differential` for the Lyric instance, keeping the full differential first-class only when both legs come from the same builder?**
 
@@ -344,4 +344,4 @@ The implementation is accepted only if **all** of these hold. false-WORKS = 0 is
 ---
 
 ### Assumptions made (not user-stated)
-Config-only adapters in v2; single-leg `non-differential` external `catch` in v2; UI excluded from code-identity binding in v2; Lyric target = Model-B BYOC lyriclet; pb's zero-runtime-dep rule extends to all providers; pb is granted at least read-level cluster/registry credentials by any integrating org; the tier-2 recognized-identity trust root is operator-supplied out-of-band. "Design, do not implement" ⇒ this doc is the only artifact produced now.
+Config-only adapters in v2; single-leg `non-differential` external `catch` in v2; UI excluded from code-identity binding in v2; Lyric target = the partner's dedicated per-tenant cluster environment; pb's zero-runtime-dep rule extends to all providers; pb is granted at least read-level cluster/registry credentials by any integrating org; the tier-2 recognized-identity trust root is operator-supplied out-of-band. "Design, do not implement" ⇒ this doc is the only artifact produced now.

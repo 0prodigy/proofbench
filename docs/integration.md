@@ -228,11 +228,13 @@ An integrator scripting against exit codes can rely on the 0/1/2/3 split for the
 commands and `conjure`'s CND path today; `gate` and `prove` stay pass/fail (0/1), with `2`
 reserved for a usage problem that never produced a verdict at all.
 
-### `--json` (in progress, parallel slice)
+### `--json`
 
 `pb prove <dir> --json` emits one JSON document on stdout, schema `"pb-verdict-v1"`,
 while the existing human-readable render moves to stderr (exit codes unchanged from the
-table above):
+table above). On the early-exit path — a recipe without `from_tree`/`parent_sha` (exit
+`2`, no run starts) — no JSON document is emitted on stdout at all; a parser scripting
+against `--json` must handle empty stdout on that path.
 
 ```json
 {
@@ -275,10 +277,10 @@ ceiling, not a hidden one.
 
 ## CI sketch (description only — the GitHub Action itself is a separate R2 deliverable)
 
-A minimal PR-gate integration: run `pb prove <recipeDir>` (or, once shipped, `--json`)
-on the PR's SHA as `code_identity.sha`/`parent_sha`; consume the process exit code for
-pass/fail today (0 only on differential PASS, per the exit-code table above), or parse
-the `--json` document once it lands;
+A minimal PR-gate integration: run `pb prove <recipeDir>` (or `--json`) on the PR's SHA
+as `code_identity.sha`/`parent_sha`; consume the process exit code for pass/fail today
+(0 only on differential PASS, per the exit-code table above), or parse the `--json`
+document;
 upload the sealed case file (`result.receiptPath` per leg) as a build artifact so a
 reviewer can open it and self-verify offline; gate merge on the exit code / `verdict`
 field via branch protection. pb never merges, approves, or deploys — it only produces

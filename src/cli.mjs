@@ -295,7 +295,7 @@ async function main() {
       const pool = listRecipes();
       if (pool.length === 0) {
         process.stderr.write('pb conjure --random: no loadable recipes in the pool (recipes/)\n');
-        process.exit(1);
+        process.exit(2);
       }
       const picked = pickRandom(pool);
       process.stdout.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
@@ -333,7 +333,7 @@ async function main() {
       const pool = listRecipes();
       if (pool.length === 0) {
         process.stderr.write('pb prove --random: no loadable recipes in the pool (recipes/)\n');
-        process.exit(1);
+        process.exit(2);
       }
       const picked = pickRandom(pool);
       humanOut.write(`randomly picked: ${picked.name} (${picked.dir})\n`);
@@ -389,6 +389,6 @@ const isDirectlyExecuted = !!process.argv[1] && realpathSync(process.argv[1]) ==
 if (isDirectlyExecuted) {
   main().catch((e) => {
     process.stderr.write(`pb: ${String((e && e.message) || e)}\n`);
-    process.exit(1);
+    process.exit(3);
   });
 }

@@ -9,7 +9,7 @@ Agents implement; pb verifies with unfakeable evidence; a human (later: policy) 
 prod deploys. pb is the verification layer — it never implements, never owns the deploy.
 
 **Where we are (2026-07-24, honest):** the honesty core is done, frozen, and green
-(tests + gate + typecheck, 189/189). FOUR differential Catches have executed live:
+(tests + gate + typecheck, 181/181). FOUR differential Catches have executed live:
 n8n #7130 (additive PR, parent lands CND), n8n #9157 (the first parent=DOES_NOT_WORK
 catch — a real regression, not absent code), linkding #1170 (the first non-n8n
 stack — Django/sqlite — parent=DOES_NOT_WORK), and documenso #3031 (the SECOND ENGINE

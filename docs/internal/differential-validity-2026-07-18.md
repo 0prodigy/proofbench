@@ -136,7 +136,7 @@ stage `conjure.mjs` does not yet perform).
   multipart bodies + per-step headers + cross-service captures in recipe setup. Not a drop-in.
 - **Lyric (the partner ticket) — cluster-gated (not headless-startable).** Headless auth is fully
   ready (gh as `0prodigy`; the partner's deploy tooling re-mints a JWT headlessly from the gh
-  token; the target lyriclet's kubeconfig uses a static client-certificate — no interactive
+  token; the target lyriclet's kubeconfig authenticates non-interactively — no interactive
   auth). The **sole** blocker is that the base-coherent target lyriclet (target namespace,
   substrate `k8s-attach`, the partner ticket's A&C appservice digest `sha256:a31e0593…97709`) is
   **HIBERNATED**; waking it requires a mutating, confirmation-gated call into the partner's

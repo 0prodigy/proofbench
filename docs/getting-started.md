@@ -92,8 +92,8 @@ it works.
 ```
 
 - `mode: "from_tree"` — clone `repo` at `sha`, build `dockerfile` in `context`. This is
-  the mode both shipped recipes use, and the only mode `pb prove`'s differential accepts
-  (it needs a disclosed `parent_sha` to build the baseline).
+  the mode all four shipped recipes use, and the only mode `pb prove`'s differential
+  accepts (it needs a disclosed `parent_sha` to build the baseline).
 - `parent_sha` — the differential baseline. `pb prove` builds and drives **both** SHAs
   with the identical proposed walk; the PR is only proven the cause if merge=WORKS and
   parent≠WORKS.
@@ -230,7 +230,8 @@ using the recipe's own auth/setup surface. Absent defaults to empty (n8n's recip
 ```
 
 How the front door gets driven: `http` (raw HTTP), `browser` (a real click/type/click
-walk through the pinned Chromium sidecar — what both shipped recipes use), or `deferred`
+walk through the pinned Chromium sidecar — what three of the four shipped recipes use),
+or `deferred`
 (no driver built for this front door — an honest CND, never a forced fit; a recipe with
 no `drive` field defaults here). These are the only three values `src/recipe.mjs`
 accepts; a Lyric/k8s drive class (R3, not reachable today) was excised at `b807169` and
@@ -299,12 +300,14 @@ verdict state: `0` WORKS / `1` DOES_NOT_WORK / `2` COULD_NOT_DETERMINE / `3` any
 (internal). `pb conjure` exits `0` on a successful bring-up and `2` on an honest CND
 (could not conjure — a bring-up/setup failure, never evidence against the change).
 
-The three committed, sealed differential Catches — n8n #9157 (merge WORKS ∧ parent DOES
+The four committed, sealed differential Catches — n8n #9157 (merge WORKS ∧ parent DOES
 NOT WORK — the first live regression catch), linkding #1170 (merge WORKS ∧ parent DOES
-NOT WORK, a second stack), and n8n #7130 (merge WORKS ∧ parent CND, the earned green) —
-are the receipts under `site/cases/*.json`; the interactive rendering of the #7130 case
-is `site/case.html`. See the [README](../README.md) and
-[docs/ROADMAP.md](ROADMAP.md) for what those verdicts actually assert.
+NOT WORK, a second stack), n8n #7130 (merge WORKS ∧ parent CND, the earned green), and
+documenso #3031 (merge WORKS ∧ parent DOES NOT WORK, the second engine — a real Konva
+canvas browser drive over Postgres) — are the receipts under `site/cases/*.json`; the
+interactive rendering of the #7130 case is `site/case.html`. See the
+[README](../README.md) and [docs/ROADMAP.md](ROADMAP.md) for what those verdicts
+actually assert.
 
 ## Honest CND — what declines today, and how it names its unblock
 
