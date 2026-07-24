@@ -42,27 +42,6 @@ import { join } from 'node:path';
 export const ALLOWED_WALK_OPS = Object.freeze(['find', 'type', 'click', 'clickAt', 'pointer']);
 
 /**
- * The walk vocabulary for the ARGO drive (drive.mode:'argo-workflows'): a single `trigger` op — the
- * user gesture is "run the DAG" (the workflow manifest is disclosed config, like the front-door URL).
- * Kept a one-op vocabulary so agent-proposes/harness-disposes stays uniform and reuses this validator
- * (the harness owns the run-nonce, the observe, and every out-of-band read). Selected via the
- * `allowedOps` parameter of validateProposal/proposeWalkAndClaim; the browser default is unchanged.
- * @type {readonly string[]}
- */
-export const ALLOWED_ARGO_OPS = Object.freeze(['trigger']);
-
-/**
- * The walk vocabulary for the NOTE-LIFECYCLE drive (drive.mode:'note-lifecycle', the Lyric class): a
- * single `http` op — the user gesture is "call the disclosed REST surface" (method/path/body/capture,
- * the same shape conjure.mjs's setup steps / catch.mjs's confirm steps already use). Kept a one-op
- * vocabulary so agent-proposes/harness-disposes stays uniform and reuses this validator (the harness
- * owns the port-forwarded transport, the headers, and every out-of-band mongo read). Selected via the
- * `allowedOps` parameter of validateProposal/proposeWalkAndClaim.
- * @type {readonly string[]}
- */
-export const ALLOWED_HTTP_OPS = Object.freeze(['http']);
-
-/**
  * The relation set the FROZEN verdict adjudicates (verdict.mjs relationHolds). Mirrored here as the
  * proposer's input allowlist so a bad op is rejected at the door as an honest CND, rather than
  * reaching the verdict (where an unknown op relationHolds→false → FALSIFIED anyway). Kept in lockstep
@@ -110,132 +89,8 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
- * @typedef {Object} OpPromptDoc
- * @property {readonly string[]} intro replaces the browser intro paragraph (still ends in the propose_walk-tool clause)
- * @property {readonly string[]} walk the `- walk:` section documenting the op's EXACT validateArgs shape
- * @property {string} argShapes the compact "Walk arg shapes" recap line for the CLI prompt
- */
-
-/**
- * Per-op prompt docs for the NON-BROWSER one-op drive vocabularies (keyed by op; the browser default
- * keeps SYSTEM_PROMPT verbatim). This map closes the MODE-BLINDNESS bug: validateProposal restricts
- * the walk vocabulary per drive mode (allowedOps), but the prompt used to instruct the browser
- * gestures unconditionally — the model obeyed, proposed `find`, and every note-lifecycle run was a
- * guaranteed could-not-execute. Each `walk` section mirrors validateArgs's shape for its op exactly
- * (the prompt must teach the SAME vocabulary the gate enforces).
- * @type {Record<string, OpPromptDoc>}
- */
-const OP_PROMPT_DOCS = {
-  http: {
-    intro: [
-      'You propose how a real API client would drive a service\'s harness-disclosed REST surface (the',
-      'introspection carries the front door: base_url_template, entrypoint, and the operator_env echo) to',
-      'exercise ONE feature, plus the single persisted effect that proves it worked. Reply ONLY via the',
-      'propose_walk tool.',
-    ],
-    walk: [
-      '- walk: the ordered REST calls. Every step MUST be {"op":"http","args":{...}} — no browser gestures,',
-      '  no scripts. args: `method` (required, e.g. "GET"/"POST") and `path` (required; a RELATIVE path',
-      '  starting with \'/\' — never an absolute URL, \'@\', \'://\', or whitespace; the harness owns the host).',
-      '  Optional `body`: a JSON object (never an array or a bare string). Optional `capture`: an object of',
-      '  name -> a \'$.a.b[0].c\' JSONPath string read from the step\'s JSON response. A {name} placeholder in',
-      '  a later step\'s path or body string is substituted from the operator_env values and earlier captures',
-      '  (an unresolved placeholder fails the step).',
-    ],
-    argShapes:
-      'Walk arg shapes: http → {"method":"...","path":"/...","body":{...} optional,"capture":{"name":"$.json.path"} optional}.',
-  },
-  trigger: {
-    intro: [
-      'You propose how a real user would run a service\'s harness-disclosed Argo workflow (the manifest is',
-      'disclosed config, like a front-door URL) to exercise ONE feature, plus the single persisted effect',
-      'that proves it worked. Reply ONLY via the propose_walk tool.',
-    ],
-    walk: [
-      '- walk: the ordered trigger gestures. Every step MUST be {"op":"trigger","args":{...}} — the harness',
-      '  owns the run-nonce and the manifest. args: optional `parameters`, an object of name -> STRING',
-      '  workflow parameters (nothing else).',
-    ],
-    argShapes: 'Walk arg shapes: trigger → {"parameters":{"name":"value", ...} optional} (every value a string).',
-  },
-};
-
-/** The closing prompt lines shared by every non-browser mode (the browser closing names the front door). */
-const NON_BROWSER_CLOSING_LINES = [
-  'Propose the smallest walk that exercises the disclosed surface end-to-end. The harness — not you —',
-  'reads the store and decides the verdict.',
-];
-
-/**
- * The per-op docs when EVERY allowed op is a non-browser one (http/trigger), else null → the caller
- * keeps the browser text byte-identical to today's.
- * @param {readonly string[]} allowedOps
- * @returns {OpPromptDoc[]|null}
- */
-function nonBrowserOpDocs(allowedOps) {
-  if (!allowedOps || allowedOps.length === 0) return null;
-  /** @type {OpPromptDoc[]} */
-  const docs = [];
-  for (const op of allowedOps) {
-    const d = OP_PROMPT_DOCS[op];
-    if (!d) return null;
-    docs.push(d);
-  }
-  return docs;
-}
-
-/**
- * The mode-aware system prompt: the browser default is SYSTEM_PROMPT unchanged; a non-browser
- * vocabulary (ALLOWED_HTTP_OPS / ALLOWED_ARGO_OPS) swaps the intro + walk-vocabulary sections while
- * the claim-shape section stays identical.
- * @param {readonly string[]} allowedOps
- * @returns {string}
- */
-function systemPromptFor(allowedOps) {
-  const docs = nonBrowserOpDocs(allowedOps);
-  if (!docs) return SYSTEM_PROMPT;
-  return [
-    ...docs[0].intro,
-    '',
-    ...docs.flatMap((d) => [...d.walk]),
-    ...CLAIM_PROMPT_LINES,
-    '',
-    ...NON_BROWSER_CLOSING_LINES,
-  ].join('\n');
-}
-
-/**
- * The walk-shape contract the harness disclosed THROUGH the introspection (catch.mjs's
- * note-lifecycle drive sets `required_capture` = the discriminating query's {placeholder}): the
- * harness splits the walk as resolveSteps = walk.slice(0,-1) / terminalStep = walk.slice(-1) and
- * scopes its store reads by the captured id, so a walk that never captures it — or has only one
- * step — is a guaranteed could-not-execute. Emitted on BOTH prompt paths (CLI + API system prompt)
- * only when the disclosure is present; without it the prompt is unchanged.
- * @param {any} introspection
- * @returns {string[]}
- */
-function requiredCaptureContractLines(introspection) {
-  const name = introspection && typeof introspection.required_capture === 'string' && introspection.required_capture;
-  if (!name) return [];
-  return [
-    '',
-    'This drive\'s walk needs AT LEAST 2 steps. Every step before the LAST is the resolve phase (setup +',
-    `resolving the fresh instance) and MUST populate a capture named exactly "${name}" — the harness scopes`,
-    'its store reads by that captured id (the introspection\'s `serves`, when present, describes how the',
-    'entrypoint\'s response resolves to it). The LAST step must be the single terminal state-changing call',
-    'the claim is about: the harness observes the store between the resolve phase and that final step, and',
-    'again after it. Every {name} placeholder used in a step\'s path or body MUST be an operator_env name',
-    'disclosed in the introspection or a `capture` name declared by an EARLIER step — a made-up placeholder',
-    'is refused before execution. Declare a capture ONLY for a NEW name — never re-capture a name you',
-    'already have (refused before execution) — and only when a LATER step\'s path or body consumes it;',
-    `"${name}" is the exception, consumed by the harness itself.`,
-  ];
-}
-
-/**
  * @typedef {Object} WalkStep
- * @property {'find'|'type'|'click'|'clickAt'|'pointer'|'trigger'|'http'} op the drive gesture (browser
- *   ops, the one-op argo 'trigger', or the one-op note-lifecycle 'http' — see ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS)
+ * @property {'find'|'type'|'click'|'clickAt'|'pointer'} op the drive gesture
  * @property {Record<string, any>} args op-specific, validated arguments
  */
 
@@ -283,27 +138,6 @@ function requireNumber(v, field) {
 }
 
 /**
- * Guard an `http` walk step's path against host-retargeting tricks. The note-lifecycle executor
- * builds its request as `fetchFn(baseUrl + resolvedPath)` (catch.mjs's executeNoteLifecycleWalk):
- * a path carrying userinfo (`@attacker/...`) or an absolute URL (`http://evil`) can re-target that
- * concatenation at a different host entirely, exfiltrating the recipe's operator_env values /
- * front_door.headers to it. A safe path must be a plain relative path (starts with '/') and must
- * not contain '@', '://', or whitespace/control characters. Reused both here (proposal validation
- * — an unsafe path is rejected at the door as an honest CND) and, defense-in-depth, at execution
- * (catch.mjs re-checks the PLACEHOLDER-RESOLVED path, since a captured value could smuggle the
- * same trick in after resolution).
- * @param {string} path
- * @returns {string|null} a reason the path is unsafe, or null when it's fine
- */
-export function unsafeHttpPathReason(path) {
-  if (typeof path !== 'string' || !path.startsWith('/')) return `must start with '/' (a relative path), got ${JSON.stringify(path)}`;
-  if (path.includes('@')) return "must not contain '@' (host-retargeting risk)";
-  if (path.includes('://')) return "must not contain '://' (absolute-URL retargeting risk)";
-  if (/[\s\x00-\x1f]/.test(path)) return 'must not contain whitespace/control characters';
-  return null;
-}
-
-/**
  * Validate one step's args against its op — reject a wrong-shape argument. Returns a clean,
  * whitelisted args object (only the fields the executor uses; no stray keys carried through).
  * @param {string} op
@@ -330,60 +164,9 @@ function validateArgs(op, args, i) {
       if (!Array.isArray(args.actions) || args.actions.length === 0) bad(`walk[${i}].args.actions must be a non-empty array`);
       if (args.pointerType !== undefined) requireString(args.pointerType, `walk[${i}].args.pointerType`);
       return { actions: args.actions, ...(args.pointerType !== undefined ? { pointerType: args.pointerType } : {}) };
-    case 'trigger':
-      // The argo drive gesture: run the disclosed workflow. Optional validated string parameters; the
-      // run-nonce and the manifest are harness/config-owned, never agent-supplied.
-      if (args.parameters !== undefined) {
-        if (!args.parameters || typeof args.parameters !== 'object' || Array.isArray(args.parameters)) bad(`walk[${i}].args.parameters must be an object`);
-        for (const [k, v] of Object.entries(args.parameters)) requireString(v, `walk[${i}].args.parameters.${k}`);
-      }
-      return { ...(args.parameters !== undefined ? { parameters: { ...args.parameters } } : {}) };
-    case 'http': {
-      // The note-lifecycle drive gesture: one REST call against the disclosed surface. `body` (if
-      // any) is JSON-shaped (mirrors conjure.mjs's SetupStep); `capture` (if any) is JSONPath-only
-      // (name -> a JSONPath string read from the response, the setup/confirm default form).
-      requireString(args.method, `walk[${i}].args.method`);
-      requireString(args.path, `walk[${i}].args.path`);
-      {
-        const pathProblem = unsafeHttpPathReason(args.path);
-        if (pathProblem) bad(`walk[${i}].args.path ${pathProblem}`);
-      }
-      if (args.body !== undefined && (!args.body || typeof args.body !== 'object' || Array.isArray(args.body))) {
-        bad(`walk[${i}].args.body must be an object when present`);
-      }
-      if (args.capture !== undefined) {
-        if (!args.capture || typeof args.capture !== 'object' || Array.isArray(args.capture)) bad(`walk[${i}].args.capture must be an object when present`);
-        for (const [k, v] of Object.entries(args.capture)) requireString(v, `walk[${i}].args.capture.${k}`);
-      }
-      return {
-        method: args.method,
-        path: args.path,
-        ...(args.body !== undefined ? { body: args.body } : {}),
-        ...(args.capture !== undefined ? { capture: { ...args.capture } } : {}),
-      };
-    }
     default:
       return bad(`walk[${i}].op unsupported '${op}'`); // unreachable: op is already allowlisted
   }
-}
-
-/**
- * Collect every `{name}` placeholder in a string — or in an object's/array's string leaves — into
- * `out`. The SAME replacement grammar as conjure.mjs's resolvePlaceholders (any non-'}' run), so the
- * static resolvability check below simulates exactly what the executor will try to resolve.
- * @param {any} node
- * @param {Set<string>} out
- * @returns {Set<string>}
- */
-function collectPlaceholders(node, out) {
-  if (typeof node === 'string') {
-    for (const m of node.matchAll(/\{([^}]+)\}/g)) out.add(m[1]);
-  } else if (Array.isArray(node)) {
-    for (const x of node) collectPlaceholders(x, out);
-  } else if (node && typeof node === 'object') {
-    for (const v of Object.values(node)) collectPlaceholders(v, out);
-  }
-  return out;
 }
 
 /**
@@ -425,20 +208,11 @@ function validateClaim(claim, observables) {
  * {op, args} whose ops are all in `allowedOps` (find/type/click/clickAt/pointer — execute/navigate
  * excluded, FW-P1-D) with well-shaped args; the claim must bind an in-menu entity (FW-P1-C) and a
  * frozen relation op. ANY violation throws — an honest could-not-execute (→ CND), not a bypass.
- *
- * `placeholderNames` (when provided — the names resolvable at run time: operator_env + any
- * harness-seeded names) additionally simulates placeholder resolvability IN STEP ORDER: every
- * `{name}` in a step's path/body must be in that set or declared by an EARLIER step's capture (a
- * step's own capture cannot feed its own path), and each step's capture names join the set after
- * it. Catches a made-up placeholder (the fifth live CND: `{stageName}` copy-pasted from the serves
- * prose) at PROPOSAL time instead of wasting a cluster round-trip to die at resolvePlaceholders;
- * likewise refuses a capture that SHADOWS an already-bound name (the sixth: a redundant re-capture
- * that missed killed a run over a value nothing needed). Absent → behavior unchanged.
  * @param {any} raw the untrusted proposal (an llmFn's tool input)
- * @param {{observables:string[], allowedOps?:readonly string[], placeholderNames?:readonly string[]}} opts
+ * @param {{observables:string[], allowedOps?:readonly string[]}} opts
  * @returns {Proposal}
  */
-export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_OPS, placeholderNames }) {
+export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_OPS }) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) bad('proposal must be an object');
   if (!Array.isArray(raw.walk) || raw.walk.length === 0) bad('proposal.walk must be a non-empty array of steps');
   const opSet = new Set(allowedOps);
@@ -454,36 +228,6 @@ export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_O
     if (!step.args || typeof step.args !== 'object' || Array.isArray(step.args)) bad(`walk[${i}].args must be an object`);
     return { op: step.op, args: validateArgs(step.op, step.args, i) };
   });
-  if (placeholderNames) {
-    // name -> where it was first bound, so both refusals (an unresolvable use AND a shadowing
-    // re-capture — the sixth live CND: a redundant re-capture missed and wasted a round-trip on a
-    // value nothing needed) can name the binding site.
-    /** @type {Map<string,string>} */
-    const boundBy = new Map(placeholderNames.map((n) => [n, 'an operator_env/harness-seeded name']));
-    walk.forEach((step, i) => {
-      const used = collectPlaceholders(step.args.body, collectPlaceholders(step.args.path, new Set()));
-      for (const name of used) {
-        if (!boundBy.has(name)) {
-          bad(
-            `walk[${i}] uses the placeholder {${name}} which nothing resolves at run time — not an ` +
-              `operator_env/harness-seeded name and not an EARLIER step's capture ` +
-              `(names available at this step: ${[...boundBy.keys()].sort().join(', ') || '(none)'})`
-          );
-        }
-      }
-      if (step.args.capture) {
-        for (const name of Object.keys(step.args.capture)) {
-          if (boundBy.has(name)) {
-            bad(
-              `walk[${i}] re-captures '${name}' which is already bound (${boundBy.get(name)}) — ` +
-                'captures must introduce NEW names; drop the redundant capture'
-            );
-          }
-          boundBy.set(name, `captured by walk[${i}]`);
-        }
-      }
-    });
-  }
   const claim = validateClaim(raw.claim, observables);
   return { walk, claim };
 }
@@ -500,11 +244,9 @@ export function validateProposal(raw, { observables, allowedOps = ALLOWED_WALK_O
 export function buildProposeTool(observables, allowedOps = ALLOWED_WALK_OPS) {
   return {
     name: PROPOSE_TOOL_NAME,
-    description: nonBrowserOpDocs(allowedOps)
-      ? `Propose the walk (ops: ${allowedOps.join('/')}) against the harness-disclosed surface and the ` +
-        'single persisted effect to claim, bound to one disclosed observable.'
-      : 'Propose the user walk on the already-loaded front-door page (find/type/click; clickAt/pointer ' +
-        'for a canvas) and the single persisted effect to claim, bound to one disclosed observable.',
+    description:
+      'Propose the user walk on the already-loaded front-door page (find/type/click; clickAt/pointer ' +
+      'for a canvas) and the single persisted effect to claim, bound to one disclosed observable.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -584,7 +326,7 @@ export async function defaultLlmFn({ intent, introspection, observables, allowed
     body: JSON.stringify({
       model: opts.model || DEFAULT_MODEL,
       max_tokens: opts.maxTokens || DEFAULT_MAX_TOKENS,
-      system: [systemPromptFor(allowedOps), ...requiredCaptureContractLines(introspection)].join('\n'),
+      system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: `${intent}\n\n${JSON.stringify(introspection)}` }],
       tools: [buildProposeTool(observables, allowedOps)],
       tool_choice: { type: 'tool', name: PROPOSE_TOOL_NAME },
@@ -639,24 +381,22 @@ function stripFence(s) {
 }
 
 /**
- * Build the CLI prompt: the (mode-aware) system prompt + the intent + the harness introspection
- * snapshot + the disclosed observable menu + an explicit "reply with ONLY the JSON {walk, claim}"
- * instruction that mirrors buildProposeTool's shape (the op enum = allowedOps, entity ∈ observables,
- * the frozen relation-op enum). There is NO forced tool in `claude -p`, so the schema must live in
- * the prompt; the real gate is still validateProposal on the returned raw.
+ * Build the CLI prompt: the system prompt + the intent + the harness introspection snapshot + the
+ * disclosed observable menu + an explicit "reply with ONLY the JSON {walk, claim}" instruction that
+ * mirrors buildProposeTool's shape (the op enum = allowedOps, entity ∈ observables, the frozen
+ * relation-op enum). There is NO forced tool in `claude -p`, so the schema must live in the prompt;
+ * the real gate is still validateProposal on the returned raw.
  * @param {{intent:any, introspection:any, observables:string[], allowedOps?:readonly string[]}} input
  * @returns {string}
  */
 export function buildCliPrompt({ intent, introspection, observables, allowedOps = ALLOWED_WALK_OPS }) {
   const menu = observables || [];
-  const docs = nonBrowserOpDocs(allowedOps);
   return [
-    systemPromptFor(allowedOps),
-    ...requiredCaptureContractLines(introspection),
+    SYSTEM_PROMPT,
     '',
     `INTENT: ${intent}`,
     '',
-    `HARNESS INTROSPECTION (${docs ? 'the disclosed drive surface' : 'the already-loaded front-door page'}, provided by the harness): ${JSON.stringify(introspection)}`,
+    `HARNESS INTROSPECTION (the already-loaded front-door page, provided by the harness): ${JSON.stringify(introspection)}`,
     '',
     `DISCLOSED OBSERVABLES — the claim.entity MUST be exactly one of: ${menu.join(', ') || '(none)'}`,
     '',
@@ -671,11 +411,9 @@ export function buildCliPrompt({ intent, introspection, observables, allowedOps 
     '    "quantified": optional boolean (true only for a universal any/all/every claim)',
     '  }',
     '}',
-    docs
-      ? docs.map((d) => d.argShapes).join(' ')
-      : 'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
-        'clickAt → {"x":<number>,"y":<number>,"shift":true? (hold Shift for a multi-select gesture)}; ' +
-        'pointer → {"actions":[...],"pointerType":"..."}.',
+    'Walk arg shapes: find/click → {"selector":"..."}; type → {"selector":"...","text":"..."}; ' +
+      'clickAt → {"x":<number>,"y":<number>,"shift":true? (hold Shift for a multi-select gesture)}; ' +
+      'pointer → {"actions":[...],"pointerType":"..."}.',
   ].join('\n');
 }
 
@@ -726,15 +464,14 @@ export async function claudeCliLlmFn({ intent, introspection, observables, allow
  * Propose a validated {walk, claim} for the intent + introspection, or THROW (→ caller treats a
  * throw as an honest could-not-execute → CND). The llmFn seam produces an untrusted raw proposal;
  * validateProposal is the gate. Default llmFn = the real Anthropic call. allowedOps is threaded INTO
- * the llmFn input so the prompt teaches the same vocabulary the validator enforces (mode-blindness
- * — a browser prompt on an http-only drive — made every note-lifecycle proposal a guaranteed CND).
+ * the llmFn input so the prompt teaches the same vocabulary the validator enforces.
  * @param {{intent:any, introspection:any, observables:string[]}} input
- * @param {{llmFn?:LlmFn, allowedOps?:readonly string[], placeholderNames?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default, or ALLOWED_ARGO_OPS/ALLOWED_HTTP_OPS for the argo/note-lifecycle drives); placeholderNames enables the static resolvability check (see validateProposal)
+ * @param {{llmFn?:LlmFn, allowedOps?:readonly string[]}} [opts] allowedOps selects the walk vocabulary (browser default)
  * @returns {Promise<Proposal>}
  */
 export async function proposeWalkAndClaim({ intent, introspection, observables }, opts = {}) {
   const allowedOps = opts.allowedOps || ALLOWED_WALK_OPS;
   const llmFn = opts.llmFn || /** @type {LlmFn} */ ((input) => defaultLlmFn(input));
   const raw = await llmFn({ intent, introspection, observables, allowedOps });
-  return validateProposal(raw, { observables, allowedOps, placeholderNames: opts.placeholderNames });
+  return validateProposal(raw, { observables, allowedOps });
 }

@@ -21,7 +21,7 @@
  * phase2's helper), git via child_process, HTTP via global fetch.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,7 +29,6 @@ import { randomUUID } from 'node:crypto';
 import { loadRecipe } from './recipe.mjs';
 import { mint } from './harness.mjs';
 import { registerReap, deregisterReap } from './reaper.mjs';
-import { normalizeDigest } from './argoworkflows.mjs';
 
 const READY_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
@@ -51,8 +50,7 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * A live SUT handle returned by {@link conjure}.
  * @typedef {Object} SutHandle
  * @property {import('./recipe.mjs').Recipe} recipe
- * @property {string|null} containerName the fresh-world container (unique per conjure); null for
- *   mode 'k8s-attach' (attach owns no container)
+ * @property {string|null} containerName the fresh-world container (unique per conjure)
  * @property {string} baseUrl e.g. http://localhost:5678
  * @property {string} frontDoorUrl the user-facing URL, placeholders resolved
  * @property {Record<string,any>} captures values captured from setup responses
@@ -63,41 +61,7 @@ const MAX_BUFFER = 64 * 1024 * 1024; // docker build logs blow past the 1MB spaw
  * @property {string|null} _cloneDir temp from-tree checkout to reap on teardown (null otherwise)
  * @property {ComposeInfo|null} _compose compose project + -f files to `down -v` on teardown (null for run mode)
  * @property {() => (void|Promise<void>)} [_reap] the interrupt-reap registered with the signal reaper (de-registered on normal teardown)
- * @property {K8sAttachState} [_k8sAttach] present only for mode 'k8s-attach' — the port-forward
- *   processes to kill on teardown + the snapshot state {@link mintK8sAttachIdentity} and
- *   {@link checkK8sAttachDrift} read/write (never present for run/compose handles)
  * @property {() => Promise<void>} teardown
- */
-
-/**
- * A point-in-time read of every pod in the attached namespace — the raw material both the
- * code-identity BINDING check and the DRIFT SENTINEL are built from (never through an app
- * endpoint; always a direct `kubectl get pods`).
- * @typedef {Object} ClusterSnapshot
- * @property {string[]} pods pod names, sorted
- * @property {string[]} digests resolved `sha256:` digests observed across every container, sorted+deduped
- * @property {Record<string,number>} restarts `${podName}/${containerName}` -> observed restartCount
- * @property {{ref:string, digest:string}[]} [imageRefs] each container's OWN requested image ref
- *   (repo[:tag], no digest guaranteed) paired with that SAME container's resolved digest — the
- *   ref-matching material {@link expectedImagesBind} needs for a digestless `expected_images` entry
- *   (repo+tag matching); the deduped `digests` set above can't do this since it drops the
- *   ref<->digest pairing. Optional so a pure detectDrift-only test fixture need not supply it.
- * @property {Record<string,string>} [uids] podName -> metadata.uid — the pod-REPLACEMENT signal
- *   (a deleted+recreated pod keeps a StatefulSet name like mongodb-0 and RESETS restartCount, so
- *   name/digest/restart checks alone miss the swap; a new uid does not). Optional so pure test
- *   fixtures without uids keep validating.
- */
-
-/**
- * k8s-attach bookkeeping carried on the {@link SutHandle} (present only for mode 'k8s-attach').
- * @typedef {Object} K8sAttachState
- * @property {K8sExecRunner} execFn the injected (or default) blocking kubectl runner
- * @property {{kubeContext:string, namespace:string}} kubeArgs
- * @property {ClusterSnapshot} attachSnapshot read the instant every port-forward confirmed ready
- * @property {ClusterSnapshot|null} driveSnapshot the DRIVE-TIME snapshot {@link mintK8sAttachIdentity}
- *   records — the drift sentinel's "before the verdict window" baseline; null until minted
- * @property {{svc:import('./recipe.mjs').K8sAttachService, proc:PortForwardHandle}[]} forwards the
- *   live port-forward child processes (killed on teardown/interrupt)
  */
 
 /**
@@ -199,9 +163,9 @@ export function resolveBodyPlaceholders(node, lookup) {
 
 /**
  * Walk a simple `$.a.b` / `$.a[0].b` JSONPath (the capture syntax): a dot-separated key, each
- * OPTIONALLY followed by one or more `[N]` array-index suffixes (e.g. the Lyric class's
- * `$.notes[0]._id` — resolving parent.notes[0] to the child note-exec id). Non-`$` paths, an
- * off-path read, or an out-of-range index all return undefined.
+ * OPTIONALLY followed by one or more `[N]` array-index suffixes (e.g. `$.items[0].id` —
+ * resolving parent.items[0] to the child id). Non-`$` paths, an off-path read, or an
+ * out-of-range index all return undefined.
  * @param {any} obj
  * @param {string} path
  * @returns {any}
@@ -587,12 +551,8 @@ async function resolveImage(docker, recipe, onCloneDir, buildSha) {
   }
 
   // from_tree — build the effective sha (buildSha overrides ci.sha for the differential parent).
-  // (multi_repo pairs with conjure.mode 'k8s-attach', not 'run'/'compose' — no committed recipe
-  // combines them; this guard narrows the type and fails loudly rather than reading undefined
-  // from_tree-only fields if one ever did.)
-  if (ci.mode !== 'from_tree') {
-    throw new Error(`conjure: mode 'run' requires code_identity.mode 'from_tree' or 'pinned_image'; got '${ci.mode}'`);
-  }
+  // code_identity.mode is one of exactly 'from_tree' | 'pinned_image' (recipe.mjs's validator
+  // guarantees this at load time; 'pinned_image' already returned above), so ci is 'from_tree' here.
   const sha = buildSha || ci.sha;
   const tag = `pb-sut-${slug(recipe.name)}-${sha.slice(0, 7)}`;
   const cached = docker.run(['image', 'inspect', tag], DOCKER_TIMEOUT_MS).status === 0;
@@ -691,29 +651,14 @@ function bringUpCompose(docker, recipe, recipeDir, onCloneDir, onCompose, buildS
  * same recipe, and the fingerprint records whichever sha actually built, so the merge and
  * parent bundles carry DIFFERENT code-identity (the whole point of the differential Catch).
  * @param {string} recipeDir directory holding recipe.json (+ body files)
- * @param {{buildSha?:string, spawnFn?:PortForwardSpawnFn, execFn?:K8sExecRunner}} [opts] buildSha:
- *   an alternate from_tree SHA to build (defaults to code_identity.sha); spawnFn/execFn: injected
- *   kubectl seams for mode 'k8s-attach' (cluster-free unit tests)
+ * @param {{buildSha?:string}} [opts] buildSha: an alternate from_tree SHA to build (defaults to
+ *   code_identity.sha)
  * @returns {Promise<SutHandle>}
  */
 export async function conjure(recipeDir, opts = {}) {
   const recipe = loadRecipe(recipeDir);
   const ci = recipe.code_identity;
   const c = recipe.conjure;
-
-  // k8s-attach owns no container and needs no docker daemon at all — dispatch (including its own
-  // multi_repo identity handling) before the docker gate below (which stays run/compose-only).
-  if (c.mode === 'k8s-attach') {
-    return conjureK8sAttach(recipe, opts);
-  }
-
-  // multi_repo identity (the Lyric class) pairs with conjure.mode 'k8s-attach' ONLY — a from_tree/
-  // pinned_image single-container build has no shape for repos[]/wheels[]/images[]. Every OTHER
-  // conjure mode (run/compose, handled below) rejects it by name — never reading an undefined
-  // from_tree/pinned_image field further down.
-  if (ci.mode === 'multi_repo') {
-    throw new Error(`conjure: code_identity.mode 'multi_repo' pairs with conjure.mode 'k8s-attach' only (got conjure.mode ${JSON.stringify(c.mode)})`);
-  }
 
   const docker = detectDocker();
   if (!docker) throw new Error('conjure: docker is not available (`docker version` did not respond — is the daemon running?).');
@@ -792,11 +737,10 @@ export async function conjure(recipeDir, opts = {}) {
     }
     /** @type {Record<string,any>} */ const captures = {};
     /** @type {Record<string,any>} */ const bodyDerived = {};
-    // The operator_env OBJECT form (G5, the Lyric class) has no REST steps to walk here — it is
-    // not built by this bring-up (k8s-attach is guarded off above); the array form is the only
-    // shape 'run'/'compose' ever produces.
+    // setup is always array-form (§6) — recipe.mjs's validator guarantees this at load time; the
+    // guard stays as defense-in-depth against a malformed recipe reaching this far.
     if (!Array.isArray(recipe.setup)) {
-      throw new Error("conjure: setup as an operator_env object is not supported by mode 'run'/'compose' (array-form setup only)");
+      throw new Error("conjure: setup must be array-form (REST steps) for mode 'run'/'compose'");
     }
     const setupSteps = recipe.setup;
     for (const step of setupSteps) {
@@ -844,9 +788,9 @@ export async function conjure(recipeDir, opts = {}) {
     // Front door: resolve placeholders from captures, else a minted id in a setup body. In
     // compose mode a deferred-drive front door (documenso) mints no ids, so an unresolved
     // placeholder stays literal (informational URL) instead of throwing; run mode stays strict.
-    // mode 'rest' (G6, the Lyric class) has no url_template at all — not built by this bring-up.
+    // url_template is always present (§6) — recipe.mjs's validator guarantees this at load time.
     if (typeof recipe.front_door.url_template !== 'string') {
-      throw new Error("conjure: front_door.mode 'rest' (no url_template) is not supported by mode 'run'/'compose'");
+      throw new Error("conjure: front_door.url_template is required for mode 'run'/'compose'");
     }
     const urlTemplate = recipe.front_door.url_template;
     const lookup = (/** @type {string} */ n) => captures[n] ?? bodyDerived[camelize(n)] ?? bodyDerived[n];
@@ -905,8 +849,7 @@ export async function conjure(recipeDir, opts = {}) {
 
 /**
  * Reap a conjured SUT: compose mode `down -v`s the whole graph (services + volumes); run mode
- * removes the single container; k8s-attach kills its port-forward child processes (it never
- * created a cluster object, so there is nothing else to reap). Safe to call twice.
+ * removes the single container. Safe to call twice.
  * @param {SutHandle|null} [handle]
  * @returns {Promise<void>}
  */
@@ -915,654 +858,7 @@ export async function teardownSut(handle) {
   // Normal teardown: drop the interrupt-reap first so the signal handler cannot re-run it (cleanup is
   // idempotent, so a race is harmless either way), then reap.
   if (handle._reap) deregisterReap(handle._reap);
-  if (handle._k8sAttach) {
-    for (const f of handle._k8sAttach.forwards) {
-      try {
-        f.proc.kill();
-      } catch {
-        /* already gone */
-      }
-    }
-    return;
-  }
   await cleanup(detectDocker(), handle.containerName, handle._cloneDir, handle._compose);
-}
-
-// ---------------------------------------------------------------------------
-// k8s-attach (the Lyric class): ATTACH to an existing k8s deploy — pb port-forwards named
-// Services as its own child processes and NEVER creates or mutates a cluster object (ADR-0011
-// Shape-A). Honesty is a MINT PRECONDITION (docs/pb-extensibility-foundation.md §3, P1/P3), not a
-// verdict edit: mintK8sAttachIdentity/checkK8sAttachDrift THROW (naming the precondition) rather
-// than mint a satisfying receipt — the caller's existing could-not-execute → executed:false → CND
-// handling (catch.mjs) does the rest, with zero frozen-core changes.
-// ---------------------------------------------------------------------------
-
-const K8S_GET_TIMEOUT_MS = 30000;
-const PORT_FORWARD_READY_TIMEOUT_MS = 15000;
-
-/**
- * A blocking kubectl call (`get pods`, …) — mirrors argoworkflows.mjs's KubectlRunner. Injected via
- * opts.execFn so digest/restart reads run WITHOUT a cluster; the default shells to the real kubectl.
- * @typedef {Object} K8sExecRunner
- * @property {(args:string[], timeoutMs:number) => import('node:child_process').SpawnSyncReturns<string>} run
- */
-
-/** @returns {K8sExecRunner} the real kubectl child_process runner */
-function defaultK8sExec() {
-  return {
-    run: (args, timeoutMs) => spawnSync('kubectl', args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: MAX_BUFFER }),
-  };
-}
-
-/**
- * A long-lived `kubectl port-forward` child process. Injected via opts.spawnFn so port-forward
- * bring-up is exercised WITHOUT a cluster; the default shells to the real kubectl.
- * @typedef {Object} PortForwardHandle
- * @property {number} [pid]
- * @property {() => void} kill
- * @property {(onData:(chunk:string)=>void) => void} onStdout
- * @property {(onExit:(code:number|null)=>void) => void} [onExit]
- * @property {(onError:(err:Error)=>void) => void} [onError]
- */
-/** @typedef {(args:string[]) => PortForwardHandle} PortForwardSpawnFn */
-
-/** @returns {PortForwardSpawnFn} the real `kubectl port-forward` spawner */
-function defaultPortForwardSpawn() {
-  return (args) => {
-    const child = spawn('kubectl', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    /** @type {((code:number|null)=>void)[]} */
-    const exitListeners = [];
-    /** @type {((err:Error)=>void)[]} */
-    const errorListeners = [];
-    child.on('exit', (code) => {
-      for (const l of exitListeners) l(code);
-    });
-    child.on('error', (err) => {
-      for (const l of errorListeners) l(err);
-    });
-    return {
-      pid: child.pid,
-      kill: () => {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          /* already gone */
-        }
-      },
-      onStdout: (onData) => {
-        if (child.stdout) child.stdout.on('data', (d) => onData(String(d)));
-      },
-      onExit: (l) => exitListeners.push(l),
-      onError: (l) => errorListeners.push(l),
-    };
-  };
-}
-
-/**
- * Wait for a port-forward to confirm readiness — kubectl writes "Forwarding from …" to stdout the
- * instant the tunnel is live (the same "the bring-up response IS the proof" stance run/compose use
- * for their HTTP ready signal, generalized to a non-HTTP attach). Rejects, naming the service, if
- * the process exits/errors first or the confirmation never arrives within the bound.
- * @param {PortForwardHandle} proc
- * @param {import('./recipe.mjs').K8sAttachService} svc
- * @param {number} [timeoutMs]
- * @returns {Promise<void>}
- */
-export function waitForPortForwardReady(proc, svc, timeoutMs = PORT_FORWARD_READY_TIMEOUT_MS) {
-  return new Promise((resolveReady, reject) => {
-    let settled = false;
-    const to = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`conjure: k8s-attach port-forward to ${svc.name} did not confirm readiness ("Forwarding from") within ${timeoutMs}ms`));
-    }, timeoutMs);
-    proc.onStdout((chunk) => {
-      if (settled || !/Forwarding from/i.test(chunk)) return;
-      settled = true;
-      clearTimeout(to);
-      resolveReady();
-    });
-    if (proc.onExit) {
-      proc.onExit((code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(to);
-        reject(new Error(`conjure: k8s-attach port-forward to ${svc.name} exited early (code ${code}) before confirming readiness`));
-      });
-    }
-    if (proc.onError) {
-      proc.onError((err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(to);
-        reject(new Error(`conjure: k8s-attach port-forward to ${svc.name} failed to start: ${err.message}`));
-      });
-    }
-  });
-}
-
-/**
- * The pod names present in a `kubectl get pods -o json` list, sorted.
- * @param {any} poList
- * @returns {string[]}
- */
-export function podNamesFrom(poList) {
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  /** @type {string[]} */
-  const names = [];
-  for (const pod of items) {
-    if (pod && pod.metadata && typeof pod.metadata.name === 'string' && pod.metadata.name) names.push(pod.metadata.name);
-  }
-  return names.sort();
-}
-
-/**
- * The resolved `sha256:` digests of every (init or regular) container observed across a
- * `kubectl get pods -o json` list, deduped and sorted.
- * @param {any} poList
- * @returns {string[]}
- */
-export function podDigestsFrom(poList) {
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  /** @type {Set<string>} */
-  const digests = new Set();
-  for (const pod of items) {
-    const st = (pod && pod.status) || {};
-    const statuses = [...(st.containerStatuses || []), ...(st.initContainerStatuses || [])];
-    for (const cs of statuses) {
-      const d = normalizeDigest(cs && cs.imageID);
-      if (d) digests.add(d);
-    }
-  }
-  return Array.from(digests).sort();
-}
-
-/**
- * Per-container restart counts across a `kubectl get pods -o json` list, keyed
- * `${podName}/${containerName}` — the drift sentinel's raw material.
- * @param {any} poList
- * @returns {Record<string,number>}
- */
-export function podRestartCountsFrom(poList) {
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  /** @type {Record<string,number>} */
-  const out = {};
-  for (const pod of items) {
-    const name = pod && pod.metadata && pod.metadata.name;
-    if (typeof name !== 'string' || !name) continue;
-    const st = (pod && pod.status) || {};
-    const statuses = [...(st.containerStatuses || []), ...(st.initContainerStatuses || [])];
-    for (const cs of statuses) {
-      if (!cs || typeof cs.name !== 'string' || !cs.name) continue;
-      out[`${name}/${cs.name}`] = typeof cs.restartCount === 'number' ? cs.restartCount : 0;
-    }
-  }
-  return out;
-}
-
-/**
- * podName -> metadata.uid across a `kubectl get pods -o json` list — the drift sentinel's
- * pod-REPLACEMENT raw material (see ClusterSnapshot.uids). A pod without a uid is skipped.
- * @param {any} poList
- * @returns {Record<string,string>}
- */
-export function podUidsFrom(poList) {
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  /** @type {Record<string,string>} */
-  const out = {};
-  for (const pod of items) {
-    const name = pod && pod.metadata && pod.metadata.name;
-    const uid = pod && pod.metadata && pod.metadata.uid;
-    if (typeof name === 'string' && name && typeof uid === 'string' && uid) out[name] = uid;
-  }
-  return out;
-}
-
-/**
- * The SUT pod-scope rule, derived from the recipe (never hardcoded): the drift sentinel watches
- * (1) any pod running an image whose REPO (registry/path, ignoring tag/digest) matches a
- *     `conjure.expected_images` entry's repo — the identity-bound services, and
- * (2) the `store_tap.pod` by exact name (ground-truth reads must not silently survive a store pod
- *     swap).
- * Pods backing the port-forwarded `conjure.services` are NOT separately derived (that would need a
- * `get svc` + label-selector match per service); the expected_images set covers the drive-path
- * services. An EMPTY scope (no expected_images and no store_tap pod) means "nothing to scope by":
- * callers fall back to the whole-namespace watch — scoping may only ever NARROW deliberately,
- * never silently watch nothing.
- * @param {import('./recipe.mjs').Recipe} recipe
- * @returns {{repos:string[], pods:string[]}}
- */
-export function sutScopeFrom(recipe) {
-  const expected = /** @type {string[]} */ (/** @type {any} */ (recipe.conjure).expected_images || []);
-  const repos = [...new Set(expected.map((ref) => splitRepoTag(stripDigestSuffix(ref)).repo))].sort();
-  const storePod = /** @type {any} */ (recipe.store_tap) && /** @type {any} */ (recipe.store_tap).pod;
-  return { repos, pods: typeof storePod === 'string' && storePod ? [storePod] : [] };
-}
-
-/**
- * Filter a `kubectl get pods -o json` list to the {@link sutScopeFrom} pod set: a pod is IN scope
- * when its name is scoped exactly, or when ANY of its containers' image references (the spec's
- * requested `image` OR the status's `image`/resolved `imageID`) shares a scoped repo. An empty
- * scope returns the list unfiltered (the whole-namespace fallback).
- * @param {any} poList
- * @param {{repos:string[], pods:string[]}} scope
- * @returns {any}
- */
-export function filterPodListToScope(poList, scope) {
-  if (!scope || (scope.repos.length === 0 && scope.pods.length === 0)) return poList;
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  const repoSet = new Set(scope.repos);
-  const nameSet = new Set(scope.pods);
-  return {
-    items: items.filter((/** @type {any} */ pod) => {
-      const name = pod && pod.metadata && pod.metadata.name;
-      if (typeof name === 'string' && nameSet.has(name)) return true;
-      const spec = (pod && pod.spec) || {};
-      const st = (pod && pod.status) || {};
-      const refs = [
-        ...[...(spec.containers || []), ...(spec.initContainers || [])].map((/** @type {any} */ c) => c && c.image),
-        ...[...(st.containerStatuses || []), ...(st.initContainerStatuses || [])].flatMap((/** @type {any} */ cs) => (cs ? [cs.image, cs.imageID] : [])),
-      ];
-      return refs.some((r) => typeof r === 'string' && r && repoSet.has(splitRepoTag(stripDigestSuffix(r)).repo));
-    }),
-  };
-}
-
-/**
- * Read a point-in-time {@link ClusterSnapshot} — a store-DIRECT `kubectl get pods` read, never
- * through an app endpoint. `scope` (when provided and non-empty — see {@link sutScopeFrom}) narrows
- * the snapshot to the SUT pod set BEFORE anything is computed, so the identity binding and the
- * drift sentinel watch the same disclosed set and out-of-scope namespace churn (cron pods aging
- * out/in, an unrelated operator restarting) never kills a run.
- * @param {K8sExecRunner} execFn
- * @param {{kubeContext:string, namespace:string}} kubeArgs
- * @param {{repos:string[], pods:string[]}} [scope]
- * @returns {Promise<ClusterSnapshot>}
- */
-async function snapshotCluster(execFn, { kubeContext, namespace }, scope) {
-  const res = execFn.run(['--context', kubeContext, '-n', namespace, 'get', 'pods', '-o', 'json'], K8S_GET_TIMEOUT_MS);
-  if (res.error) throw new Error(`conjure: k8s-attach kubectl get pods failed to run: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(`conjure: k8s-attach kubectl get pods failed (exit ${res.status}): ${tail(res.stderr || res.stdout)}`);
-  let list;
-  try {
-    list = JSON.parse((res.stdout || '').trim());
-  } catch (e) {
-    throw new Error(`conjure: k8s-attach could not parse 'get pods -o json' output: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (scope) list = filterPodListToScope(list, scope);
-  return {
-    pods: podNamesFrom(list),
-    digests: podDigestsFrom(list),
-    restarts: podRestartCountsFrom(list),
-    imageRefs: podImageRefsFrom(list),
-    uids: podUidsFrom(list),
-  };
-}
-
-/**
- * The {ref, digest} pairs observed across every (init or regular) container in a `kubectl get pods
- * -o json` list — `ref` is that SAME container's OWN requested image (`spec.containers[].image` /
- * `spec.initContainers[].image`, matched by container name; falls back to `status.containerStatuses[].image`
- * when no spec is present, e.g. a test fixture), `digest` is the resolved `sha256:` digest
- * (`status.containerStatuses[].imageID`). A container with no resolvable digest is skipped (nothing to
- * bind against). Used by {@link expectedImagesBind}'s ref-matching path.
- * @param {any} poList
- * @returns {{ref:string, digest:string}[]}
- */
-export function podImageRefsFrom(poList) {
-  const items = poList && Array.isArray(poList.items) ? poList.items : [];
-  /** @type {{ref:string, digest:string}[]} */
-  const out = [];
-  for (const pod of items) {
-    const spec = (pod && pod.spec) || {};
-    const st = (pod && pod.status) || {};
-    const specContainers = [...(spec.containers || []), ...(spec.initContainers || [])];
-    const statuses = [...(st.containerStatuses || []), ...(st.initContainerStatuses || [])];
-    for (const cs of statuses) {
-      if (!cs) continue;
-      const digest = normalizeDigest(cs.imageID);
-      if (!digest) continue;
-      const specC = typeof cs.name === 'string' ? specContainers.find((c) => c && c.name === cs.name) : undefined;
-      const ref = (specC && typeof specC.image === 'string' && specC.image) || (typeof cs.image === 'string' ? cs.image : '');
-      if (ref) out.push({ ref, digest });
-    }
-  }
-  return out;
-}
-
-/** @param {string} ref @returns {string} strip a trailing `@sha256:...` digest, if present */
-function stripDigestSuffix(ref) {
-  return String(ref || '').replace(/@sha256:[0-9a-f]{64}/i, '');
-}
-
-/**
- * Split a digestless image ref into {repo, tag} — the LAST `:` after the LAST `/` is the tag
- * (so a `host:port/repo` registry address is never mistaken for a tag); a ref with no such `:`
- * has an undefined tag (a bare repo reference).
- * @param {string} ref
- * @returns {{repo:string, tag:string|undefined}}
- */
-function splitRepoTag(ref) {
-  const lastSlash = ref.lastIndexOf('/');
-  const lastColon = ref.lastIndexOf(':');
-  if (lastColon > lastSlash) return { repo: ref.slice(0, lastColon), tag: ref.slice(lastColon + 1) };
-  return { repo: ref, tag: undefined };
-}
-
-/**
- * The CODE-IDENTITY mint precondition (P1/P4, docs/pb-extensibility-foundation.md §3): every
- * recipe-declared `conjure.expected_images` entry must BIND to a running pod. The actual guarantee
- * ladder, strongest to weakest (a recipe author should read a digest ref as "exact bit-for-bit
- * identity bound", repo+tag as "a specific published build bound", and repo-only as "SOME image
- * from this repo is running — NOT a specific build, NOT a specific digest"):
- *   1. **digest** (`@sha256:...`) — binds ONLY on that EXACT digest actually being observed
- *      running (unchanged prior behavior). Strongest: the sealed identity IS the checked identity.
- *   2. **repo+tag** (digestless, the Lyric class: `git_tag_overwrite` dev-build tags, never a
- *      stable digest, live in the recipe) — binds against a running pod's own requested image ref
- *      matching BOTH repo and tag. The OBSERVED digest for that SAME container is what actually
- *      gets sealed (mintK8sAttachIdentity), never the recipe's claimed tag — but the tag match at
- *      least confirms the intended BUILD is what's deployed, not merely something from the repo.
- *   3. **repo-only** (digestless, untagged entry) — binds against ANY running pod whose image ref
- *      shares the repo, regardless of tag or digest. Weakest NON-absent guarantee: this admits any
- *      image ever pushed to that repo (including a stale or wrong build) as satisfying the entry —
- *      use repo+tag or a full digest ref wherever the operator can supply one.
- *   4. **absent** (an empty/undeclared `conjure.expected_images` altogether) — this function is
- *      never even called (see mintK8sAttachIdentity's `if (expectedImages.length)` guard): NO
- *      binding check runs at all, so a base-skewed cluster is not detected by this mechanism.
- * No match at levels 1-3 is `unbound` — never WORKS-capable (fail-safe: a base-skewed cluster
- * refuses to mint rather than seal a wrong identity). Level 4 has no such fail-safe; it is a
- * recipe-authoring gap, not a code bug — declare `expected_images` whenever possible.
- * @param {string[]} observedDigests
- * @param {string[]} expectedImages
- * @param {{ref:string, digest:string}[]} [observedRefs] per-container {ref,digest} pairs (see
- *   {@link podImageRefsFrom}) — required only for the digestless ref-matching path; omitted callers
- *   (or a digest-only expected_images list) are unaffected.
- * @returns {{bound:boolean, reason?:string}}
- */
-export function expectedImagesBind(observedDigests, expectedImages, observedRefs = []) {
-  const observed = new Set(observedDigests);
-  /** @type {string[]} */
-  const problems = [];
-  for (const ref of expectedImages) {
-    const digest = normalizeDigest(ref);
-    if (digest) {
-      if (!observed.has(digest)) {
-        problems.push(`${ref} — digest ${digest} was not observed running on any attached pod`);
-      }
-      continue;
-    }
-    // Digestless: bind by REPO+TAG against a running pod's own requested image ref — the recipe's
-    // tag is an EXPECTATION, never sealed itself (the observed digest is what gets sealed).
-    const expected = splitRepoTag(stripDigestSuffix(ref));
-    const matched = observedRefs.some((o) => {
-      const obs = splitRepoTag(stripDigestSuffix(o.ref));
-      return expected.tag !== undefined ? obs.repo === expected.repo && obs.tag === expected.tag : obs.repo === expected.repo;
-    });
-    if (!matched) {
-      problems.push(
-        `${ref} names no sha256 digest and matched no running pod's image ref by repo${expected.tag !== undefined ? '+tag' : ''} — unbound, never WORKS-capable`
-      );
-    }
-  }
-  return problems.length ? { bound: false, reason: problems.join('; ') } : { bound: true };
-}
-
-/**
- * The DRIFT SENTINEL comparison: because k8s-attach NEVER creates or mutates a cluster object, pb
- * itself can cause none of a pod-set change, a running-digest change, or a restart-count increase —
- * so ANY observed delta between two snapshots is by construction un-caused (a reconciler re-render,
- * a reschedule, a crash-restart) and must CND, never be misread as a false DOES_NOT_WORK.
- * @param {ClusterSnapshot} before
- * @param {ClusterSnapshot} after
- * @returns {{drifted:boolean, reason?:string}}
- */
-export function detectDrift(before, after) {
-  /** @type {string[]} */
-  const reasons = [];
-  if (before.pods.join(',') !== after.pods.join(',')) {
-    reasons.push(`pod set changed (before=[${before.pods.join(', ')}] after=[${after.pods.join(', ')}]) — likely rescheduled/reconciled`);
-  }
-  if (before.digests.join(',') !== after.digests.join(',')) {
-    reasons.push(`running image digest(s) changed (before=[${before.digests.join(', ')}] after=[${after.digests.join(', ')}]) — likely reconciled to a different ref`);
-  }
-  for (const [key, beforeCount] of Object.entries(before.restarts)) {
-    const afterCount = after.restarts[key];
-    if (typeof afterCount === 'number' && afterCount > beforeCount) {
-      reasons.push(`${key} restart count increased (${beforeCount} -> ${afterCount})`);
-    }
-  }
-  // Pod REPLACEMENT: a deleted+recreated pod keeps a StatefulSet name (mongodb-0) and RESETS its
-  // restartCount, so the three checks above all miss the swap — the uid does not. Compared only
-  // when both snapshots recorded a uid for the name (older fixtures without uids stay valid).
-  const beforeUids = before.uids || {};
-  const afterUids = after.uids || {};
-  for (const [name, beforeUid] of Object.entries(beforeUids)) {
-    const afterUid = afterUids[name];
-    if (typeof afterUid === 'string' && afterUid && afterUid !== beforeUid) {
-      reasons.push(`pod ${name} was replaced (uid ${beforeUid} -> ${afterUid}) — same name, different pod instance`);
-    }
-  }
-  return reasons.length ? { drifted: true, reason: reasons.join('; ') } : { drifted: false };
-}
-
-/**
- * The `{<slug>_host}`/`{<slug>_port}` placeholders a k8s-attach `front_door.base_url_template`
- * (mode 'rest') resolves against — one pair per recipe-declared `conjure.services[]` entry, the
- * slug DERIVED (never hardcoded) from the k8s Service name's own last path segment (e.g.
- * `svc/appservice` -> `appservice_host`/`appservice_port`; non-alnum runs collapsed to `_` so
- * `svc/mongodb-svc` still yields a valid placeholder identifier, `mongodb_svc_host`). Every
- * k8s-attach service is reached through pb's OWN port-forward, so the host is always `localhost`.
- * @param {import('./recipe.mjs').K8sAttachService[]} services
- * @returns {Record<string,string|number>}
- */
-function k8sServicePlaceholders(services) {
-  /** @type {Record<string,string|number>} */
-  const out = {};
-  for (const svc of services) {
-    const last = String(svc.name).split('/').pop() || svc.name;
-    const slug = last.replace(/[^a-zA-Z0-9]+/g, '_');
-    out[`${slug}_host`] = 'localhost';
-    out[`${slug}_port`] = svc.local_port;
-  }
-  return out;
-}
-
-/**
- * Bring up a k8s-attach SUT: port-forward the recipe's declared Services as pb-owned child
- * processes (registered with the reaper) — NEVER creating or mutating a cluster object. Mints only
- * the 'bringup' receipt here; the code-identity 'fingerprint' is deferred to
- * {@link mintK8sAttachIdentity} (a mint PRECONDITION, not a bring-up fact — the DRIVE-TIME digest
- * read is what gets sealed, never this attach-time one, per P1/F2/F3: the running image can be
- * reconciled/swapped between attach and drive).
- * @param {import('./recipe.mjs').Recipe} recipe
- * @param {{spawnFn?:PortForwardSpawnFn, execFn?:K8sExecRunner}} opts
- * @returns {Promise<SutHandle>}
- */
-async function conjureK8sAttach(recipe, opts) {
-  const c = recipe.conjure;
-  const services = /** @type {import('./recipe.mjs').K8sAttachService[]} */ (/** @type {any} */ (c).services);
-  const kubeArgs = {
-    kubeContext: /** @type {string} */ (/** @type {any} */ (c).kube_context),
-    namespace: /** @type {string} */ (/** @type {any} */ (c).namespace),
-  };
-  const spawnFn = opts.spawnFn || defaultPortForwardSpawn();
-  const execFn = opts.execFn || defaultK8sExec();
-
-  /** @type {{svc:import('./recipe.mjs').K8sAttachService, proc:PortForwardHandle}[]} */
-  const forwards = [];
-  let success = false;
-  // Reap on interrupt too (mirrors run/compose): the closure reads the live `forwards` array at
-  // signal time, so it kills whatever is up (partial or complete); killing an already-dead process
-  // is a no-op, so a double-kill from normal teardown racing the handler is harmless.
-  const reap = () => {
-    for (const f of forwards) {
-      try {
-        f.proc.kill();
-      } catch {
-        /* already gone */
-      }
-    }
-  };
-  registerReap(reap);
-  try {
-    for (const svc of services) {
-      const proc = spawnFn(['port-forward', '--context', kubeArgs.kubeContext, '-n', kubeArgs.namespace, svc.name, `${svc.local_port}:${svc.remote_port}`]);
-      forwards.push({ svc, proc });
-      await waitForPortForwardReady(proc, svc);
-    }
-
-    // Attach-time snapshot: recorded for diagnostics; the code-identity BINDING check is
-    // drive-time only (mintK8sAttachIdentity) — never this one (F2/F3).
-    const attachSnapshot = await snapshotCluster(execFn, kubeArgs);
-
-    let baseUrl = `http://localhost:${services[0].local_port}`;
-    const fd = recipe.front_door;
-    /** @type {string} */
-    let frontDoorUrl;
-    if (fd.mode === 'rest') {
-      // The Lyric class: no single user-facing page — the door is a REST base (resolved against
-      // every port-forwarded Service, {slug_host}/{slug_port}) + a disclosed entrypoint the DRIVE
-      // fires at drive time (catch.mjs), never here (the entrypoint's own placeholders are
-      // operator_env values, not known at conjure time). frontDoorUrl mirrors the resolved base —
-      // there is no separate page to point at.
-      const svcPlaceholders = k8sServicePlaceholders(services);
-      baseUrl = resolvePlaceholders(/** @type {string} */ (fd.base_url_template), (n) => svcPlaceholders[n]);
-      frontDoorUrl = baseUrl;
-    } else {
-      // No REST setup dance runs for k8s-attach (operator_env, not steps) — an unresolved
-      // placeholder stays literal for a later drive slice to fill, mirroring compose's
-      // deferred-drive leniency.
-      const literalLookup = (/** @type {string} */ n) => `{${n}}`;
-      frontDoorUrl = `${baseUrl}${resolvePlaceholders(/** @type {string} */ (fd.url_template), literalLookup)}`;
-    }
-
-    const bringup = mint({
-      id: 'bringup',
-      kind: 'attempt',
-      provenance: 'harness',
-      data: {
-        request: `port-forward ${services.map((s) => s.name).join(', ')}`,
-        services: services.map((s) => ({ name: s.name, local_port: s.local_port, remote_port: s.remote_port })),
-        ready: true,
-      },
-    });
-
-    /** @type {SutHandle} */
-    const handle = {
-      recipe,
-      containerName: null,
-      baseUrl,
-      frontDoorUrl,
-      captures: {},
-      cookies: [],
-      receipts: [bringup],
-      _cloneDir: null,
-      _compose: null,
-      _reap: reap,
-      _k8sAttach: { execFn, kubeArgs, attachSnapshot, driveSnapshot: null, forwards },
-      teardown: () => teardownSut(handle),
-    };
-    success = true;
-    return handle;
-  } finally {
-    if (!success) {
-      deregisterReap(reap);
-      for (const f of forwards) {
-        try {
-          f.proc.kill();
-        } catch {
-          /* already gone */
-        }
-      }
-    }
-  }
-}
-
-/**
- * The CODE-IDENTITY mint precondition (P1, docs/pb-extensibility-foundation.md §3): read the pod
- * imageID digests AT DRIVE TIME — never the attach-time snapshot (F2/F3: the running image can be
- * reconciled/swapped between attach and drive) — and require every recipe-declared
- * `conjure.expected_images` entry to bind (see {@link expectedImagesBind}). An unbound entry
- * REFUSES to mint: the caller gets no satisfying fingerprint, so the run degrades to an honest CND
- * (never a false WORKS sealed against a base-skewed pod). The drive-time snapshot becomes the
- * drift sentinel's "before the verdict window" baseline for {@link checkK8sAttachDrift}.
- * @param {SutHandle} handle a handle {@link conjure} returned for a k8s-attach recipe
- * @returns {Promise<import('./types.mjs').Receipt>} the minted harness 'fingerprint' receipt
- */
-export async function mintK8sAttachIdentity(handle) {
-  const attach = handle._k8sAttach;
-  if (!attach) throw new Error('conjure: mintK8sAttachIdentity called on a non-k8s-attach handle');
-  // SUT-scoped snapshot (see sutScopeFrom): identity binding and the drift sentinel watch the same
-  // recipe-derived pod set — a busy namespace's unrelated churn never turns a run into a coin flip.
-  const scope = sutScopeFrom(handle.recipe);
-  const driveSnapshot = await snapshotCluster(attach.execFn, attach.kubeArgs, scope);
-  const expectedImages = /** @type {any} */ (handle.recipe.conjure).expected_images || [];
-  if (expectedImages.length) {
-    const { bound, reason } = expectedImagesBind(driveSnapshot.digests, expectedImages, driveSnapshot.imageRefs);
-    if (!bound) {
-      throw new Error(`conjure: k8s-attach code-identity refuses to mint — base-skew: ${reason}`);
-    }
-  }
-  const ci = handle.recipe.code_identity;
-  // multi_repo (the Lyric class): seal the recipe's OWN repos[]/wheels[] declarations alongside the
-  // DRIVE-TIME observed digests above — the recipe's images[].tag claims are expectations only and
-  // are NEVER what gets sealed here (the running digest is).
-  const multiRepoIdentity =
-    ci.mode === 'multi_repo'
-      ? {
-          repos: /** @type {import('./recipe.mjs').MultiRepoIdentity} */ (ci).repos,
-          wheels: /** @type {import('./recipe.mjs').MultiRepoIdentity} */ (ci).wheels,
-        }
-      : {};
-  const fingerprint = mint({
-    id: 'fingerprint',
-    kind: 'fingerprint',
-    provenance: 'harness',
-    data: {
-      mode: 'k8s-attach',
-      code_identity_mode: ci.mode,
-      kube_context: attach.kubeArgs.kubeContext,
-      namespace: attach.kubeArgs.namespace,
-      drive_time_digests: driveSnapshot.digests,
-      expected_images: expectedImages,
-      // Evidence honesty: the seal discloses WHAT was watched (the scoped pod set) and BY WHAT RULE
-      // — a narrower sentinel, declared, never a silent one.
-      drift_scope: {
-        rule:
-          scope.repos.length || scope.pods.length
-            ? 'expected_images repos + store_tap pod'
-            : 'whole namespace (no expected_images/store_tap pod to scope by)',
-        repos: scope.repos,
-        pods: scope.pods,
-        scoped_pods: driveSnapshot.pods,
-      },
-      ...multiRepoIdentity,
-    },
-  });
-  handle.receipts.push(fingerprint);
-  attach.driveSnapshot = driveSnapshot;
-  return fingerprint;
-}
-
-/**
- * The DRIFT SENTINEL mint precondition: re-read the same snapshot (pod set, digests, per-container
- * restart counts) AFTER the verdict window closes and compare it to the drive-time baseline
- * {@link mintK8sAttachIdentity} recorded, via {@link detectDrift}. Any un-caused change refuses to
- * confirm — CND naming reconcile-drift, never a false DOES_NOT_WORK.
- * @param {SutHandle} handle
- * @returns {Promise<void>} resolves when no drift is detected; throws (naming reconcile-drift) otherwise
- */
-export async function checkK8sAttachDrift(handle) {
-  const attach = handle._k8sAttach;
-  if (!attach) throw new Error('conjure: checkK8sAttachDrift called on a non-k8s-attach handle');
-  if (!attach.driveSnapshot) throw new Error('conjure: checkK8sAttachDrift called before mintK8sAttachIdentity (no drive-time baseline snapshot)');
-  // The SAME recipe-derived scope as the mint baseline (both sides of detectDrift must watch the
-  // same set) — out-of-scope namespace churn is ignored entirely; in-scope checks at full strength.
-  const after = await snapshotCluster(attach.execFn, attach.kubeArgs, sutScopeFrom(handle.recipe));
-  const { drifted, reason } = detectDrift(attach.driveSnapshot, after);
-  if (drifted) {
-    throw new Error(`conjure: k8s-attach drift sentinel — reconcile-drift: ${reason}`);
-  }
 }
 
 /**

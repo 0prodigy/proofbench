@@ -14,9 +14,6 @@
  *     (-p, --output-format json, --model sonnet, tools off, a NEUTRAL tmp cwd), a good/fenced .result
  *     → a valid proposal through validateProposal, and the throw paths (is_error OAuth envelope,
  *     non-JSON .result, and a hostile .result rejected by validateProposal → CND).
- *   - the MODE-AWARE prompt (the mode-blindness fix): proposeWalkAndClaim threads allowedOps into
- *     the llmFn input; buildCliPrompt/buildProposeTool under ALLOWED_HTTP_OPS teach the http op's
- *     exact args shape and never the browser gestures; the browser default stays byte-identical.
  */
 
 import test from 'node:test';
@@ -32,7 +29,6 @@ import {
   buildCliPrompt,
   claudeCliLlmFn,
   ALLOWED_WALK_OPS,
-  ALLOWED_HTTP_OPS,
   ALLOWED_RELATION_OPS,
 } from '../src/proposer.mjs';
 import { assembleCatchBundle, quantifierFromIntent } from '../src/catch.mjs';
@@ -101,118 +97,6 @@ test('validateProposal: REJECTS an out-of-menu entity (FW-P1-C) and a bad relati
 
 test('validateProposal: an empty walk is rejected (a proposal must propose at least one gesture)', () => {
   assert.throws(() => validateProposal({ walk: [], claim: goodRaw().claim }, { observables: OBSERVABLES }), /walk must be a non-empty array/);
-});
-
-test('validateProposal: the note-lifecycle "http" op (ALLOWED_HTTP_OPS) accepts method/path/body/capture and strips stray keys', () => {
-  const raw = {
-    walk: [
-      { op: 'http', args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', body: { note: 'x' }, capture: { child_execution_id: '$.notes[0]._id' }, evil: 'nope' } },
-    ],
-    claim: { entity: 'stage_controls_queued.row-count', expectedAfterRelation: { op: 'decreased' }, scope: 'the terminal transition clears queued stagecontrols' },
-  };
-  const { walk } = validateProposal(raw, { observables: ['stage_controls_queued.row-count'], allowedOps: ALLOWED_HTTP_OPS });
-  assert.deepEqual(walk[0], {
-    op: 'http',
-    args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', body: { note: 'x' }, capture: { child_execution_id: '$.notes[0]._id' } },
-  });
-});
-
-test('validateProposal: the "http" op rejects a missing method/path and a non-object body', () => {
-  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
-  assert.throws(
-    () => validateProposal({ walk: [{ op: 'http', args: { path: '/x' } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
-    /walk\[0\]\.args\.method must be a non-empty string/
-  );
-  assert.throws(
-    () => validateProposal({ walk: [{ op: 'http', args: { method: 'GET', path: '/x', body: 'nope' } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
-    /walk\[0\]\.args\.body must be an object/
-  );
-});
-
-test('validateProposal: the "http" op rejects a hostile path that could re-target fetchFn(baseUrl + path) at a different host', () => {
-  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'increased' }, scope: 's' } };
-  const hostileShapes = [
-    '@attacker/x', // userinfo-shaped, no leading '/' — re-targets the host on concatenation
-    'http://evil', // absolute URL — bypasses baseUrl entirely
-    '/ok@attacker.com/x', // '@' present even though the path otherwise looks relative
-    'relative/no/leading/slash', // not a relative PATH at all
-    '/has\nnewline', // control character
-  ];
-  for (const path of hostileShapes) {
-    assert.throws(
-      () => validateProposal({ walk: [{ op: 'http', args: { method: 'GET', path } }], ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }),
-      /walk\[0\]\.args\.path/,
-      `expected '${path}' to be rejected`
-    );
-  }
-});
-
-test('validateProposal: placeholderNames — a made-up {placeholder} is refused AT PROPOSAL time, in step order (the fifth live CND: {stageName} wasted a cluster round-trip)', () => {
-  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'changed' }, scope: 's' } };
-  const opts = { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS, placeholderNames: ['PB_SCENARIO_ID'] };
-  const stageNameWalk = [
-    { op: 'http', args: { method: 'POST', path: '/executions?scenarioId={PB_SCENARIO_ID}', capture: { parent_id: '$.id' } } },
-    { op: 'http', args: { method: 'PATCH', path: '/executions/{parent_id}/stages/{stageName}' } },
-  ];
-  // The live shape: {stageName} copy-pasted from prose — refused naming the step, the name, and the menu.
-  assert.throws(
-    () => validateProposal({ walk: stageNameWalk, ...base }, opts),
-    /walk\[1\] uses the placeholder \{stageName\} which nothing resolves at run time — not an operator_env\/harness-seeded name and not an EARLIER step's capture \(names available at this step: PB_SCENARIO_ID, parent_id\)/
-  );
-  // A later step drawing on an EARLIER step's capture (path AND body) passes.
-  const ok = validateProposal(
-    {
-      walk: [
-        { op: 'http', args: { method: 'POST', path: '/x', capture: { id: '$.id' } } },
-        { op: 'http', args: { method: 'PATCH', path: '/y/{id}', body: { scenario: '{PB_SCENARIO_ID}' } } },
-      ],
-      ...base,
-    },
-    opts
-  );
-  assert.equal(ok.walk.length, 2);
-  // A step's OWN capture cannot feed its own path (captures land AFTER the step runs).
-  assert.throws(
-    () => validateProposal({ walk: [{ op: 'http', args: { method: 'POST', path: '/x/{id}', capture: { id: '$.id' } } }], ...base }, { ...opts, placeholderNames: [] }),
-    /walk\[0\] uses the placeholder \{id\}.*names available at this step: \(none\)/
-  );
-  // Absent placeholderNames → old behavior: the same {stageName} walk validates (backward compatible).
-  const legacy = validateProposal({ walk: stageNameWalk, ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS });
-  assert.equal(legacy.walk.length, 2);
-});
-
-test("validateProposal: placeholderNames — a capture SHADOWING an already-bound name is refused, naming the first binder (the sixth live CND: a redundant re-capture missed and killed the run)", () => {
-  const base = { claim: { entity: 'e', expectedAfterRelation: { op: 'changed' }, scope: 's' } };
-  const opts = { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS, placeholderNames: ['PB_SCENARIO_ID'] };
-  // The live shape: step 2 re-captured a name step 0 already bound — refused at proposal time.
-  const shadowWalk = [
-    { op: 'http', args: { method: 'POST', path: '/x', capture: { child_execution_id: '$.notes[0]._id' } } },
-    { op: 'http', args: { method: 'GET', path: '/y/{child_execution_id}' } },
-    { op: 'http', args: { method: 'PATCH', path: '/z', capture: { child_execution_id: '$.id' } } },
-  ];
-  assert.throws(
-    () => validateProposal({ walk: shadowWalk, ...base }, opts),
-    /walk\[2\] re-captures 'child_execution_id' which is already bound \(captured by walk\[0\]\) — captures must introduce NEW names; drop the redundant capture/
-  );
-  // Shadowing an operator_env/harness-seeded name is refused the same way, naming the seed.
-  assert.throws(
-    () => validateProposal({ walk: [{ op: 'http', args: { method: 'POST', path: '/x', capture: { PB_SCENARIO_ID: '$.id' } } }], ...base }, opts),
-    /walk\[0\] re-captures 'PB_SCENARIO_ID' which is already bound \(an operator_env\/harness-seeded name\)/
-  );
-  // All-NEW consumed captures pass unchanged (no over-refusal).
-  const ok = validateProposal(
-    {
-      walk: [
-        { op: 'http', args: { method: 'POST', path: '/x', capture: { parent_id: '$.id', child_id: '$.notes[0]._id' } } },
-        { op: 'http', args: { method: 'PATCH', path: '/y/{parent_id}/{child_id}' } },
-      ],
-      ...base,
-    },
-    opts
-  );
-  assert.equal(ok.walk.length, 2);
-  // Absent placeholderNames → old behavior: the shadowing walk validates (backward compatible).
-  assert.equal(validateProposal({ walk: shadowWalk, ...base }, { observables: ['e'], allowedOps: ALLOWED_HTTP_OPS }).walk.length, 3);
 });
 
 test('validateProposal: an "http" op is rejected under the default (browser) allowedOps — walk vocabularies stay scoped per drive', () => {
@@ -418,78 +302,14 @@ test("buildProposeTool: expectedAfterRelation.value's description flags it REQUI
   assert.match(props.claim.properties.expectedAfterRelation.properties.value.description, /REQUIRED when op is 'equals'/);
 });
 
-// --- the MODE-AWARE prompt (the mode-blindness fix: prompt vocabulary = validator vocabulary) ----
-
-test('buildCliPrompt: ALLOWED_HTTP_OPS (note-lifecycle) teaches the http op + its exact args shape, never the browser gestures', () => {
-  const p = buildCliPrompt({ intent: 'terminal transition clears queued stagecontrols', introspection: { surface: 'note-lifecycle' }, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS });
-  // The walk vocabulary the model sees is the SAME one validateProposal enforces (the live bug:
-  // a browser prompt on an http-only drive → the model proposed `find` → a guaranteed CND).
-  assert.match(p, /\{"op":"http","args":\{\.\.\.\}\}/);
-  assert.match(p, /"op": one of http,/);
-  assert.match(p, /`method` \(required/);
-  assert.match(p, /`path` \(required/);
-  assert.match(p, /JSONPath string read from the step's JSON response/); // the capture semantics
-  assert.match(p, /\{name\} placeholder/); // …and the placeholder semantics
-  assert.match(p, /Walk arg shapes: http → \{"method":"\.\.\.","path":"\/\.\.\."/);
-  assert.doesNotMatch(p, /find|click|selector|pointer/); // no browser instruction survives
-  // The claim-shape section is IDENTICAL to the browser prompt's.
-  assert.match(p, /increased\|decreased\|changed\|unchanged\|equals/);
-  assert.match(p, /REQUIRED when op is 'equals'/);
-  assert.match(p, /execution_entity\.max_id/);
-  assert.match(p, /ONLY a single JSON object/);
-});
-
-test('buildCliPrompt: an introspection-disclosed required_capture adds the resolve-then-terminal walk contract (the second live CND: a 1-step walk)', () => {
-  const input = { intent: 'x', introspection: { surface: 's', required_capture: 'child_execution_id' }, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS };
-  const p = buildCliPrompt(input);
-  assert.match(p, /AT LEAST 2 steps/);
-  assert.match(p, /capture named exactly "child_execution_id"/);
-  assert.match(p, /The LAST step must be the single terminal state-changing call/);
-  assert.match(p, /observes the store between the resolve phase and that final step/);
-  assert.match(p, /a made-up placeholder\s+is refused before execution/); // the placeholder-resolvability rule (fifth live CND)
-  assert.match(p, /never re-capture a name you\s+already have/); // the shadow-capture rule (sixth live CND)…
-  assert.match(p, /"child_execution_id" is the exception, consumed by the harness itself/); // …with the harness-consumed exemption named
-  // Without the disclosure the prompt is unchanged — the contract is drive-disclosed, not http-generic.
-  assert.doesNotMatch(buildCliPrompt({ ...input, introspection: { surface: 's' } }), /AT LEAST 2 steps/);
-});
-
 test('buildCliPrompt: the browser DEFAULT is byte-identical with and without an explicit allowedOps (no regression)', () => {
   const input = { intent: 'A visitor submits the form', introspection: { fields: [] }, observables: OBSERVABLES };
   assert.equal(buildCliPrompt(input), buildCliPrompt({ ...input, allowedOps: ALLOWED_WALK_OPS }));
   assert.match(buildCliPrompt(input), /Use ONLY find\/type\/click/); // the browser walk text is still there
 });
 
-test('proposeWalkAndClaim: threads allowedOps into the llmFn input (http mode and the browser default)', async () => {
+test('proposeWalkAndClaim: threads allowedOps into the llmFn input (the browser default)', async () => {
   /** @type {any} */ let seen;
-  const httpRaw = {
-    walk: [
-      { op: 'http', args: { method: 'POST', path: '/executions', capture: { id: '$.notes[0]._id' } } },
-      { op: 'http', args: { method: 'POST', path: '/executions/{id}/transition' } },
-    ],
-    claim: goodRaw().claim,
-  };
-  const proposal = await proposeWalkAndClaim(
-    { intent: 'x', introspection: {}, observables: OBSERVABLES },
-    { llmFn: async (input) => ((seen = input), httpRaw), allowedOps: ALLOWED_HTTP_OPS }
-  );
-  assert.deepEqual(seen.allowedOps, [...ALLOWED_HTTP_OPS]);
-  assert.equal(proposal.walk[0].op, 'http');
   await proposeWalkAndClaim({ intent: 'x', introspection: {}, observables: OBSERVABLES }, { llmFn: async (input) => ((seen = input), goodRaw()) });
   assert.deepEqual(seen.allowedOps, [...ALLOWED_WALK_OPS]); // the default vocabulary reaches the seam too
-});
-
-test('claudeCliLlmFn: threads allowedOps into the CLI prompt (the http-mode prompt reaches the real seam)', async () => {
-  const runner = fakeRunner({ status: 0, stdout: JSON.stringify(okEnvelope(JSON.stringify(goodRaw()))) });
-  await claudeCliLlmFn({ intent: 'x', introspection: {}, observables: OBSERVABLES, allowedOps: ALLOWED_HTTP_OPS }, { runner, cwd: tmpdir() });
-  const prompt = runner.calls[0].args[1];
-  assert.match(prompt, /\{"op":"http","args":\{\.\.\.\}\}/);
-  assert.doesNotMatch(prompt, /find|click|selector|pointer/);
-});
-
-test('buildProposeTool: ALLOWED_HTTP_OPS narrows the op enum to http (API tool-call path, same fix)', () => {
-  const tool = buildProposeTool(OBSERVABLES, ALLOWED_HTTP_OPS);
-  assert.deepEqual(tool.input_schema.properties.walk.items.properties.op.enum, ['http']);
-  assert.doesNotMatch(tool.description, /find|click/);
-  // The default is unchanged (the existing enum test also proves this).
-  assert.deepEqual(buildProposeTool(OBSERVABLES).input_schema.properties.walk.items.properties.op.enum, [...ALLOWED_WALK_OPS]);
 });

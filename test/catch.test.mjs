@@ -117,7 +117,7 @@ test('catch helpers: observedValue reduces store-tap rows per the engine-shaped 
   assert.equal(observedValue([], { relation: 'row-count' }), 0);
   assert.equal(observedValue([{ id: 1 }, { id: 2 }], { relation: 'row-count' }), 2);
   assert.equal(observedValue([[1], [2], [3]], { relation: 'row-count' }), 3); // postgres tuples count the same
-  // max-id: sqlite/k8s-exec object rows, default field 'id', coerced to Number.
+  // max-id: sqlite object rows, default field 'id', coerced to Number.
   assert.equal(observedValue([], { relation: 'max-id' }), 0);
   assert.equal(observedValue([{ id: 1 }, { id: 3 }, { id: 2 }], { relation: 'max-id' }), 3);
   assert.equal(observedValue([{ id: '5' }, { id: '2' }], { relation: 'max-id' }), 5); // string ids coerced

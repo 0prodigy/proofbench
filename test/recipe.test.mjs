@@ -45,8 +45,7 @@ function writeRecipeDir(obj) {
 }
 
 /**
- * `setup` is `SetupStep[] | OperatorEnvSetup` (G5) — every recipe under test here uses the array
- * form, so this narrows for the tests that index/iterate it.
+ * Small helper for the tests that index/iterate `setup` (SetupStep[]).
  * @param {import('../src/recipe.mjs').Recipe} r
  * @returns {import('../src/recipe.mjs').SetupStep[]}
  */
@@ -195,13 +194,9 @@ test('recipe: absent setup and absent drive default honestly (empty setup, defer
 });
 
 test('recipe: every drive mode validates and resolves', () => {
-  for (const mode of ['http', 'browser', 'note-lifecycle', 'deferred']) {
+  for (const mode of ['http', 'browser', 'deferred']) {
     const o = /** @type {any} */ (validRecipe());
-    // note-lifecycle (G7) requires `surface` + a mongo store_tap; every other mode is bare.
-    o.drive = mode === 'note-lifecycle' ? { mode, surface: 'appservice-api+mongo' } : { mode };
-    if (mode === 'note-lifecycle') {
-      o.store_tap = { engine: 'mongo', pod: 'mongodb-0', container: 'mongod', db: 'lyric', credential_secrets: ['s'], queries: { q: 'db.x.find()' } };
-    }
+    o.drive = { mode };
     const dir = writeRecipeDir(o);
     try {
       assert.equal(loadRecipe(dir).drive.mode, mode);
@@ -328,208 +323,6 @@ test('recipe: front_door.url_template with no {placeholder} validates and is use
   }
 });
 
-test('recipe: code_identity.mode "multi_repo" validates repos[]/wheels[]/images[] (Lyric class, G1)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.code_identity = {
-    mode: 'multi_repo',
-    repos: [
-      { name: 'appservice', sha: 'f38fa648c5378f0aaf574bdbd1da573af640c17b' },
-      { name: 'metadata-service', path: '.tickets/ENG-17397/metadata-service', sha: 'e7d543288696dea150f509b3996559896d46d85a' },
-    ],
-    wheels: [
-      { name: 'lyric-py', version: '1.3.40.dev17398' },
-      { name: 'lyric-runner-py', version: 'TODO(read from the built wheel at conjure time)' },
-    ],
-    images: [{ service: 'appservice', tag: 'ENG-17397-dev' }],
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    const ci = /** @type {any} */ (r.code_identity);
-    assert.equal(ci.mode, 'multi_repo');
-    assert.equal(ci.repos.length, 2);
-    assert.equal(ci.repos[1].path, '.tickets/ENG-17397/metadata-service');
-    assert.equal(ci.wheels[0].version, '1.3.40.dev17398');
-    assert.equal(ci.images[0].service, 'appservice');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: code_identity.mode "multi_repo" images[] is optional (drive-time digest, never a recipe literal)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.code_identity = {
-    mode: 'multi_repo',
-    repos: [{ name: 'appservice', sha: 'abc123' }],
-    wheels: [{ name: 'lyric-py', version: '1.3.40.dev17398' }],
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    assert.equal(/** @type {any} */ (r.code_identity).images, undefined);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: conjure.mode "k8s-attach" validates kube_context/namespace/services[]/expected_images and forbids single-container fields (G2)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.conjure = {
-    mode: 'k8s-attach',
-    kube_context: 'akashpathak',
-    namespace: 'delta',
-    services: [
-      { name: 'svc/appservice', local_port: 18000, remote_port: 8000 },
-      { name: 'svc/mongodb-svc', local_port: 27117, remote_port: 27017 },
-    ],
-    expected_images: ['us-docker.pkg.dev/development-367210/lyric/appservice'],
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    const c = /** @type {any} */ (r.conjure);
-    assert.equal(c.mode, 'k8s-attach');
-    assert.equal(c.services.length, 2);
-    assert.equal(c.expected_images[0], 'us-docker.pkg.dev/development-367210/lyric/appservice');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: conjure.mode "k8s-attach" rejects a single-container field — attach never creates a cluster object', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.conjure = {
-    mode: 'k8s-attach',
-    kube_context: 'akashpathak',
-    namespace: 'delta',
-    services: [{ name: 'svc/appservice', local_port: 18000, remote_port: 8000 }],
-    env: {}, // forbidden for k8s-attach
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    assert.throws(() => loadRecipe(dir), /conjure\.env.*forbidden/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: store_tap.engine "mongo" validates pod/container/db/credential_secrets and resolves a row-count default (G3)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.store_tap = {
-    engine: 'mongo',
-    pod: 'mongodb-0',
-    container: 'mongod',
-    db: 'lyric',
-    credential_secrets: ['mongodb-root', 'mongodb-application'],
-    queries: { child_execution: "db.executions.findOne({_id:ObjectId('$PB_CHILD_ID')})" },
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    const st = /** @type {any} */ (r.store_tap);
-    assert.equal(st.pod, 'mongodb-0');
-    assert.deepEqual(st.credential_secrets, ['mongodb-root', 'mongodb-application']);
-    assert.equal(resolveObservable(r.store_tap, 'child_execution').relation, 'row-count');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: fresh_world.strategy "new_instance_per_iteration" validates (shared-cluster grain, G4)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.fresh_world = { strategy: 'new_instance_per_iteration' };
-  const dir = writeRecipeDir(o);
-  try {
-    assert.equal(loadRecipe(dir).fresh_world.strategy, 'new_instance_per_iteration');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: setup accepts the operator_env object form and rejects an unset-friendly baked default (G5)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.setup = {
-    operator_env: ['PB_K8S_CONTEXT', 'PB_K8S_NAMESPACE', 'PB_SCENARIO_ID'],
-    capture_expectations: 'printf-echo the PB_* expectation env back to stdout',
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    assert.deepEqual(/** @type {any} */ (r.setup).operator_env, ['PB_K8S_CONTEXT', 'PB_K8S_NAMESPACE', 'PB_SCENARIO_ID']);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: front_door.mode "rest" validates base_url_template/entrypoint and drops the url_template requirement (G6)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.front_door = {
-    mode: 'rest',
-    base_url_template: 'http://{appservice_host}:{appservice_port}',
-    entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}&sequenceId={PB_SEQUENCE_ID}&sequenceNoteId={PB_SEQ_NOTE_ID}',
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    const fd = /** @type {any} */ (r.front_door);
-    assert.equal(fd.mode, 'rest');
-    assert.equal(fd.url_template, undefined);
-    assert.match(fd.entrypoint, /POST \/executions/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: front_door.mode "rest" accepts operator_env-sourced headers (e.g. a cluster From header) and rejects a non-string value', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.front_door = {
-    mode: 'rest',
-    base_url_template: 'http://{appservice_host}:{appservice_port}',
-    entrypoint: 'POST /executions?scenarioId={PB_SCENARIO_ID}',
-    headers: { From: '{PB_LYRIC_FROM}' },
-  };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    assert.deepEqual(/** @type {any} */ (r.front_door).headers, { From: '{PB_LYRIC_FROM}' });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  const bad = /** @type {any} */ (validRecipe());
-  bad.front_door = { mode: 'rest', base_url_template: 'http://x', entrypoint: 'POST /x', headers: { From: 123 } };
-  const badDir = writeRecipeDir(bad);
-  try {
-    assert.throws(() => loadRecipe(badDir), /front_door\.headers\.From must be a string value/);
-  } finally {
-    rmSync(badDir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: drive.mode "note-lifecycle" requires surface + a mongo store_tap, and never scripts the walk (G7)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.drive = { mode: 'note-lifecycle', surface: 'appservice-api+mongo' };
-  o.store_tap = { engine: 'mongo', pod: 'mongodb-0', container: 'mongod', db: 'lyric', credential_secrets: ['s'], queries: { q: 'db.x.find()' } };
-  const dir = writeRecipeDir(o);
-  try {
-    const r = loadRecipe(dir);
-    assert.equal(r.drive.mode, 'note-lifecycle');
-    assert.equal(/** @type {any} */ (r.drive).surface, 'appservice-api+mongo');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('recipe: drive.mode "note-lifecycle" rejects a non-mongo store_tap (the ground truth must be the mongo tap)', () => {
-  const o = /** @type {any} */ (validRecipe());
-  o.drive = { mode: 'note-lifecycle', surface: 'appservice-api+mongo' };
-  const dir = writeRecipeDir(o); // validRecipe()'s default store_tap.engine is 'sqlite'
-  try {
-    assert.throws(() => loadRecipe(dir), /store_tap\.engine.*requires store_tap\.engine 'mongo'/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test('recipe: a malformed recipe fails loudly, each error naming the bad field', () => {
   /** @type {Array<{label:string, mutate:(o:any)=>void, match:RegExp}>} */
   const cases = [
@@ -570,26 +363,7 @@ test('recipe: a malformed recipe fails loudly, each error naming the bad field',
     { label: 'exec step missing query', mutate: (o) => (o.setup = [{ id: 's', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd' } }]), match: /exec\.query/ },
     { label: 'exec step capture non-integer column', mutate: (o) => (o.setup = [{ id: 's', exec: { engine: 'postgres', container: 'c', user: 'u', db: 'd', query: 'SELECT 1;' }, capture: { x: 'zero' } }]), match: /non-negative integer column/ },
     { label: 'store_tap.settle missing max_ms', mutate: (o) => (o.store_tap.settle = { quiet_ms: 100 }), match: /store_tap\.settle\.max_ms/ },
-    { label: 'multi_repo missing repos', mutate: (o) => (o.code_identity = { mode: 'multi_repo', wheels: [{ name: 'lyric-py', version: '1' }] }), match: /code_identity\.repos/ },
-    { label: 'multi_repo repos entry missing sha', mutate: (o) => (o.code_identity = { mode: 'multi_repo', repos: [{ name: 'appservice' }], wheels: [{ name: 'lyric-py', version: '1' }] }), match: /code_identity\.repos\[0\]\.sha/ },
-    { label: 'multi_repo missing wheels', mutate: (o) => (o.code_identity = { mode: 'multi_repo', repos: [{ name: 'appservice', sha: 's' }] }), match: /code_identity\.wheels/ },
-    { label: 'multi_repo wheels entry missing version', mutate: (o) => (o.code_identity = { mode: 'multi_repo', repos: [{ name: 'appservice', sha: 's' }], wheels: [{ name: 'lyric-py' }] }), match: /code_identity\.wheels\[0\]\.version/ },
-    { label: 'multi_repo images entry missing tag', mutate: (o) => (o.code_identity = { mode: 'multi_repo', repos: [{ name: 'appservice', sha: 's' }], wheels: [{ name: 'lyric-py', version: '1' }], images: [{ service: 'appservice' }] }), match: /code_identity\.images\[0\]\.tag/ },
-    { label: 'k8s-attach missing kube_context', mutate: (o) => (o.conjure = { mode: 'k8s-attach', namespace: 'delta', services: [{ name: 's', local_port: 1, remote_port: 2 }] }), match: /conjure\.kube_context/ },
-    { label: 'k8s-attach missing namespace', mutate: (o) => (o.conjure = { mode: 'k8s-attach', kube_context: 'c', services: [{ name: 's', local_port: 1, remote_port: 2 }] }), match: /conjure\.namespace/ },
-    { label: 'k8s-attach missing services', mutate: (o) => (o.conjure = { mode: 'k8s-attach', kube_context: 'c', namespace: 'delta' }), match: /conjure\.services/ },
-    { label: 'k8s-attach service missing remote_port', mutate: (o) => (o.conjure = { mode: 'k8s-attach', kube_context: 'c', namespace: 'delta', services: [{ name: 's', local_port: 1 }] }), match: /conjure\.services\[0\]\.remote_port/ },
-    { label: 'non-recreate/new_instance_per_iteration fresh_world (updated enum)', mutate: (o) => (o.fresh_world = { strategy: 'reuse' }), match: /fresh_world\.strategy/ },
-    { label: 'setup operator_env object with an unknown field', mutate: (o) => (o.setup = { operator_env: ['PB_X'], bogus: true }), match: /setup\.bogus/ },
-    { label: 'setup neither array nor operator_env-shaped object', mutate: (o) => (o.setup = 42), match: /setup must be an array of steps, or an operator_env object/ },
-    { label: 'setup operator_env empty array', mutate: (o) => (o.setup = { operator_env: [] }), match: /setup\.operator_env/ },
-    { label: 'setup operator_env non-string entry', mutate: (o) => (o.setup = { operator_env: [1] }), match: /setup\.operator_env/ },
-    { label: 'front_door mode rest missing base_url_template', mutate: (o) => (o.front_door = { mode: 'rest', entrypoint: 'POST /x' }), match: /front_door\.base_url_template/ },
-    { label: 'front_door mode rest missing entrypoint', mutate: (o) => (o.front_door = { mode: 'rest', base_url_template: 'http://x' }), match: /front_door\.entrypoint/ },
     { label: 'front_door bogus mode', mutate: (o) => (o.front_door = { mode: 'carrier-pigeon' }), match: /front_door\.mode/ },
-    { label: 'mongo tap missing pod', mutate: (o) => (o.store_tap = { engine: 'mongo', container: 'mongod', db: 'lyric', credential_secrets: ['s'], queries: { q: 'db.x.find()' } }), match: /store_tap\.pod/ },
-    { label: 'mongo tap missing credential_secrets', mutate: (o) => (o.store_tap = { engine: 'mongo', pod: 'mongodb-0', container: 'mongod', db: 'lyric', queries: { q: 'db.x.find()' } }), match: /store_tap\.credential_secrets/ },
-    { label: 'note-lifecycle missing surface', mutate: (o) => (o.drive = { mode: 'note-lifecycle' }), match: /drive\.surface/ },
   ];
   for (const { label, mutate, match } of cases) {
     const o = validRecipe();

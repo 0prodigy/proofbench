@@ -10,3 +10,5 @@ design work, no code, until the trigger fires.
 - **pb hub / verdict ledger** — revisit at R4 (the fold over case files TL-5 already provides for), never before G3.
 - **Adaptive re-propose loop (agent re-proposes after a failed walk)** — revisit when a committed corpus of real CNDs shows honest verdicts are being lost to first-proposal brittleness.
 - **Owner-shadow multi-user capture** — revisit when a committed recipe needs a second real user identity that setup steps cannot mint (likely R3 Lyric operator flows).
+- **argo-workflows drive + k8s-exec tap (never live; hard-throw tap)** — resurrect from e8a5a75.
+- **note-lifecycle/k8s-attach substrate (live CND legs executed 2026-07-22, no sealed differential committed)** — resurrect from e8a5a75.

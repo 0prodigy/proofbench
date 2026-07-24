@@ -48,8 +48,8 @@ test('reaper: registerReap returns the same reference so it can be de-registered
   deregisterReap(fn); // leave the registry empty (this reap must not run in a later runAllReaps)
 });
 
-test('reaper: a teardown-shaped async reap (catch.mjs browser/workflow sidecar) is drained + awaited', async () => {
-  // Models exactly what catch.mjs registers after openBrowserFn/argoRunFn: an async sidecar teardown
+test('reaper: a teardown-shaped async reap (catch.mjs browser sidecar) is drained + awaited', async () => {
+  // Models exactly what catch.mjs registers after openBrowserFn: an async sidecar teardown
   // wrapped in try/catch. The signal handler drains it just like conjure's SUT reap.
   let toreDown = false;
   const sidecarReap = registerReap(async () => { try { await Promise.resolve(); toreDown = true; } catch { /* already gone */ } });
