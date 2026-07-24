@@ -8,9 +8,6 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
   overlayDockerfile,
   resolvePlaceholders,
@@ -23,9 +20,6 @@ import {
   encodeSetupBody,
   absorbSetCookies,
 } from '../src/conjure.mjs';
-
-/** @param {any} x @returns {any} */
-const asAny = (x) => x;
 
 test('conjure: overlayDockerfile injects build_overlay before the corepack line, RUN-prefixing bare shell lines', () => {
   const df = ['FROM n8nio/base:18', 'WORKDIR /src', 'RUN corepack enable && corepack prepare --activate', 'RUN pnpm install'].join('\n');
